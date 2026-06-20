@@ -162,6 +162,7 @@ const embed_integration_non_linux_modules = .{
 const embed_integration_macos_modules = .{};
 
 const thirdparty_unit_base_modules = .{
+    @import("thirdparty_unit/kcp.zig"),
     @import("thirdparty_unit/lvgl.zig"),
     @import("thirdparty_unit/mbedtls.zig"),
     @import("thirdparty_unit/opus_embed_std.zig"),
@@ -187,6 +188,7 @@ const thirdparty_unit_macos_modules = .{
 };
 
 const thirdparty_integration_base_modules = .{
+    @import("thirdparty_integration/kcp.zig"),
     @import("thirdparty_integration/lvgl.zig"),
     @import("thirdparty_integration/opus_embed_std.zig"),
     @import("thirdparty_integration/opus_std.zig"),

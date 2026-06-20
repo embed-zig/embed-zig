@@ -1,0 +1,315 @@
+diff --git a/ikcp.c b/ikcp.c
+index 1f32039..de7321e 100644
+--- a/ikcp.c
++++ b/ikcp.c
+@@ -163,23 +163,50 @@ static void ikcp_free(void *ptr) {
+ }
+ 
+ // redefine allocator
+-void ikcp_allocator(void* (*new_malloc)(size_t), void (*new_free)(void*))
+-{
+-	ikcp_malloc_hook = new_malloc;
+-	ikcp_free_hook = new_free;
+-}
+-
+-// allocate a new kcp segment
+-static IKCPSEG* ikcp_segment_new(ikcpcb *kcp, int size)
+-{
+-	return (IKCPSEG*)ikcp_malloc(sizeof(IKCPSEG) + size);
+-}
+-
+-// delete a segment
+-static void ikcp_segment_delete(ikcpcb *kcp, IKCPSEG *seg)
+-{
+-	ikcp_free(seg);
+-}
++void ikcp_allocator(void* (*new_malloc)(size_t), void (*new_free)(void*))
++{
++	ikcp_malloc_hook = new_malloc;
++	ikcp_free_hook = new_free;
++}
++
++static void* ikcp_alloc_malloc(const IKCPALLOC *alloc, size_t size)
++{
++	if (alloc && alloc->malloc_fn) {
++		return alloc->malloc_fn(alloc->ctx, size);
++	}
++	return ikcp_malloc(size);
++}
++
++static void ikcp_alloc_free(const IKCPALLOC *alloc, void *ptr)
++{
++	if (alloc && alloc->free_fn) {
++		alloc->free_fn(alloc->ctx, ptr);
++	} else {
++		ikcp_free(ptr);
++	}
++}
++
++static void* ikcp_malloc_kcp(ikcpcb *kcp, size_t size)
++{
++	return ikcp_alloc_malloc(&kcp->alloc, size);
++}
++
++static void ikcp_free_kcp(ikcpcb *kcp, void *ptr)
++{
++	ikcp_alloc_free(&kcp->alloc, ptr);
++}
++
++// allocate a new kcp segment
++static IKCPSEG* ikcp_segment_new(ikcpcb *kcp, int size)
++{
++	return (IKCPSEG*)ikcp_malloc_kcp(kcp, sizeof(IKCPSEG) + size);
++}
++
++// delete a segment
++static void ikcp_segment_delete(ikcpcb *kcp, IKCPSEG *seg)
++{
++	ikcp_free_kcp(kcp, seg);
++}
+ 
+ // write log
+ void ikcp_log(ikcpcb *kcp, int mask, const char *fmt, ...)
+@@ -231,12 +258,13 @@ void ikcp_qprint(const char *name, const struct IQUEUEHEAD *head)
+ //---------------------------------------------------------------------
+ // create a new kcpcb
+ //---------------------------------------------------------------------
+-ikcpcb* ikcp_create(IUINT32 conv, void *user)
+-{
+-	ikcpcb *kcp = (ikcpcb*)ikcp_malloc(sizeof(struct IKCPCB));
+-	if (kcp == NULL) return NULL;
+-	kcp->conv = conv;
+-	kcp->user = user;
++ikcpcb* ikcp_create_with_allocator(IUINT32 conv, void *user, IKCPALLOC alloc)
++{
++	ikcpcb *kcp = (ikcpcb*)ikcp_alloc_malloc(&alloc, sizeof(struct IKCPCB));
++	if (kcp == NULL) return NULL;
++	kcp->alloc = alloc;
++	kcp->conv = conv;
++	kcp->user = user;
+ 	kcp->snd_una = 0;
+ 	kcp->snd_nxt = 0;
+ 	kcp->rcv_nxt = 0;
+@@ -254,11 +282,11 @@ ikcpcb* ikcp_create(IUINT32 conv, void *user)
+ 	kcp->mss = kcp->mtu - IKCP_OVERHEAD;
+ 	kcp->stream = 0;
+ 
+-	kcp->buffer = (char*)ikcp_malloc((kcp->mtu + IKCP_OVERHEAD) * 3);
+-	if (kcp->buffer == NULL) {
+-		ikcp_free(kcp);
+-		return NULL;
+-	}
++	kcp->buffer = (char*)ikcp_malloc_kcp(kcp, (kcp->mtu + IKCP_OVERHEAD) * 3);
++	if (kcp->buffer == NULL) {
++		ikcp_alloc_free(&alloc, kcp);
++		return NULL;
++	}
+ 
+ 	iqueue_init(&kcp->snd_queue);
+ 	iqueue_init(&kcp->rcv_queue);
+@@ -293,13 +321,22 @@ ikcpcb* ikcp_create(IUINT32 conv, void *user)
+ 	kcp->ccops = NULL;
+ 	kcp->congest = NULL;
+ 	kcp->writelog = NULL;
+-
+-	return kcp;
+-}
+-
+-
+-//---------------------------------------------------------------------
+-// release a kcpcb
++
++	return kcp;
++}
++
++ikcpcb* ikcp_create(IUINT32 conv, void *user)
++{
++	IKCPALLOC alloc;
++	alloc.ctx = NULL;
++	alloc.malloc_fn = NULL;
++	alloc.free_fn = NULL;
++	return ikcp_create_with_allocator(conv, user, alloc);
++}
++
++
++//---------------------------------------------------------------------
++// release a kcpcb
+ //---------------------------------------------------------------------
+ void ikcp_release(ikcpcb *kcp)
+ {
+@@ -329,23 +366,23 @@ void ikcp_release(ikcpcb *kcp)
+ 			iqueue_del(&seg->node);
+ 			ikcp_segment_delete(kcp, seg);
+ 		}
+-		if (kcp->buffer) {
+-			ikcp_free(kcp->buffer);
+-		}
+-		if (kcp->acklist) {
+-			ikcp_free(kcp->acklist);
+-		}
++		if (kcp->buffer) {
++			ikcp_free_kcp(kcp, kcp->buffer);
++		}
++		if (kcp->acklist) {
++			ikcp_free_kcp(kcp, kcp->acklist);
++		}
+ 
+ 		kcp->nrcv_buf = 0;
+ 		kcp->nsnd_buf = 0;
+ 		kcp->nrcv_que = 0;
+ 		kcp->nsnd_que = 0;
+-		kcp->ackcount = 0;
+-		kcp->buffer = NULL;
+-		kcp->acklist = NULL;
+-		ikcp_free(kcp);
+-	}
+-}
++		kcp->ackcount = 0;
++		kcp->buffer = NULL;
++		kcp->acklist = NULL;
++		ikcp_free_kcp(kcp, kcp);
++	}
++}
+ 
+ 
+ //---------------------------------------------------------------------
+@@ -675,7 +712,7 @@ static void ikcp_ack_push(ikcpcb *kcp, IUINT32 sn, IUINT32 ts)
+ 		IUINT32 newblock;
+ 
+ 		for (newblock = 8; newblock < newsize; newblock <<= 1);
+-		acklist = (IUINT32*)ikcp_malloc(newblock * sizeof(IUINT32) * 2);
++		acklist = (IUINT32*)ikcp_malloc_kcp(kcp, newblock * sizeof(IUINT32) * 2);
+ 
+ 		if (acklist == NULL) {
+ 			assert(acklist != NULL);
+@@ -688,7 +725,7 @@ static void ikcp_ack_push(ikcpcb *kcp, IUINT32 sn, IUINT32 ts)
+ 				acklist[x * 2 + 0] = kcp->acklist[x * 2 + 0];
+ 				acklist[x * 2 + 1] = kcp->acklist[x * 2 + 1];
+ 			}
+-			ikcp_free(kcp->acklist);
++			ikcp_free_kcp(kcp, kcp->acklist);
+ 		}
+ 
+ 		kcp->acklist = acklist;
+@@ -861,10 +898,13 @@ int ikcp_input(ikcpcb *kcp, const char *data, long size)
+ 			}
+ 			if (_itimediff(sn, kcp->rcv_nxt + kcp->rcv_wnd) < 0) {
+ 				ikcp_ack_push(kcp, sn, ts);
+-				if (_itimediff(sn, kcp->rcv_nxt) >= 0) {
+-					seg = ikcp_segment_new(kcp, len);
+-					seg->conv = conv;
+-					seg->cmd = cmd;
++				if (_itimediff(sn, kcp->rcv_nxt) >= 0) {
++					seg = ikcp_segment_new(kcp, len);
++					if (seg == NULL) {
++						return -2;
++					}
++					seg->conv = conv;
++					seg->cmd = cmd;
+ 					seg->frg = frg;
+ 					seg->wnd = wnd;
+ 					seg->ts = ts;
+@@ -1317,15 +1357,15 @@ int ikcp_setmtu(ikcpcb *kcp, int mtu)
+ 	char *buffer;
+ 	if (mtu < 50 || mtu < (int)IKCP_OVERHEAD) 
+ 		return -1;
+-	buffer = (char*)ikcp_malloc((mtu + IKCP_OVERHEAD) * 3);
+-	if (buffer == NULL) 
+-		return -2;
+-	kcp->mtu = mtu;
+-	kcp->mss = kcp->mtu - IKCP_OVERHEAD;
+-	ikcp_free(kcp->buffer);
+-	kcp->buffer = buffer;
+-	return 0;
+-}
++	buffer = (char*)ikcp_malloc_kcp(kcp, (mtu + IKCP_OVERHEAD) * 3);
++	if (buffer == NULL) 
++		return -2;
++	kcp->mtu = mtu;
++	kcp->mss = kcp->mtu - IKCP_OVERHEAD;
++	ikcp_free_kcp(kcp, kcp->buffer);
++	kcp->buffer = buffer;
++	return 0;
++}
+ 
+ int ikcp_interval(ikcpcb *kcp, int interval)
+ {
+diff --git a/ikcp.h b/ikcp.h
+index a7447c1..4649859 100644
+--- a/ikcp.h
++++ b/ikcp.h
+@@ -264,13 +264,23 @@ typedef struct IQUEUEHEAD iqueue_head;
+ //=====================================================================
+ // Predefine struct
+ //=====================================================================
+-struct IKCPCB;
+-typedef struct IKCPCB ikcpcb;
+-
+-
+-//=====================================================================
+-// SEGMENT
+-//=====================================================================
++struct IKCPCB;
++typedef struct IKCPCB ikcpcb;
++
++typedef void* (*ikcp_malloc_fn)(void *ctx, size_t size);
++typedef void (*ikcp_free_fn)(void *ctx, void *ptr);
++
++typedef struct IKCPALLOC
++{
++	void *ctx;
++	ikcp_malloc_fn malloc_fn;
++	ikcp_free_fn free_fn;
++} IKCPALLOC;
++
++
++//=====================================================================
++// SEGMENT
++//=====================================================================
+ struct IKCPSEG
+ {
+ 	struct IQUEUEHEAD node;
+@@ -336,12 +346,13 @@ struct IKCPCB
+ 	struct IQUEUEHEAD snd_buf;
+ 	struct IQUEUEHEAD rcv_buf;
+ 	IUINT32 *acklist;
+-	IUINT32 ackcount;
+-	IUINT32 ackblock;
+-	IUINT32 ackedlen;
+-	void *user;
+-	char *buffer;
+-	int fastresend;
++	IUINT32 ackcount;
++	IUINT32 ackblock;
++	IUINT32 ackedlen;
++	IKCPALLOC alloc;
++	void *user;
++	char *buffer;
++	int fastresend;
+ 	int fastlimit;
+ 	int nocwnd, stream;
+ 	const struct IKCPOPS *ccops;
+@@ -373,13 +384,16 @@ extern "C" {
+ // interface
+ //---------------------------------------------------------------------
+ 
+-// create a new kcp control object, 'conv' must be equal in both endpoints
+-// of the same connection. 'user' will be passed to the output callback.
+-// output callback can be set up like this: 'kcp->output = my_udp_output'
+-ikcpcb* ikcp_create(IUINT32 conv, void *user);
+-
+-// release kcp control object
+-void ikcp_release(ikcpcb *kcp);
++// create a new kcp control object, 'conv' must be equal in both endpoints
++// of the same connection. 'user' will be passed to the output callback.
++// output callback can be set up like this: 'kcp->output = my_udp_output'
++ikcpcb* ikcp_create(IUINT32 conv, void *user);
++
++// create a new kcp control object using a per-instance allocator
++ikcpcb* ikcp_create_with_allocator(IUINT32 conv, void *user, IKCPALLOC alloc);
++
++// release kcp control object
++void ikcp_release(ikcpcb *kcp);
+ 
+ // set output callback, which will be invoked by kcp
+ void ikcp_setoutput(ikcpcb *kcp, int (*output)(const char *buf, int len, 

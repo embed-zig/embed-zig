@@ -17,6 +17,7 @@ pub const base_test_modules = [_]ModuleSpec{
 pub const thirdparty_modules = [_]ModuleSpec{
     module2("thirdparty", "core_bluetooth"),
     module2("thirdparty", "core_wlan"),
+    module2("thirdparty", "kcp"),
     module2("thirdparty", "lvgl"),
     module2("thirdparty", "lvgl_osal"),
     module2("thirdparty", "mbedtls"),

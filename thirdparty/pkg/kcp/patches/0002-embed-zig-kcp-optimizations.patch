@@ -1,0 +1,590 @@
+diff --git a/ikcp.c b/ikcp.c
+index de7321e..d76c416 100644
+--- a/ikcp.c
++++ b/ikcp.c
+@@ -41,10 +41,23 @@ const IUINT32 IKCP_OVERHEAD = 24;
+ const IUINT32 IKCP_DEADLINK = 20;
+ const IUINT32 IKCP_THRESH_INIT = 2;
+ const IUINT32 IKCP_THRESH_MIN = 2;
+-const IUINT32 IKCP_PROBE_INIT = 5000;		// 7 secs to probe window size
+-const IUINT32 IKCP_PROBE_LIMIT = 120000;	// up to 120 secs to probe window
+-const IUINT32 IKCP_FASTACK_LIMIT = 5;		// max times to trigger fastack
+-
++const IUINT32 IKCP_PROBE_INIT = 5000;		// 7 secs to probe window size
++const IUINT32 IKCP_PROBE_LIMIT = 120000;	// up to 120 secs to probe window
++const IUINT32 IKCP_FASTACK_LIMIT = 5;		// max times to trigger fastack
++const IUINT32 IKCP_SEG_POOL_LIMIT = 64;
++
++#ifndef IKCP_OPT_SEGMENT_POOL
++#define IKCP_OPT_SEGMENT_POOL 1
++#endif
++
++#ifndef IKCP_OPT_STREAM_APPEND
++#define IKCP_OPT_STREAM_APPEND 1
++#endif
++
++#ifndef IKCP_OPT_FLUSH_SKIP
++#define IKCP_OPT_FLUSH_SKIP 1
++#endif
++
+ 
+ //---------------------------------------------------------------------
+ // encode / decode
+@@ -144,7 +157,7 @@ static inline long _itimediff(IUINT32 later, IUINT32 earlier)
+ typedef struct IKCPSEG IKCPSEG;
+ 
+ static void* (*ikcp_malloc_hook)(size_t) = NULL;
+-static void (*ikcp_free_hook)(void *) = NULL;
++static void (*ikcp_free_hook)(void *) = NULL;
+ 
+ // internal malloc
+ static void* ikcp_malloc(size_t size) {
+@@ -195,18 +208,55 @@ static void ikcp_free_kcp(ikcpcb *kcp, void *ptr)
+ {
+ 	ikcp_alloc_free(&kcp->alloc, ptr);
+ }
+-
+-// allocate a new kcp segment
++
++// allocate a new kcp segment
+ static IKCPSEG* ikcp_segment_new(ikcpcb *kcp, int size)
+ {
+-	return (IKCPSEG*)ikcp_malloc_kcp(kcp, sizeof(IKCPSEG) + size);
++	IKCPSEG *seg;
++#if IKCP_OPT_SEGMENT_POOL
++	while (!iqueue_is_empty(&kcp->seg_pool)) {
++		seg = iqueue_entry(kcp->seg_pool.next, IKCPSEG, node);
++		iqueue_del(&seg->node);
++		kcp->seg_pool_count--;
++		if (seg->capacity >= (IUINT32)size) {
++			return seg;
++		}
++		ikcp_free_kcp(kcp, seg);
++	}
++#endif
++
++	seg = (IKCPSEG*)ikcp_malloc_kcp(kcp, sizeof(IKCPSEG) + size);
++	if (seg != NULL) {
++		seg->capacity = size;
++	}
++	return seg;
+ }
+ 
+ // delete a segment
+ static void ikcp_segment_delete(ikcpcb *kcp, IKCPSEG *seg)
+ {
++#if IKCP_OPT_SEGMENT_POOL
++	if (seg->capacity >= kcp->mss && kcp->seg_pool_count < IKCP_SEG_POOL_LIMIT) {
++		iqueue_init(&seg->node);
++		iqueue_add_tail(&seg->node, &kcp->seg_pool);
++		kcp->seg_pool_count++;
++		return;
++	}
++#endif
+ 	ikcp_free_kcp(kcp, seg);
+ }
++
++static void ikcp_segment_pool_clear(ikcpcb *kcp)
++{
++#if IKCP_OPT_SEGMENT_POOL
++	while (!iqueue_is_empty(&kcp->seg_pool)) {
++		IKCPSEG *seg = iqueue_entry(kcp->seg_pool.next, IKCPSEG, node);
++		iqueue_del(&seg->node);
++		ikcp_free_kcp(kcp, seg);
++	}
++#endif
++	kcp->seg_pool_count = 0;
++}
+ 
+ // write log
+ void ikcp_log(ikcpcb *kcp, int mask, const char *fmt, ...)
+@@ -288,15 +338,19 @@ ikcpcb* ikcp_create_with_allocator(IUINT32 conv, void *user, IKCPALLOC alloc)
+ 		return NULL;
+ 	}
+ 
+-	iqueue_init(&kcp->snd_queue);
+-	iqueue_init(&kcp->rcv_queue);
+-	iqueue_init(&kcp->snd_buf);
+-	iqueue_init(&kcp->rcv_buf);
+-	kcp->nrcv_buf = 0;
+-	kcp->nsnd_buf = 0;
+-	kcp->nrcv_que = 0;
+-	kcp->nsnd_que = 0;
+-	kcp->state = 0;
++	iqueue_init(&kcp->snd_queue);
++	iqueue_init(&kcp->rcv_queue);
++	iqueue_init(&kcp->snd_buf);
++	iqueue_init(&kcp->rcv_buf);
++	iqueue_init(&kcp->seg_pool);
++	kcp->nrcv_buf = 0;
++	kcp->nsnd_buf = 0;
++	kcp->nrcv_que = 0;
++	kcp->nsnd_que = 0;
++	kcp->seg_pool_count = 0;
++	kcp->fastack_pending = 0;
++	kcp->next_resendts = 0;
++	kcp->state = 0;
+ 	kcp->acklist = NULL;
+ 	kcp->ackblock = 0;
+ 	kcp->ackcount = 0;
+@@ -321,7 +375,7 @@ ikcpcb* ikcp_create_with_allocator(IUINT32 conv, void *user, IKCPALLOC alloc)
+ 	kcp->ccops = NULL;
+ 	kcp->congest = NULL;
+ 	kcp->writelog = NULL;
+-
++
+ 	return kcp;
+ }
+ 
+@@ -333,10 +387,10 @@ ikcpcb* ikcp_create(IUINT32 conv, void *user)
+ 	alloc.free_fn = NULL;
+ 	return ikcp_create_with_allocator(conv, user, alloc);
+ }
+-
+-
+-//---------------------------------------------------------------------
+-// release a kcpcb
++
++
++//---------------------------------------------------------------------
++// release a kcpcb
+ //---------------------------------------------------------------------
+ void ikcp_release(ikcpcb *kcp)
+ {
+@@ -372,12 +426,14 @@ void ikcp_release(ikcpcb *kcp)
+ 		if (kcp->acklist) {
+ 			ikcp_free_kcp(kcp, kcp->acklist);
+ 		}
+-
+-		kcp->nrcv_buf = 0;
+-		kcp->nsnd_buf = 0;
+-		kcp->nrcv_que = 0;
+-		kcp->nsnd_que = 0;
++		ikcp_segment_pool_clear(kcp);
++
++		kcp->nrcv_buf = 0;
++		kcp->nsnd_buf = 0;
++		kcp->nrcv_que = 0;
++		kcp->nsnd_que = 0;
+ 		kcp->ackcount = 0;
++		kcp->seg_pool_count = 0;
+ 		kcp->buffer = NULL;
+ 		kcp->acklist = NULL;
+ 		ikcp_free_kcp(kcp, kcp);
+@@ -410,9 +466,9 @@ int ikcp_recv(ikcpcb *kcp, char *buffer, int len)
+ 	if (iqueue_is_empty(&kcp->rcv_queue))
+ 		return -1;
+ 
+-	if (len < 0) len = -len;
+-
+-	peeksize = ikcp_peeksize(kcp);
++	if (len < 0) len = -len;
++
++	peeksize = ikcp_peeksize(kcp);
+ 
+ 	if (peeksize < 0) 
+ 		return -2;
+@@ -518,34 +574,44 @@ int ikcp_send(ikcpcb *kcp, const char *buffer, int len)
+ 	assert(kcp->mss > 0);
+ 	if (len < 0) return -1;
+ 
+-	// append to previous segment in streaming mode (if possible)
+-	if (kcp->stream != 0) {
+-		if (!iqueue_is_empty(&kcp->snd_queue)) {
+-			IKCPSEG *old = iqueue_entry(kcp->snd_queue.prev, IKCPSEG, node);
+-			if (old->len < kcp->mss) {
+-				int capacity = kcp->mss - old->len;
+-				int extend = (len < capacity)? len : capacity;
+-				seg = ikcp_segment_new(kcp, old->len + extend);
+-				assert(seg);
+-				if (seg == NULL) {
+-					return -2;
+-				}
+-				iqueue_add_tail(&seg->node, &kcp->snd_queue);
+-				memcpy(seg->data, old->data, old->len);
+-				if (buffer) {
+-					memcpy(seg->data + old->len, buffer, extend);
+-					buffer += extend;
+-				}
+-				seg->len = old->len + extend;
+-				seg->frg = 0;
+-				len -= extend;
+-				iqueue_del_init(&old->node);
+-				ikcp_segment_delete(kcp, old);
+-				sent = extend;
+-			}
+-		}
+-		if (len <= 0) {
+-			return sent;
++	// append to previous segment in streaming mode (if possible)
++	if (kcp->stream != 0) {
++		if (!iqueue_is_empty(&kcp->snd_queue)) {
++			IKCPSEG *old = iqueue_entry(kcp->snd_queue.prev, IKCPSEG, node);
++			if (old->len < kcp->mss) {
++				int capacity = kcp->mss - old->len;
++				int extend = (len < capacity)? len : capacity;
++#if IKCP_OPT_STREAM_APPEND
++				if (buffer) {
++					memcpy(old->data + old->len, buffer, extend);
++					buffer += extend;
++				}
++				old->len += extend;
++				len -= extend;
++				sent = extend;
++#else
++				seg = ikcp_segment_new(kcp, old->len + extend);
++				assert(seg);
++				if (seg == NULL) {
++					return -2;
++				}
++				iqueue_add_tail(&seg->node, &kcp->snd_queue);
++				memcpy(seg->data, old->data, old->len);
++				if (buffer) {
++					memcpy(seg->data + old->len, buffer, extend);
++					buffer += extend;
++				}
++				seg->len = old->len + extend;
++				seg->frg = 0;
++				len -= extend;
++				iqueue_del_init(&old->node);
++				ikcp_segment_delete(kcp, old);
++				sent = extend;
++#endif
++			}
++		}
++		if (len <= 0) {
++			return sent;
+ 		}
+ 	}
+ 
+@@ -560,13 +626,17 @@ int ikcp_send(ikcpcb *kcp, const char *buffer, int len)
+ 
+ 	if (count == 0) count = 1;
+ 
+-	// fragment
+-	for (i = 0; i < count; i++) {
+-		int size = len > (int)kcp->mss ? (int)kcp->mss : len;
+-		seg = ikcp_segment_new(kcp, size);
+-		assert(seg);
+-		if (seg == NULL) {
+-			return -2;
++	// fragment
++	for (i = 0; i < count; i++) {
++		int size = len > (int)kcp->mss ? (int)kcp->mss : len;
++#if IKCP_OPT_STREAM_APPEND
++		seg = ikcp_segment_new(kcp, kcp->stream != 0 ? kcp->mss : size);
++#else
++		seg = ikcp_segment_new(kcp, size);
++#endif
++		assert(seg);
++		if (seg == NULL) {
++			return -2;
+ 		}
+ 		if (buffer && len > 0) {
+ 			memcpy(seg->data, buffer, size);
+@@ -687,16 +757,23 @@ static void ikcp_parse_fastack(ikcpcb *kcp, IUINT32 sn, IUINT32 ts)
+ 		if (_itimediff(sn, seg->sn) < 0) {
+ 			break;
+ 		}
+-		else if (sn != seg->sn) {
+-		#ifndef IKCP_FASTACK_CONSERVE
+-			seg->fastack++;
+-		#else
+-			if (_itimediff(ts, seg->ts) >= 0)
+-				seg->fastack++;
+-		#endif
+-		}
+-	}
+-}
++		else if (sn != seg->sn) {
++#ifndef IKCP_FASTACK_CONSERVE
++			seg->fastack++;
++#if IKCP_OPT_FLUSH_SKIP
++			kcp->fastack_pending = 1;
++#endif
++		#else
++			if (_itimediff(ts, seg->ts) >= 0) {
++				seg->fastack++;
++#if IKCP_OPT_FLUSH_SKIP
++				kcp->fastack_pending = 1;
++#endif
++			}
++		#endif
++		}
++	}
++}
+ 
+ 
+ //---------------------------------------------------------------------
+@@ -754,13 +831,13 @@ void ikcp_parse_data(ikcpcb *kcp, IKCPSEG *newseg)
+ 	IUINT32 sn = newseg->sn;
+ 	int repeat = 0;
+ 	
+-	if (_itimediff(sn, kcp->rcv_nxt + kcp->rcv_wnd) >= 0 ||
+-		_itimediff(sn, kcp->rcv_nxt) < 0) {
+-		ikcp_segment_delete(kcp, newseg);
+-		return;
+-	}
+-
+-	for (p = kcp->rcv_buf.prev; p != &kcp->rcv_buf; p = prev) {
++	if (_itimediff(sn, kcp->rcv_nxt + kcp->rcv_wnd) >= 0 ||
++		_itimediff(sn, kcp->rcv_nxt) < 0) {
++		ikcp_segment_delete(kcp, newseg);
++		return;
++	}
++
++	for (p = kcp->rcv_buf.prev; p != &kcp->rcv_buf; p = prev) {
+ 		IKCPSEG *seg = iqueue_entry(p, IKCPSEG, node);
+ 		prev = p->prev;
+ 		if (seg->sn == sn) {
+@@ -898,13 +975,13 @@ int ikcp_input(ikcpcb *kcp, const char *data, long size)
+ 			}
+ 			if (_itimediff(sn, kcp->rcv_nxt + kcp->rcv_wnd) < 0) {
+ 				ikcp_ack_push(kcp, sn, ts);
+-				if (_itimediff(sn, kcp->rcv_nxt) >= 0) {
+-					seg = ikcp_segment_new(kcp, len);
+-					if (seg == NULL) {
+-						return -2;
+-					}
+-					seg->conv = conv;
+-					seg->cmd = cmd;
++					if (_itimediff(sn, kcp->rcv_nxt) >= 0) {
++						seg = ikcp_segment_new(kcp, len);
++						if (seg == NULL) {
++							return -2;
++						}
++						seg->conv = conv;
++						seg->cmd = cmd;
+ 					seg->frg = frg;
+ 					seg->wnd = wnd;
+ 					seg->ts = ts;
+@@ -1021,11 +1098,14 @@ void ikcp_flush(ikcpcb *kcp)
+ 	IUINT32 rtomin;
+ 	IUINT32 prior_cwnd;
+ 	IUINT32 eff_cwnd, cur_inflight;
+-	IINT32 pacing_budget = -1;
+-	struct IQUEUEHEAD *p;
+-	int change = 0;
+-	int lost = 0;
+-	IKCPSEG seg;
++	IINT32 pacing_budget = -1;
++	struct IQUEUEHEAD *p;
++	int change = 0;
++	int lost = 0;
++	int moved = 0;
++	int pacing_limited = 0;
++	IUINT32 next_resendts = 0;
++	IKCPSEG seg;
+ 
+ 	// 'ikcp_update' hasn't been called yet. 
+ 	if (kcp->updated == 0) return;
+@@ -1121,11 +1201,12 @@ void ikcp_flush(ikcpcb *kcp)
+ 		newseg = iqueue_entry(kcp->snd_queue.next, IKCPSEG, node);
+ 
+ 		iqueue_del(&newseg->node);
+-		iqueue_add_tail(&newseg->node, &kcp->snd_buf);
+-		kcp->nsnd_que--;
+-		kcp->nsnd_buf++;
+-
+-		newseg->conv = kcp->conv;
++		iqueue_add_tail(&newseg->node, &kcp->snd_buf);
++		kcp->nsnd_que--;
++		kcp->nsnd_buf++;
++		moved++;
++
++		newseg->conv = kcp->conv;
+ 		newseg->cmd = IKCP_CMD_PUSH;
+ 		newseg->wnd = seg.wnd;
+ 		newseg->ts = current;
+@@ -1149,12 +1230,19 @@ void ikcp_flush(ikcpcb *kcp)
+ 		}
+ 	}
+ 
+-	// calculate resent
+-	resent = (kcp->fastresend > 0)? (IUINT32)kcp->fastresend : 0xffffffff;
+-	rtomin = (kcp->nodelay == 0)? (kcp->rx_rto >> 3) : 0;
+-
+-	// flush data segments
+-	for (p = kcp->snd_buf.next; p != &kcp->snd_buf; p = p->next) {
++	// calculate resent
++	resent = (kcp->fastresend > 0)? (IUINT32)kcp->fastresend : 0xffffffff;
++	rtomin = (kcp->nodelay == 0)? (kcp->rx_rto >> 3) : 0;
++
++#if IKCP_OPT_FLUSH_SKIP
++	if (moved == 0 && (kcp->fastresend <= 0 || kcp->fastack_pending == 0) &&
++		kcp->next_resendts != 0 && _itimediff(current, kcp->next_resendts) < 0) {
++		goto data_flush_done;
++	}
++#endif
++
++	// flush data segments
++	for (p = kcp->snd_buf.next; p != &kcp->snd_buf; p = p->next) {
+ 		IKCPSEG *segment = iqueue_entry(p, IKCPSEG, node);
+ 		int needsend = 0;
+ 		if (segment->xmit == 0) {
+@@ -1188,18 +1276,25 @@ void ikcp_flush(ikcpcb *kcp)
+ 			}
+ 		}
+ 
+-		if (needsend) {
+-			int need;
+-			segment->ts = current;
+-			segment->wnd = seg.wnd;
+-			segment->una = kcp->rcv_nxt;
+-
+-			if (pacing_budget >= 0 && pacing_budget < (IINT32)segment->len) {
+-				break;
+-			}
+-
+-			if (kcp->ccops && kcp->ccops->on_pkt_sent) {
+-				kcp->ccops->on_pkt_sent(kcp, segment->sn, current,
++			if (needsend) {
++				int need;
++				segment->ts = current;
++				segment->wnd = seg.wnd;
++				segment->una = kcp->rcv_nxt;
++
++#if IKCP_OPT_FLUSH_SKIP
++				if (pacing_budget >= 0 && pacing_budget < (IINT32)segment->len) {
++					pacing_limited = 1;
++					break;
++				}
++#else
++				if (pacing_budget >= 0 && pacing_budget < (IINT32)segment->len) {
++					break;
++				}
++#endif
++
++			if (kcp->ccops && kcp->ccops->on_pkt_sent) {
++				kcp->ccops->on_pkt_sent(kcp, segment->sn, current,
+ 						segment->len, kcp->nsnd_buf, segment->xmit);
+ 			}
+ 
+@@ -1222,14 +1317,28 @@ void ikcp_flush(ikcpcb *kcp)
+ 				pacing_budget -= (IINT32)segment->len;
+ 			}
+ 
+-			if (segment->xmit >= kcp->dead_link) {
+-				kcp->state = (IUINT32)-1;
+-			}
+-		}
+-	}
+-
+-	// flash remaining segments
+-	size = (int)(ptr - buffer);
++				if (segment->xmit >= kcp->dead_link) {
++					kcp->state = (IUINT32)-1;
++				}
++			}
++#if IKCP_OPT_FLUSH_SKIP
++			if (next_resendts == 0 || _itimediff(segment->resendts, next_resendts) < 0) {
++				next_resendts = segment->resendts;
++			}
++#endif
++		}
++#if IKCP_OPT_FLUSH_SKIP
++	if (pacing_limited) {
++		kcp->next_resendts = 0;
++	} else {
++		kcp->next_resendts = next_resendts;
++	}
++	kcp->fastack_pending = 0;
++
++data_flush_done:
++#endif
++	// flash remaining segments
++	size = (int)(ptr - buffer);
+ 	if (size > 0) {
+ 		ikcp_output(kcp, buffer, size);
+ 	}
+@@ -1360,12 +1469,13 @@ int ikcp_setmtu(ikcpcb *kcp, int mtu)
+ 	buffer = (char*)ikcp_malloc_kcp(kcp, (mtu + IKCP_OVERHEAD) * 3);
+ 	if (buffer == NULL) 
+ 		return -2;
++	ikcp_segment_pool_clear(kcp);
+ 	kcp->mtu = mtu;
+-	kcp->mss = kcp->mtu - IKCP_OVERHEAD;
++	kcp->mss = kcp->mtu - IKCP_OVERHEAD;
+ 	ikcp_free_kcp(kcp, kcp->buffer);
+-	kcp->buffer = buffer;
+-	return 0;
+-}
++	kcp->buffer = buffer;
++	return 0;
++}
+ 
+ int ikcp_interval(ikcpcb *kcp, int interval)
+ {
+diff --git a/ikcp.h b/ikcp.h
+index 4649859..1a6f41b 100644
+--- a/ikcp.h
++++ b/ikcp.h
+@@ -292,12 +292,13 @@ struct IKCPSEG
+ 	IUINT32 sn;
+ 	IUINT32 una;
+ 	IUINT32 len;
+-	IUINT32 resendts;
+-	IUINT32 rto;
+-	IUINT32 fastack;
+-	IUINT32 xmit;
+-	char data[1];
+-};
++	IUINT32 resendts;
++	IUINT32 rto;
++	IUINT32 fastack;
++	IUINT32 xmit;
++	IUINT32 capacity;
++	char data[1];
++};
+ 
+ 
+ //---------------------------------------------------------------------
+@@ -337,22 +338,26 @@ struct IKCPCB
+ 	IUINT32 snd_wnd, rcv_wnd, rmt_wnd, cwnd, probe;
+ 	IUINT32 current, interval, ts_flush, xmit;
+ 	IUINT32 nrcv_buf, nsnd_buf;
+-	IUINT32 nrcv_que, nsnd_que;
+-	IUINT32 nodelay, updated;
+-	IUINT32 ts_probe, probe_wait;
++	IUINT32 nrcv_que, nsnd_que;
++	IUINT32 nodelay, updated;
++	IUINT32 fastack_pending;
++	IUINT32 next_resendts;
++	IUINT32 ts_probe, probe_wait;
+ 	IUINT32 dead_link, incr;
+-	struct IQUEUEHEAD snd_queue;
+-	struct IQUEUEHEAD rcv_queue;
+-	struct IQUEUEHEAD snd_buf;
+-	struct IQUEUEHEAD rcv_buf;
+-	IUINT32 *acklist;
++	struct IQUEUEHEAD snd_queue;
++	struct IQUEUEHEAD rcv_queue;
++	struct IQUEUEHEAD snd_buf;
++	struct IQUEUEHEAD rcv_buf;
++	struct IQUEUEHEAD seg_pool;
++	IUINT32 *acklist;
+ 	IUINT32 ackcount;
+ 	IUINT32 ackblock;
+ 	IUINT32 ackedlen;
++	IUINT32 seg_pool_count;
+ 	IKCPALLOC alloc;
+ 	void *user;
+ 	char *buffer;
+-	int fastresend;
++	int fastresend;
+ 	int fastlimit;
+ 	int nocwnd, stream;
+ 	const struct IKCPOPS *ccops;
+@@ -391,9 +396,9 @@ ikcpcb* ikcp_create(IUINT32 conv, void *user);
+ 
+ // create a new kcp control object using a per-instance allocator
+ ikcpcb* ikcp_create_with_allocator(IUINT32 conv, void *user, IKCPALLOC alloc);
+-
+-// release kcp control object
+-void ikcp_release(ikcpcb *kcp);
++
++// release kcp control object
++void ikcp_release(ikcpcb *kcp);
+ 
+ // set output callback, which will be invoked by kcp
+ void ikcp_setoutput(ikcpcb *kcp, int (*output)(const char *buf, int len, 
