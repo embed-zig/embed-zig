@@ -188,8 +188,8 @@ pub fn make(comptime grt: type) type {
                 .stop = &stop,
                 .out = &drive_result,
             };
-            const read_handle = try grt.task.go("kcp/read", .{}, glib.task.Routine.init(&read_task, ReadLoopTask.run));
-            const drive_handle = try grt.task.go("kcp/drive", .{}, glib.task.Routine.init(&drive_task, DriveLoopTask.run));
+            const read_handle = try grt.std.Thread.spawn(.{}, ReadLoopTask.run, .{&read_task});
+            const drive_handle = try grt.std.Thread.spawn(.{}, DriveLoopTask.run, .{&drive_task});
             var drive_joined = false;
             defer if (!drive_joined) {
                 stop.store(true, .release);
@@ -542,7 +542,10 @@ pub fn make(comptime grt: type) type {
             var packets: u32 = 0;
             var next_log: usize = @min(kcp_progress_interval_bytes, bytes);
             while (received < bytes) {
-                if (elapsedSince(started) > transfer_timeout) return error.NetperfTransferTimeout;
+                if (elapsedSince(started) > transfer_timeout) {
+                    logKcpProgress("sr_timeout", session, received, bytes, started);
+                    return error.NetperfTransferTimeout;
+                }
                 const n = try session.read(buf[0..@min(buf.len, bytes - received)]);
                 if (n == 0) {
                     grt.time.sleep(1 * glib.time.duration.MilliSecond);
@@ -758,6 +761,7 @@ pub fn make(comptime grt: type) type {
 
         fn driveLoopThread(session: *Session, stop: *AtomicBool, out: *DriveResult) void {
             session.driveLoop(stop) catch |err| {
+                std.log.scoped(.netperf_kcp).err("drive loop failed: {s}", .{@errorName(err)});
                 out.err = err;
                 return;
             };
@@ -765,6 +769,7 @@ pub fn make(comptime grt: type) type {
 
         fn readLoopThread(session: *Session, stop: *AtomicBool, out: *DriveResult) void {
             session.readLoop(stop) catch |err| {
+                std.log.scoped(.netperf_kcp).err("read loop failed: {s}", .{@errorName(err)});
                 out.err = err;
                 return;
             };
@@ -772,21 +777,24 @@ pub fn make(comptime grt: type) type {
 
         fn logKcpProgress(label: []const u8, session: *Session, done: usize, total: usize, started: glib.time.instant.Time) void {
             const snap = session.snapshot();
-            std.log.scoped(.netperf_kcp).info(
-                "{s} {d}/{d} ns={d} tx={d} rx={d} ws={d} room={d} out={d} in={d}",
-                .{
-                    label,
-                    done,
-                    total,
-                    elapsedSince(started),
-                    snap.tx_bytes,
-                    snap.rx_bytes,
-                    snap.state.waitsnd,
-                    snap.state.room,
-                    snap.stats.udp_out_packets,
-                    snap.stats.udp_in_packets,
-                },
-            );
+            const log = std.log.scoped(.netperf_kcp);
+            const args = .{
+                label,
+                done,
+                total,
+                elapsedSince(started),
+                snap.tx_bytes,
+                snap.rx_bytes,
+                snap.state.waitsnd,
+                snap.state.room,
+                snap.stats.udp_out_packets,
+                snap.stats.udp_in_packets,
+            };
+            if (std.mem.indexOf(u8, label, "timeout") != null) {
+                log.err("{s} {d}/{d} ns={d} tx={d} rx={d} ws={d} room={d} out={d} in={d}", args);
+            } else {
+                log.info("{s} {d}/{d} ns={d} tx={d} rx={d} ws={d} room={d} out={d} in={d}", args);
+            }
         }
 
         fn mergeThreadResults(send_result: ThreadResult, recv_result: ThreadResult) !Protocol.Result {
@@ -833,7 +841,10 @@ pub fn make(comptime grt: type) type {
         fn readExactKcp(session: *Session, buf: []u8, started: glib.time.instant.Time) !void {
             var offset: usize = 0;
             while (offset < buf.len) {
-                if (elapsedSince(started) > transfer_timeout) return error.NetperfTransferTimeout;
+                if (elapsedSince(started) > transfer_timeout) {
+                    logKcpProgress("sre_timeout", session, offset, buf.len, started);
+                    return error.NetperfTransferTimeout;
+                }
                 const n = try session.read(buf[offset..]);
                 if (n == 0) {
                     grt.time.sleep(1 * glib.time.duration.MilliSecond);

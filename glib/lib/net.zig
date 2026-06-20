@@ -38,10 +38,15 @@ const udp_conn = @import("net/UdpConn.zig");
 const resolver_mod = @import("net/Resolver.zig");
 
 pub fn make(comptime std: type, comptime time: type, comptime impl: type) type {
-    return makeWithTime(std, time, impl);
+    const sync = struct {
+        pub const Mutex = std.Thread.Mutex;
+        pub const Condition = std.Thread.Condition;
+        pub const RwLock = std.Thread.RwLock;
+    };
+    return makeWithSync(std, time, sync, impl);
 }
 
-fn makeWithTime(comptime std: type, comptime Time: type, comptime impl: type) type {
+pub fn makeWithSync(comptime std: type, comptime Time: type, comptime Sync: type, comptime impl: type) type {
     const Allocator = std.mem.Allocator;
     const Addr = netip.AddrPort;
     const IpAddr = netip.Addr;
@@ -55,6 +60,7 @@ fn makeWithTime(comptime std: type, comptime Time: type, comptime impl: type) ty
         pub const netip = @import("net/netip.zig");
         pub const url = @import("net/url.zig");
         pub const time = Time;
+        pub const sync = Sync;
         pub const Runtime = RuntimeNs;
         pub const Dialer = dialer_mod.Dialer(std, @This());
         pub const TcpConn = tcp_conn.TcpConn(std, @This());

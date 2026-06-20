@@ -192,7 +192,7 @@ pub const runtime = struct {
             pub const context = @import("context").makeWithSync(runtime_std, runtime_time, runtime_sync_ns);
             pub const task = if (options.task_impl == void) void else options.task_impl.make(@This());
             pub const sync = runtime_sync_ns;
-            pub const net = @import("net").make(runtime_std, runtime_time, net_impl);
+            pub const net = @import("net").makeWithSync(runtime_std, runtime_time, runtime_sync_ns, net_impl);
             pub const fs = @import("fs").make(runtime_std, fs_impl);
             pub const compress = if (options.compress_impl == void) void else @import("compress").make(runtime_std, options.compress_impl);
         };

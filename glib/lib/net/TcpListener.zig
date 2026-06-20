@@ -14,7 +14,7 @@ const tcp_conn = @import("TcpConn.zig");
 pub fn TcpListener(comptime std: type, comptime net: type) type {
     const AddrPort = @import("netip/AddrPort.zig");
     const Allocator = std.mem.Allocator;
-    const Mutex = std.Thread.Mutex;
+    const Mutex = net.sync.Mutex;
     const Runtime = net.Runtime;
     const RuntimeTcp = Runtime.Tcp;
     const SC = tcp_conn.TcpConn(std, net);

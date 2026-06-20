@@ -44,6 +44,7 @@ fn runKcpSmoke(comptime grt: type, allocator: glib.std.mem.Allocator, t: *glib.t
 
         pub fn run(self: *@This()) void {
             _ = self.server.serveOnce() catch |err| {
+                grt.std.log.scoped(.kcp_test_runner).err("server failed: {s}", .{@errorName(err)});
                 self.out.* = err;
                 return;
             };

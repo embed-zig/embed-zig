@@ -6,12 +6,13 @@
 const time_mod = @import("time");
 const context_mod = @import("context");
 const Conn = @import("Conn.zig");
+const runtime_mod = @import("runtime.zig");
 
 pub fn TcpConn(comptime std: type, comptime net: type) type {
     const Allocator = std.mem.Allocator;
     const Context = context_mod.Context;
-    const ContextApi = context_mod.make(std, net.time);
-    const Mutex = std.Thread.Mutex;
+    const ContextApi = context_mod.makeWithSync(std, net.time, net.sync);
+    const Mutex = net.sync.Mutex;
     const Runtime = net.Runtime;
     const TcpSocket = Runtime.Tcp;
     // Context-driven waits still use short poll slices because parent context
@@ -157,6 +158,16 @@ pub fn TcpConn(comptime std: type, comptime net: type) type {
             }
             self.write_mu.unlock();
             if (should_signal) self.socket.signal(.write_interrupt);
+        }
+
+        pub fn setReadBufferSize(self: *Self, size: usize) runtime_mod.SetSockOptError!void {
+            if (self.isClosed()) return error.Closed;
+            try self.socket.setOpt(.{ .socket = .{ .recv_buffer_size = size } });
+        }
+
+        pub fn setWriteBufferSize(self: *Self, size: usize) runtime_mod.SetSockOptError!void {
+            if (self.isClosed()) return error.Closed;
+            try self.socket.setOpt(.{ .socket = .{ .send_buffer_size = size } });
         }
 
         pub fn setReadContext(self: *Self, ctx: ?context_mod.Context) Allocator.Error!void {

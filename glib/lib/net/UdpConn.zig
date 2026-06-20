@@ -12,7 +12,7 @@ const runtime_mod = @import("runtime.zig");
 pub fn UdpConn(comptime std: type, comptime net: type) type {
     const Allocator = std.mem.Allocator;
     const AddrPort = netip.AddrPort;
-    const Mutex = std.Thread.Mutex;
+    const Mutex = net.sync.Mutex;
     const Runtime = net.Runtime;
     const UdpSocket = Runtime.Udp;
 
@@ -49,6 +49,15 @@ pub fn UdpConn(comptime std: type, comptime net: type) type {
             InvalidBatchItem,
             ShortWrite,
         };
+
+        pub const DebugStats = if (@hasDecl(UdpSocket, "DebugStats")) UdpSocket.DebugStats else struct {};
+
+        pub fn debugStats(self: *Self) DebugStats {
+            if (@hasDecl(UdpSocket, "debugStats")) {
+                return self.socket.debugStats();
+            }
+            return .{};
+        }
 
         pub const LocalAddrError = runtime_mod.SocketError;
 
@@ -275,6 +284,16 @@ pub fn UdpConn(comptime std: type, comptime net: type) type {
             }
             self.write_mu.unlock();
             if (should_signal) self.socket.signal(.write_interrupt);
+        }
+
+        pub fn setReadBufferSize(self: *Self, size: usize) runtime_mod.SetSockOptError!void {
+            if (self.isClosed()) return error.Closed;
+            try self.socket.setOpt(.{ .socket = .{ .recv_buffer_size = size } });
+        }
+
+        pub fn setWriteBufferSize(self: *Self, size: usize) runtime_mod.SetSockOptError!void {
+            if (self.isClosed()) return error.Closed;
+            try self.socket.setOpt(.{ .socket = .{ .send_buffer_size = size } });
         }
 
         pub fn boundPort(self: *Self) !u16 {

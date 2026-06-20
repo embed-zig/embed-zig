@@ -252,6 +252,25 @@ pub fn make(comptime grt: type) type {
 
                 if (self.writeTimedOut(started)) {
                     if (offset > 0) return offset;
+                    const state = self.last_debug_state;
+                    std.log.scoped(.kcp_session).err(
+                        "write timeout offset={d}/{d} tx={d} rx={d} ws={d} room={d} out={d} in={d} tick={d} queue={d} update={d} read_from={d} driver_err={s}",
+                        .{
+                            offset,
+                            buf.len,
+                            self.tx_len,
+                            self.rx_len,
+                            state.waitsnd,
+                            state.room,
+                            self.stats.udp_out_packets,
+                            self.stats.udp_in_packets,
+                            self.stats.tick_calls,
+                            self.stats.queue_calls,
+                            self.stats.update_calls,
+                            self.stats.read_from_calls,
+                            if (self.driver_err) |err| @errorName(err) else "null",
+                        },
+                    );
                     return error.KcpSessionWriteTimeout;
                 }
 
