@@ -1,4 +1,5 @@
 const std = @import("std");
+const gstd = @import("gstd");
 
 const max_entries = 256;
 const max_line_len = 1024;
@@ -19,7 +20,7 @@ const Entry = struct {
     len: usize = 0,
 };
 
-var mutex: std.Thread.Mutex = .{};
+var mutex: gstd.runtime.sync.Mutex = .{};
 var entries: [max_entries]Entry = [_]Entry{.{}} ** max_entries;
 var next_seq: u64 = 1;
 

@@ -16,7 +16,7 @@ pub fn make(comptime grt: type) type {
         hci: root.Hci,
         state: bt.State = .idle,
         started: bool = false,
-        mutex: grt.std.Thread.Mutex = .{},
+        mutex: grt.sync.Mutex = .{},
         allocator: glib.std.mem.Allocator,
         hooks: glib.std.ArrayListUnmanaged(EventHook) = .{},
         subscription_hooks: glib.std.ArrayListUnmanaged(SubscriptionHook) = .{},

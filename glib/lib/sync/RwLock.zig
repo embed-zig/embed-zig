@@ -44,9 +44,11 @@ pub fn make(comptime Impl: type) type {
 }
 
 pub fn TestRunner(comptime std: type) testing_api.TestRunner {
+    const native_std = @import("std");
+
     const TestCase = struct {
         fn locksSharedAndExclusive() !void {
-            const RwLock = make(std.Thread.RwLock);
+            const RwLock = make(native_std.Thread.RwLock);
             var rwlock: RwLock = .{};
 
             try std.testing.expect(rwlock.tryLockShared());

@@ -48,7 +48,7 @@ pub const AudioSystem = struct {
     mic_backend: PortAudioMic = .{},
     speaker_backend: PortAudioSpeaker = .{},
     configured: bool = false,
-    state_mu: grt.std.Thread.Mutex = .{},
+    state_mu: grt.sync.Mutex = .{},
     state: State = .{},
 
     pub fn init(allocator: glib.std.mem.Allocator) !AudioSystem {
@@ -149,7 +149,7 @@ const PortAudioMic = struct {
     pa: ?*portaudio.PortAudio = null,
     stream: ?portaudio.Stream = null,
     gain_db: ?i8 = null,
-    mu: grt.std.Thread.Mutex = .{},
+    mu: grt.sync.Mutex = .{},
 
     fn configure(self: *PortAudioMic, pa: *portaudio.PortAudio) void {
         self.pa = pa;
@@ -243,7 +243,7 @@ const PortAudioSpeaker = struct {
     stream: ?portaudio.Stream = null,
     gain_db: ?i8 = null,
     scratch: [samples_per_channel]i16 = @splat(0),
-    mu: grt.std.Thread.Mutex = .{},
+    mu: grt.sync.Mutex = .{},
 
     fn configure(self: *PortAudioSpeaker, pa: *portaudio.PortAudio) void {
         self.pa = pa;
@@ -330,7 +330,7 @@ const PortAudioSpeaker = struct {
 };
 
 const SpeexProcessor = struct {
-    var mu: grt.std.Thread.Mutex = .{};
+    var mu: grt.sync.Mutex = .{};
     var initialized: bool = false;
     var echo: speexdsp.EchoState = undefined;
     var preprocess: speexdsp.PreprocessState = undefined;

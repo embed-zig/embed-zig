@@ -42,7 +42,7 @@ pub fn Mocker(comptime grt: type) type {
 
         allocator: glib.std.mem.Allocator,
         config: Config,
-        mutex: grt.std.Thread.Mutex = .{},
+        mutex: grt.sync.Mutex = .{},
         nodes: glib.std.ArrayListUnmanaged(Node) = .{},
 
         pub fn init(allocator: glib.std.mem.Allocator, config: Config) Self {

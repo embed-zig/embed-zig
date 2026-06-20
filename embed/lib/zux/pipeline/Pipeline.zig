@@ -60,7 +60,7 @@ pub fn make(comptime grt: type, comptime CustomEventRegistarType: type) type {
         driver_thread: ?Worker = null,
         tick_thread: ?Worker = null,
 
-        mu: grt.std.Thread.Mutex = .{},
+        mu: grt.sync.Mutex = .{},
         pollers: PollerList = .empty,
         receivers: ReceiverList = .empty,
 
@@ -289,9 +289,10 @@ pub fn make(comptime grt: type, comptime CustomEventRegistarType: type) type {
 }
 
 pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
+    const native_std = @import("std");
     const HarnessLib = struct {
         pub const mem = grt.std.mem;
-        pub const Thread = grt.std.Thread;
+        pub const Thread = native_std.Thread;
         pub const atomic = grt.std.atomic;
         pub const debug = grt.std.debug;
         pub const log = grt.std.log;

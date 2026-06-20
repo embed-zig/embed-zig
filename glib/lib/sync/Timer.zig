@@ -60,6 +60,14 @@ pub fn init(pointer: anytype) Timer {
 }
 
 pub fn make(comptime std: type, comptime time: type) type {
+    const sync = struct {
+        pub const Mutex = @import("Mutex.zig").make(std.Thread.Mutex);
+        pub const Condition = @import("Condition.zig").make(std.Thread.Condition);
+    };
+    return makeWithSync(std, time, sync);
+}
+
+pub fn makeWithSync(comptime std: type, comptime time: type, comptime sync: type) type {
     return struct {
         pub const SpawnConfig = std.Thread.SpawnConfig;
 
@@ -67,8 +75,8 @@ pub fn make(comptime std: type, comptime time: type) type {
         callback: Timer.Callback,
         callback_ctx: *anyopaque,
         spawn_config: SpawnConfig,
-        mutex: std.Thread.Mutex = .{},
-        cond: std.Thread.Condition = .{},
+        mutex: sync.Mutex = .{},
+        cond: sync.Condition = .{},
         deadline: ?time.instant.Time = null,
         shutting_down: bool = false,
         thread: ?std.Thread = null,
@@ -156,6 +164,12 @@ pub fn make(comptime std: type, comptime time: type) type {
 }
 
 pub fn TestRunner(comptime std: type, comptime time: type) testing_api.TestRunner {
+    const native_std = @import("std");
+    const sync = struct {
+        pub const Mutex = @import("Mutex.zig").make(native_std.Thread.Mutex);
+        pub const Condition = @import("Condition.zig").make(native_std.Thread.Condition);
+    };
+
     const Runner = struct {
         pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
@@ -170,23 +184,23 @@ pub fn TestRunner(comptime std: type, comptime time: type) testing_api.TestRunne
                 t.logErrorf("sync.Timer erased wrapper failed: {}", .{err});
                 return false;
             };
-            resetNullCase(std, time) catch |err| {
+            resetNullCase(std, time, sync) catch |err| {
                 t.logErrorf("sync.Timer reset(null) failed: {}", .{err});
                 return false;
             };
-            earlierResetCase(std, time) catch |err| {
+            earlierResetCase(std, time, sync) catch |err| {
                 t.logErrorf("sync.Timer earlier reset failed: {}", .{err});
                 return false;
             };
-            laterResetCase(std, time) catch |err| {
+            laterResetCase(std, time, sync) catch |err| {
                 t.logErrorf("sync.Timer later reset failed: {}", .{err});
                 return false;
             };
-            rearmCase(std, time) catch |err| {
+            rearmCase(std, time, sync) catch |err| {
                 t.logErrorf("sync.Timer rearm failed: {}", .{err});
                 return false;
             };
-            immediateFireCase(std, time) catch |err| {
+            immediateFireCase(std, time, sync) catch |err| {
                 t.logErrorf("sync.Timer immediate fire failed: {}", .{err});
                 return false;
             };
@@ -229,10 +243,10 @@ fn erasedWrapperCase(comptime std: type) !void {
     try std.testing.expect(mock.deinit_called);
 }
 
-fn resetNullCase(comptime std: type, comptime time: type) !void {
-    const TimerImpl = make(std, time);
-    var callback_state = CallbackState(std, time){};
-    const timer = try TimerImpl.init(std.testing.allocator, CallbackState(std, time).fire, &callback_state, .{});
+fn resetNullCase(comptime std: type, comptime time: type, comptime sync: type) !void {
+    const TimerImpl = makeWithSync(std, time, sync);
+    var callback_state = CallbackState(time, sync){};
+    const timer = try TimerImpl.init(std.testing.allocator, CallbackState(time, sync).fire, &callback_state, .{});
     defer timer.deinit();
 
     timer.reset(time.instant.add(time.instant.now(), 50 * time.duration.MilliSecond));
@@ -242,10 +256,10 @@ fn resetNullCase(comptime std: type, comptime time: type) !void {
     try callback_state.expectStable(0, 100 * time.duration.MilliSecond);
 }
 
-fn earlierResetCase(comptime std: type, comptime time: type) !void {
-    const TimerImpl = make(std, time);
-    var callback_state = CallbackState(std, time){};
-    const timer = try TimerImpl.init(std.testing.allocator, CallbackState(std, time).fire, &callback_state, .{});
+fn earlierResetCase(comptime std: type, comptime time: type, comptime sync: type) !void {
+    const TimerImpl = makeWithSync(std, time, sync);
+    var callback_state = CallbackState(time, sync){};
+    const timer = try TimerImpl.init(std.testing.allocator, CallbackState(time, sync).fire, &callback_state, .{});
     defer timer.deinit();
 
     timer.reset(time.instant.add(time.instant.now(), 120 * time.duration.MilliSecond));
@@ -255,10 +269,10 @@ fn earlierResetCase(comptime std: type, comptime time: type) !void {
     _ = try callback_state.waitForCount(1, 100 * time.duration.MilliSecond);
 }
 
-fn laterResetCase(comptime std: type, comptime time: type) !void {
-    const TimerImpl = make(std, time);
-    var callback_state = CallbackState(std, time){};
-    const timer = try TimerImpl.init(std.testing.allocator, CallbackState(std, time).fire, &callback_state, .{});
+fn laterResetCase(comptime std: type, comptime time: type, comptime sync: type) !void {
+    const TimerImpl = makeWithSync(std, time, sync);
+    var callback_state = CallbackState(time, sync){};
+    const timer = try TimerImpl.init(std.testing.allocator, CallbackState(time, sync).fire, &callback_state, .{});
     defer timer.deinit();
 
     timer.reset(time.instant.add(time.instant.now(), 40 * time.duration.MilliSecond));
@@ -269,10 +283,10 @@ fn laterResetCase(comptime std: type, comptime time: type) !void {
     _ = try callback_state.waitForCount(1, 100 * time.duration.MilliSecond);
 }
 
-fn rearmCase(comptime std: type, comptime time: type) !void {
-    const TimerImpl = make(std, time);
-    var callback_state = CallbackState(std, time){};
-    const timer = try TimerImpl.init(std.testing.allocator, CallbackState(std, time).fire, &callback_state, .{});
+fn rearmCase(comptime std: type, comptime time: type, comptime sync: type) !void {
+    const TimerImpl = makeWithSync(std, time, sync);
+    var callback_state = CallbackState(time, sync){};
+    const timer = try TimerImpl.init(std.testing.allocator, CallbackState(time, sync).fire, &callback_state, .{});
     defer timer.deinit();
 
     timer.reset(time.instant.add(time.instant.now(), 20 * time.duration.MilliSecond));
@@ -282,20 +296,20 @@ fn rearmCase(comptime std: type, comptime time: type) !void {
     _ = try callback_state.waitForCount(2, 80 * time.duration.MilliSecond);
 }
 
-fn immediateFireCase(comptime std: type, comptime time: type) !void {
-    const TimerImpl = make(std, time);
-    var callback_state = CallbackState(std, time){};
-    const timer = try TimerImpl.init(std.testing.allocator, CallbackState(std, time).fire, &callback_state, .{});
+fn immediateFireCase(comptime std: type, comptime time: type, comptime sync: type) !void {
+    const TimerImpl = makeWithSync(std, time, sync);
+    var callback_state = CallbackState(time, sync){};
+    const timer = try TimerImpl.init(std.testing.allocator, CallbackState(time, sync).fire, &callback_state, .{});
     defer timer.deinit();
 
     timer.reset(time.instant.now());
     _ = try callback_state.waitForCount(1, 50 * time.duration.MilliSecond);
 }
 
-fn CallbackState(comptime std: type, comptime time: type) type {
+fn CallbackState(comptime time: type, comptime sync: type) type {
     return struct {
-        mutex: std.Thread.Mutex = .{},
-        cond: std.Thread.Condition = .{},
+        mutex: sync.Mutex = .{},
+        cond: sync.Condition = .{},
         fire_count: usize = 0,
         last_fire: time.instant.Time = 0,
 

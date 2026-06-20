@@ -170,6 +170,18 @@ pub const runtime = struct {
         const channel_factory = options.channel_factory;
         const net_impl = options.net_impl;
         const fs_impl = options.fs_impl;
+        const runtime_sync_ns = struct {
+            pub const Arc = @import("sync").Arc;
+            pub const Mutex = @import("sync").Mutex.make(runtime_sync.Mutex);
+            pub const Condition = @import("sync").Condition.make(runtime_sync.Condition);
+            pub const RwLock = @import("sync").RwLock.make(runtime_sync.RwLock);
+            pub const ChannelFactory = channel_factory;
+            pub const Channel = @import("sync").Channel(runtime_std, channel_factory);
+
+            pub fn Racer(comptime T: type) type {
+                return @import("sync").RacerWithSync(runtime_std, runtime_time, @This(), T);
+            }
+        };
 
         return struct {
             const runtime_marker: TypeMarker = .{};
@@ -177,20 +189,9 @@ pub const runtime = struct {
             pub const std = runtime_std;
             pub const time = runtime_time;
             pub const system = runtime_system;
-            pub const context = @import("context").make(runtime_std, runtime_time);
+            pub const context = @import("context").makeWithSync(runtime_std, runtime_time, runtime_sync_ns);
             pub const task = if (options.task_impl == void) void else options.task_impl.make(@This());
-            pub const sync = struct {
-                pub const Arc = @import("sync").Arc;
-                pub const Mutex = @import("sync").Mutex.make(runtime_sync.Mutex);
-                pub const Condition = @import("sync").Condition.make(runtime_sync.Condition);
-                pub const RwLock = @import("sync").RwLock.make(runtime_sync.RwLock);
-                pub const ChannelFactory = channel_factory;
-                pub const Channel = @import("sync").Channel(runtime_std, channel_factory);
-
-                pub fn Racer(comptime T: type) type {
-                    return @import("sync").Racer(runtime_std, runtime_time, T);
-                }
-            };
+            pub const sync = runtime_sync_ns;
             pub const net = @import("net").make(runtime_std, runtime_time, net_impl);
             pub const fs = @import("fs").make(runtime_std, fs_impl);
             pub const compress = if (options.compress_impl == void) void else @import("compress").make(runtime_std, options.compress_impl);
@@ -298,9 +299,9 @@ pub const runtime = struct {
 
             pub const Id = RawThread.Id;
 
-            pub const Mutex = RawThread.Mutex;
-            pub const Condition = RawThread.Condition;
-            pub const RwLock = RawThread.RwLock;
+            pub const Mutex = RemovedThreadSyncType("Mutex", "grt.sync.Mutex or glib.sync.Mutex");
+            pub const Condition = RemovedThreadSyncType("Condition", "grt.sync.Condition or glib.sync.Condition");
+            pub const RwLock = RemovedThreadSyncType("RwLock", "grt.sync.RwLock or glib.sync.RwLock");
 
             pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) SpawnError!Self {
                 return .{ .impl = try RawThread.spawn(config, f, args) };
@@ -337,6 +338,14 @@ pub const runtime = struct {
 
             pub fn getName(buf: *[max_name_len:0]u8) GetNameError!?[]const u8 {
                 return RawThread.getName(buf);
+            }
+        };
+    }
+
+    fn RemovedThreadSyncType(comptime name: []const u8, comptime replacement: []const u8) type {
+        return struct {
+            comptime {
+                @compileError("grt.std.Thread." ++ name ++ " is removed; use " ++ replacement);
             }
         };
     }

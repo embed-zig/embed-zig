@@ -106,8 +106,8 @@ fn runSequentialSuite(comptime std: type, comptime time: type, allocator: std.me
 
 fn zeroTaskTests(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
     const testing = std.testing;
-    const Context = context_mod.make(std, time);
-    const R = root.Racer(std, time, u32);
+    const Context = context_mod.makeWithSync(std, time, testSync());
+    const R = root.RacerWithSync(std, time, testSync(), u32);
 
     {
         var racer = try R.init(allocator);
@@ -157,7 +157,7 @@ fn zeroTaskTests(comptime std: type, comptime time: type, allocator: std.mem.All
 
 fn firstWinnerTests(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
     const testing = std.testing;
-    const R = root.Racer(std, time, u32);
+    const R = root.RacerWithSync(std, time, testSync(), u32);
     const BoolAtomic = std.atomic.Value(bool);
     const U32Atomic = std.atomic.Value(u32);
 
@@ -174,7 +174,7 @@ fn firstWinnerTests(comptime std: type, comptime time: type, allocator: std.mem.
     try racer.spawn(.{}, struct {
         fn run(
             ctx: R.State,
-            l: type,
+            _: type,
             started_count: *U32Atomic,
             gate: *BoolAtomic,
             attempted: *BoolAtomic,
@@ -193,7 +193,7 @@ fn firstWinnerTests(comptime std: type, comptime time: type, allocator: std.mem.
     try racer.spawn(.{}, struct {
         fn run(
             ctx: R.State,
-            l: type,
+            _: type,
             started_count: *U32Atomic,
             gate: *BoolAtomic,
             attempted: *BoolAtomic,
@@ -237,10 +237,10 @@ fn firstWinnerTests(comptime std: type, comptime time: type, allocator: std.mem.
 
 fn raceContextTests(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
     const testing = std.testing;
-    const Context = context_mod.make(std, time);
+    const Context = context_mod.makeWithSync(std, time, testSync());
     var context = try Context.init(allocator);
     defer context.deinit();
-    const R = root.Racer(std, time, u32);
+    const R = root.RacerWithSync(std, time, testSync(), u32);
     const log = std.log.scoped(.racer);
 
     {
@@ -265,7 +265,7 @@ fn raceContextTests(comptime std: type, comptime time: type, allocator: std.mem.
         defer racer.deinit();
 
         try racer.spawn(.{}, struct {
-            fn run(state: R.State, l: type) void {
+            fn run(state: R.State, _: type) void {
                 _ = state;
                 time.sleep(20 * time.duration.MilliSecond);
             }
@@ -340,7 +340,7 @@ fn raceContextTests(comptime std: type, comptime time: type, allocator: std.mem.
         defer racer.deinit();
 
         try racer.spawn(.{}, struct {
-            fn run(state: R.State, l: type) void {
+            fn run(state: R.State, _: type) void {
                 _ = state;
                 time.sleep(50 * time.duration.MilliSecond);
             }
@@ -367,7 +367,7 @@ fn raceContextTests(comptime std: type, comptime time: type, allocator: std.mem.
         defer racer.deinit();
 
         try racer.spawn(.{}, struct {
-            fn run(state: R.State, l: type) void {
+            fn run(state: R.State, _: type) void {
                 _ = state;
                 time.sleep(20 * time.duration.MilliSecond);
             }
@@ -390,7 +390,7 @@ fn raceContextTests(comptime std: type, comptime time: type, allocator: std.mem.
 
 fn exhaustedTests(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
     const testing = std.testing;
-    const R = root.Racer(std, time, u32);
+    const R = root.RacerWithSync(std, time, testSync(), u32);
 
     var racer = try R.init(allocator);
     defer racer.deinit();
@@ -420,8 +420,8 @@ fn exhaustedTests(comptime std: type, comptime time: type, allocator: std.mem.Al
 
 fn cancelTests(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
     const testing = std.testing;
-    const Context = context_mod.make(std, time);
-    const R = root.Racer(std, time, u32);
+    const Context = context_mod.makeWithSync(std, time, testSync());
+    const R = root.RacerWithSync(std, time, testSync(), u32);
     const BoolAtomic = std.atomic.Value(bool);
 
     const Flags = struct {
@@ -436,7 +436,7 @@ fn cancelTests(comptime std: type, comptime time: type, allocator: std.mem.Alloc
 
         var flags = Flags{};
         try racer.spawn(.{}, struct {
-            fn run(ctx: R.State, l: type, f: *Flags) void {
+            fn run(ctx: R.State, _: type, f: *Flags) void {
                 while (!ctx.done()) {
                     time.sleep(time.duration.MilliSecond);
                 }
@@ -479,7 +479,7 @@ fn cancelTests(comptime std: type, comptime time: type, allocator: std.mem.Alloc
 
         var flags = Flags{};
         try racer.spawn(.{}, struct {
-            fn run(ctx: R.State, l: type, f: *Flags) void {
+            fn run(ctx: R.State, _: type, f: *Flags) void {
                 while (!ctx.done()) {
                     time.sleep(time.duration.MilliSecond);
                 }
@@ -519,7 +519,7 @@ fn cancelTests(comptime std: type, comptime time: type, allocator: std.mem.Alloc
 
         var finished = BoolAtomic.init(false);
         try racer.spawn(.{}, struct {
-            fn run(ctx: R.State, l: type, fin: *BoolAtomic) void {
+            fn run(ctx: R.State, _: type, fin: *BoolAtomic) void {
                 while (!ctx.done()) {
                     time.sleep(time.duration.MilliSecond);
                 }
@@ -554,7 +554,7 @@ fn DoneAndWaitFlags(comptime std: type) type {
     };
 }
 
-fn doneAndWaitWorker(ctx: anytype, l: type, tm: type, f: anytype) void {
+fn doneAndWaitWorker(ctx: anytype, _: type, tm: type, f: anytype) void {
     while (!ctx.done()) {
         tm.sleep(tm.duration.MilliSecond);
     }
@@ -573,7 +573,7 @@ fn doneAndWaitWorker(ctx: anytype, l: type, tm: type, f: anytype) void {
 
 fn doneAndWaitTests(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
     const testing = std.testing;
-    const R = root.Racer(std, time, u32);
+    const R = root.RacerWithSync(std, time, testSync(), u32);
     const Flags = DoneAndWaitFlags(std);
 
     var racer = try R.init(allocator);
@@ -612,7 +612,7 @@ fn doneAndWaitTests(comptime std: type, comptime time: type, allocator: std.mem.
 
 fn doneSignalPublishesRejectionBeforeReadyFlagTests(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
     const testing = std.testing;
-    const R = root.Racer(std, time, u32);
+    const R = root.RacerWithSync(std, time, testSync(), u32);
     const Flags = DoneAndWaitFlags(std);
 
     var racer = try R.init(allocator);
@@ -654,7 +654,7 @@ fn spawnAllocatorTests(comptime std: type, comptime time: type, allocator: std.m
         pub const debug = std.debug;
         pub const Thread = CapturingThread;
     };
-    const R = root.Racer(CapturingThreadLib, time, u32);
+    const R = root.RacerWithSync(CapturingThreadLib, time, testSync(), u32);
 
     var racer = try R.init(allocator);
     defer racer.deinit();
@@ -685,7 +685,7 @@ fn spawnAllocatorTests(comptime std: type, comptime time: type, allocator: std.m
 
 fn initOomTests(comptime std: type, comptime time: type) !void {
     const testing = std.testing;
-    const R = root.Racer(std, time, u32);
+    const R = root.RacerWithSync(std, time, testSync(), u32);
     const FailingAllocator = FailingAllocatorType(std);
 
     var failing_allocator = FailingAllocator{};
@@ -804,9 +804,10 @@ fn FailingAllocatorType(comptime std: type) type {
 }
 
 fn CapturingThreadType(comptime std: type) type {
+    const native_std = @import("std");
     return struct {
-        pub const Mutex = std.Thread.Mutex;
-        pub const Condition = std.Thread.Condition;
+        pub const Mutex = native_std.Thread.Mutex;
+        pub const Condition = native_std.Thread.Condition;
         pub const SpawnError = error{};
         pub const SpawnConfig = struct {
             allocator: ?std.mem.Allocator = null,
@@ -825,5 +826,14 @@ fn CapturingThreadType(comptime std: type) type {
         pub fn detach(self: Self) void {
             _ = self;
         }
+    };
+}
+
+fn testSync() type {
+    const native_std = @import("std");
+    return struct {
+        pub const Mutex = root.Mutex.make(native_std.Thread.Mutex);
+        pub const Condition = root.Condition.make(native_std.Thread.Condition);
+        pub const RwLock = root.RwLock.make(native_std.Thread.RwLock);
     };
 }

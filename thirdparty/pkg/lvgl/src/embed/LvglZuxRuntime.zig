@@ -96,7 +96,7 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
         flush_buffer: []embed_pkg.drivers.Display.Rgb = &.{},
         single_button_bindings: grt.std.ArrayList(*SingleButtonBinding) = .empty,
         grouped_button_bindings: grt.std.ArrayList(*GroupedButtonBinding) = .empty,
-        state_mu: grt.std.Thread.Mutex = .{},
+        state_mu: grt.sync.Mutex = .{},
         zux_app: ?*ZuxAppType = null,
         render_hook: ?RenderHook = null,
         render_seq: u64 = 0,

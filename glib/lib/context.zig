@@ -48,9 +48,18 @@ const internal = @import("context/internal.zig");
 const value_context = @import("context/ValueContext.zig");
 
 pub fn make(comptime std: type, comptime time: type) type {
+    const sync = struct {
+        pub const Mutex = std.Thread.Mutex;
+        pub const Condition = std.Thread.Condition;
+        pub const RwLock = std.Thread.RwLock;
+    };
+    return makeWithSync(std, time, sync);
+}
+
+pub fn makeWithSync(comptime std: type, comptime time: type, comptime sync: type) type {
     const Background = struct {
         tree: Context.TreeLink = .{},
-        tree_rw: std.Thread.RwLock = .{},
+        tree_rw: sync.RwLock = .{},
 
         const Self = @This();
 
@@ -159,10 +168,10 @@ pub fn make(comptime std: type, comptime time: type) type {
         shared: *Shared,
 
         const Self = @This();
-        pub const CancelContext = cancel_context.make(std, time);
-        pub const DeadlineContext = deadline_context.make(std, time);
+        pub const CancelContext = cancel_context.make(std, time, sync);
+        pub const DeadlineContext = deadline_context.make(std, time, sync);
         pub fn ValueContext(comptime T: type) type {
-            return value_context.make(std, time, T);
+            return value_context.make(std, time, sync, T);
         }
 
         pub fn now(self: *const Self) time_mod.instant.Time {

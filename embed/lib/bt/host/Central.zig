@@ -21,7 +21,7 @@ pub fn make(comptime grt: type) type {
         state: bt.Central.State = .idle,
         started: bool = false,
         att_mtu: u16 = bt.Central.DEFAULT_ATT_MTU,
-        mutex: grt.std.Thread.Mutex = .{},
+        mutex: grt.sync.Mutex = .{},
         hooks: glib.std.ArrayListUnmanaged(EventHook) = .{},
         scan_service_uuids: glib.std.ArrayListUnmanaged(u16) = .{},
         allocator: glib.std.mem.Allocator,

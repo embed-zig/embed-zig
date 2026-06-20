@@ -1,6 +1,6 @@
 const glib = @import("glib");
 const binding = @import("binding.zig");
-const Thread = @import("../std/Thread.zig");
+const sync = @import("../sync.zig");
 
 const ns_per_ms: i128 = 1_000_000;
 const ns_per_s: i128 = 1_000_000_000;
@@ -14,7 +14,7 @@ const Sample = struct {
     ms: u64,
 };
 
-var cache_lock: Thread.Mutex = .{};
+var cache_lock: sync.Mutex = .{};
 var has_last_good_sample = false;
 var last_good_ns: u64 = 0;
 var last_good_ms: u64 = 0;

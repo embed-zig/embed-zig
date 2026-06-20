@@ -66,7 +66,6 @@ pub fn closeWithError(self: root) void {
 }
 
 pub fn make(comptime grt: type) type {
-    const Thread = grt.std.Thread;
     const Allocator = glib.std.mem.Allocator;
     const ArrayListUnmanaged = grt.std.ArrayListUnmanaged;
     const TrackState = TrackStateMod.make(grt);
@@ -165,7 +164,7 @@ pub fn make(comptime grt: type) type {
         output: Format,
         headroom_gain: f32,
         limiter_threshold: f32,
-        mutex: Thread.Mutex = .{},
+        mutex: grt.sync.Mutex = .{},
         tracks: ArrayListUnmanaged(*TrackState) = .{},
         mix_accum: ArrayListUnmanaged(f32) = .{},
         ref_accum: ArrayListUnmanaged(f32) = .{},

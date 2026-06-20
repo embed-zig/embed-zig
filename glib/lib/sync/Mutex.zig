@@ -28,10 +28,11 @@ pub fn make(comptime Impl: type) type {
 
 pub fn TestRunner(comptime std: type) @import("testing").TestRunner {
     const testing_api = @import("testing");
+    const native_std = @import("std");
 
     const TestCase = struct {
         fn locksUnlocksAndTryLocks() !void {
-            const Mutex = make(std.Thread.Mutex);
+            const Mutex = make(native_std.Thread.Mutex);
             var mutex: Mutex = .{};
 
             try std.testing.expect(mutex.tryLock());

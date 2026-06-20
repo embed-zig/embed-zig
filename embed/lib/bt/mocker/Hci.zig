@@ -142,7 +142,7 @@ pub fn Hci(comptime grt: type) type {
         };
 
         allocator: glib.std.mem.Allocator,
-        mutex: grt.std.Thread.Mutex = .{},
+        mutex: grt.sync.Mutex = .{},
         queue: glib.std.ArrayListUnmanaged(Packet) = .{},
         host_server_pushes: glib.std.ArrayListUnmanaged(ServerPush) = .{},
         services: glib.std.ArrayListUnmanaged(ServiceState) = .{},

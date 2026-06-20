@@ -217,7 +217,7 @@ pub fn make(comptime Launcher: type) type {
         const RuntimeState = struct {
             allocator: gstd.runtime.std.mem.Allocator,
             launcher: Launcher,
-            mutex: gstd.runtime.std.Thread.Mutex = .{},
+            mutex: gstd.runtime.sync.Mutex = .{},
             audio_systems: [audio_system_count]device.audio_system.AudioSystem,
             buttons: [single_button_count]device.single_button.SingleButton,
             displays: [display_count]device.display.Display,

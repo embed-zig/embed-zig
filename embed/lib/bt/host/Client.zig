@@ -22,7 +22,7 @@ pub fn make(comptime grt: type) type {
         allocator: glib.std.mem.Allocator,
         central: ?bt.Central = null,
         hook_installed: bool = false,
-        mutex: grt.std.Thread.Mutex = .{},
+        mutex: grt.sync.Mutex = .{},
         subscriptions: glib.std.ArrayListUnmanaged(*SubscriptionState) = .{},
 
         pub fn init(allocator: glib.std.mem.Allocator) Self {

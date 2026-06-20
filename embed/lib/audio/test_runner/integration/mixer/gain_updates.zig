@@ -27,8 +27,8 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
 
             const State = struct {
                 mixer: MixerMod,
-                mutex: Thread.Mutex = .{},
-                cond: Thread.Condition = .{},
+                mutex: grt.sync.Mutex = .{},
+                cond: grt.sync.Condition = .{},
                 started: bool = false,
                 active: bool = false,
                 draining: bool = false,

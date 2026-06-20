@@ -5,7 +5,7 @@ const gstd = @import("gstd");
 const TouchApi = embed.drivers.Touch;
 
 pub const Touch = struct {
-    mutex: gstd.runtime.std.Thread.Mutex = .{},
+    mutex: gstd.runtime.sync.Mutex = .{},
     pressed: bool = false,
     point: TouchApi.Point = .{ .x = 0, .y = 0 },
 

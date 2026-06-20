@@ -7,10 +7,11 @@ const Allocator = stdz.mem.Allocator;
 const Context = @import("Context.zig");
 const internal = @import("internal.zig");
 
-pub fn make(comptime std: type, comptime time: type) type {
-    const Mutex = std.Thread.Mutex;
-    const Condition = std.Thread.Condition;
-    const RwLock = std.Thread.RwLock;
+pub fn make(comptime std: type, comptime time: type, comptime sync: type) type {
+    _ = std;
+    const Mutex = sync.Mutex;
+    const Condition = sync.Condition;
+    const RwLock = sync.RwLock;
 
     return struct {
         allocator: Allocator,

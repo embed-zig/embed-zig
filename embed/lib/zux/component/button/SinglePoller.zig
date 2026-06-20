@@ -22,7 +22,7 @@ pub fn make(comptime grt: type) type {
         poll_interval: glib.time.duration.Duration = Poller.default_poll_interval,
         spawn_config: grt.std.Thread.SpawnConfig = .{},
         out: ?Emitter = null,
-        state_mu: grt.std.Thread.Mutex = .{},
+        state_mu: grt.sync.Mutex = .{},
         running: bool = false,
         async_failed: bool = false,
         last_pressed: ?bool = null,

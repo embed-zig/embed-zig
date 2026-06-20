@@ -5,8 +5,8 @@ pub fn make(comptime grt: type, comptime T: type, comptime label: anytype) type 
     const Allocator = glib.std.mem.Allocator;
     const AtomicU64 = grt.std.atomic.Value(u64);
     const SubscriberList = grt.std.ArrayList(*Subscriber);
-    const Mutex = grt.std.Thread.Mutex;
-    const RwLock = grt.std.Thread.RwLock;
+    const Mutex = grt.sync.Mutex;
+    const RwLock = grt.sync.RwLock;
     const label_name = labelText(label);
 
     return struct {

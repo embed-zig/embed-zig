@@ -26,6 +26,7 @@ pub fn make(comptime base: type, comptime options: anytype) type {
     const SelectedLog = if (@hasField(@TypeOf(options), "log")) options.log else base.log;
     const SelectedMem = if (@hasField(@TypeOf(options), "mem")) options.mem else base.mem;
     const SelectedFmt = if (@hasField(@TypeOf(options), "fmt")) options.fmt else base.fmt;
+    const SelectedDebug = if (@hasField(@TypeOf(options), "debug")) options.debug else base.debug;
     const SelectedPosix = if (@hasField(@TypeOf(options), "posix"))
         options.posix
     else if (@hasDecl(base, "posix"))
@@ -41,6 +42,7 @@ pub fn make(comptime base: type, comptime options: anytype) type {
         pub const log = SelectedLog;
         pub const mem = SelectedMem;
         pub const fmt = SelectedFmt;
+        pub const debug = SelectedDebug;
         pub const posix = SelectedPosix;
         pub const testing = SelectedTesting;
 

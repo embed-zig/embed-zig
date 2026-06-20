@@ -31,7 +31,7 @@ pub fn make(comptime grt: type, comptime ServerType: type) type {
             mux: *Self,
             subscription: Subscription,
             conn_handle: u16,
-            mutex: grt.std.Thread.Mutex = .{},
+            mutex: grt.sync.Mutex = .{},
             closed: bool = false,
             ref_count: usize = 1,
             inbox: Inbox,
@@ -226,7 +226,7 @@ pub fn make(comptime grt: type, comptime ServerType: type) type {
         };
 
         allocator: glib.std.mem.Allocator,
-        mutex: grt.std.Thread.Mutex = .{},
+        mutex: grt.sync.Mutex = .{},
         receive_handler: ?HandlerFn = null,
         handler_ctx: ?*anyopaque = null,
         sessions: grt.std.AutoHashMapUnmanaged(u16, *Session) = .{},

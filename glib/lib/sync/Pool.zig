@@ -69,11 +69,18 @@ pub fn init(pointer: anytype) Pool {
 }
 
 pub fn make(comptime std: type, comptime T: type) type {
+    const sync = struct {
+        pub const Mutex = @import("Mutex.zig").make(std.Thread.Mutex);
+    };
+    return makeWithSync(std, sync, T);
+}
+
+pub fn makeWithSync(comptime std: type, comptime sync: type, comptime T: type) type {
     return struct {
         allocator: stdz.mem.Allocator,
         new_fn: ?New,
         new_ctx: ?*anyopaque,
-        mutex: std.Thread.Mutex = .{},
+        mutex: sync.Mutex = .{},
         free_entries: std.DoublyLinkedList = .{},
         created_count: usize = 0,
         free_count: usize = 0,
@@ -164,6 +171,11 @@ pub fn make(comptime std: type, comptime T: type) type {
 }
 
 pub fn TestRunner(comptime std: type) testing_api.TestRunner {
+    const native_std = @import("std");
+    const sync = struct {
+        pub const Mutex = @import("Mutex.zig").make(native_std.Thread.Mutex);
+    };
+
     const Runner = struct {
         pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
@@ -174,23 +186,23 @@ pub fn TestRunner(comptime std: type) testing_api.TestRunner {
             _ = self;
             _ = allocator;
 
-            reuseCase(std) catch |err| {
+            reuseCase(std, sync) catch |err| {
                 t.logErrorf("sync.Pool reuse failed: {}", .{err});
                 return false;
             };
-            newCase(std) catch |err| {
+            newCase(std, sync) catch |err| {
                 t.logErrorf("sync.Pool new failed: {}", .{err});
                 return false;
             };
-            zeroInitCase(std) catch |err| {
+            zeroInitCase(std, sync) catch |err| {
                 t.logErrorf("sync.Pool zero init failed: {}", .{err});
                 return false;
             };
-            newReturnsNullCase(std) catch |err| {
+            newReturnsNullCase(std, sync) catch |err| {
                 t.logErrorf("sync.Pool null new failed: {}", .{err});
                 return false;
             };
-            erasedWrapperCase(std) catch |err| {
+            erasedWrapperCase(std, sync) catch |err| {
                 t.logErrorf("sync.Pool erased wrapper failed: {}", .{err});
                 return false;
             };
@@ -209,11 +221,11 @@ pub fn TestRunner(comptime std: type) testing_api.TestRunner {
     return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }
 
-fn reuseCase(comptime std: type) !void {
+fn reuseCase(comptime std: type, comptime sync: type) !void {
     const Item = struct {
         value: usize = 0,
     };
-    const TypedPool = Pool.make(std, Item);
+    const TypedPool = Pool.makeWithSync(std, sync, Item);
 
     var pool = TypedPool.init(std.testing.allocator, null, null);
     defer pool.deinit();
@@ -236,11 +248,11 @@ fn reuseCase(comptime std: type) !void {
     pool.putTyped(second);
 }
 
-fn newCase(comptime std: type) !void {
+fn newCase(comptime std: type, comptime sync: type) !void {
     const Item = struct {
         value: usize = 0,
     };
-    const TypedPool = Pool.make(std, Item);
+    const TypedPool = Pool.makeWithSync(std, sync, Item);
     const State = struct {
         next_value: usize = 7,
         allocator_ptr: usize = 0,
@@ -271,12 +283,12 @@ fn newCase(comptime std: type) !void {
     try std.testing.expectEqual(@as(usize, 2), pool.free_count);
 }
 
-fn zeroInitCase(comptime std: type) !void {
+fn zeroInitCase(comptime std: type, comptime sync: type) !void {
     const Item = struct {
         a: usize,
         b: bool,
     };
-    const TypedPool = Pool.make(std, Item);
+    const TypedPool = Pool.makeWithSync(std, sync, Item);
 
     var pool = TypedPool.init(std.testing.allocator, null, null);
     defer pool.deinit();
@@ -287,11 +299,11 @@ fn zeroInitCase(comptime std: type) !void {
     pool.putTyped(item);
 }
 
-fn newReturnsNullCase(comptime std: type) !void {
+fn newReturnsNullCase(comptime std: type, comptime sync: type) !void {
     const Item = struct {
         value: usize = 0,
     };
-    const TypedPool = Pool.make(std, Item);
+    const TypedPool = Pool.makeWithSync(std, sync, Item);
     const Hooks = struct {
         fn newItem(_: ?*anyopaque, _: stdz.mem.Allocator) ?Item {
             return null;
@@ -306,11 +318,11 @@ fn newReturnsNullCase(comptime std: type) !void {
     try std.testing.expectEqual(@as(usize, 0), pool.free_count);
 }
 
-fn erasedWrapperCase(comptime std: type) !void {
+fn erasedWrapperCase(comptime std: type, comptime sync: type) !void {
     const Item = struct {
         value: usize = 0,
     };
-    const TypedPool = Pool.make(std, Item);
+    const TypedPool = Pool.makeWithSync(std, sync, Item);
     const Hooks = struct {
         fn newItem(_: ?*anyopaque, _: stdz.mem.Allocator) ?Item {
             return .{};

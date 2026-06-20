@@ -2,7 +2,7 @@ const context_mod = @import("context");
 const testing_api = @import("testing");
 const time_mod = @import("time");
 
-pub fn Racer(comptime std: type, comptime time: type, comptime T: type) type {
+pub fn Racer(comptime std: type, comptime time: type, comptime sync: type, comptime T: type) type {
     const Allocator = std.mem.Allocator;
     const Thread = std.Thread;
     const Atomic = std.atomic.Value;
@@ -14,8 +14,8 @@ pub fn Racer(comptime std: type, comptime time: type, comptime T: type) type {
         const Self = @This();
 
         const SharedState = struct {
-            mutex: Thread.Mutex = .{},
-            cond: Thread.Condition = .{},
+            mutex: sync.Mutex = .{},
+            cond: sync.Condition = .{},
             done: Atomic(bool) = Atomic(bool).init(false),
             running: usize = 0,
             has_value: bool = false,
@@ -225,9 +225,15 @@ pub fn Racer(comptime std: type, comptime time: type, comptime T: type) type {
 }
 
 pub fn TestRunner(comptime std: type, comptime time: type) testing_api.TestRunner {
+    const native_std = @import("std");
+    const sync = struct {
+        pub const Mutex = @import("Mutex.zig").make(native_std.Thread.Mutex);
+        pub const Condition = @import("Condition.zig").make(native_std.Thread.Condition);
+    };
+
     const TestCase = struct {
         fn run() !void {
-            const R = Racer(std, time, u32);
+            const R = Racer(std, time, sync, u32);
 
             var racer = try R.init(std.testing.allocator);
             defer racer.deinit();

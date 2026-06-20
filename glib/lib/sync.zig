@@ -32,7 +32,15 @@ pub fn Channel(comptime std: type, comptime factory: channel.FactoryType) channe
 }
 
 pub fn Racer(comptime std: type, comptime time: type, comptime T: type) type {
-    return racer_mod.Racer(std, time, T);
+    const sync = struct {
+        pub const Mutex = @import("sync/Mutex.zig").make(std.Thread.Mutex);
+        pub const Condition = @import("sync/Condition.zig").make(std.Thread.Condition);
+    };
+    return RacerWithSync(std, time, sync, T);
+}
+
+pub fn RacerWithSync(comptime std: type, comptime time: type, comptime sync: type, comptime T: type) type {
+    return racer_mod.Racer(std, time, sync, T);
 }
 
 pub const test_runner = struct {

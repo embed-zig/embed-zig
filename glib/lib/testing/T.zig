@@ -198,7 +198,12 @@ fn structuredLabelPadding(label: []const u8) []const u8 {
 
 pub fn new(comptime std: type, comptime time: type, comptime scope: @Type(.enum_literal)) Self {
     const TestStd = testing_std_mod.make(std, .{});
-    const ContextApi = context_mod.make(std, time);
+    const ContextSync = struct {
+        pub const Mutex = TestStd.Thread.Mutex;
+        pub const Condition = TestStd.Thread.Condition;
+        pub const RwLock = TestStd.Thread.RwLock;
+    };
+    const ContextApi = context_mod.makeWithSync(std, time, ContextSync);
     const TestingAllocator = @import("TestingAllocator.zig");
     const run_log = TestStd.log.scoped(scope);
 

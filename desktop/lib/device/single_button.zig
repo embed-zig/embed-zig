@@ -10,7 +10,7 @@ pub const SingleButton = struct {
         }
     };
 
-    mutex: gstd.runtime.std.Thread.Mutex = .{},
+    mutex: gstd.runtime.sync.Mutex = .{},
     pressed: bool = false,
 
     pub fn handle(self: *@This()) Handle {

@@ -96,7 +96,7 @@ pub fn Builder(comptime grt: type) type {
                     items: []Frame,
                     head: usize = 0,
                     len: usize = 0,
-                    mutex: grt.std.Thread.Mutex = .{},
+                    mutex: grt.sync.Mutex = .{},
 
                     fn init(allocator: glib.std.mem.Allocator, capacity: usize) !RawFrameBuffer {
                         return .{
@@ -161,7 +161,7 @@ pub fn Builder(comptime grt: type) type {
                 raw_rb: RawFrameBuffer,
                 ref_rb: SampleRingBuffer,
                 ref_write_scratch: []i16,
-                state_mu: grt.std.Thread.Mutex = .{},
+                state_mu: grt.sync.Mutex = .{},
                 running: bool = false,
                 async_failed: bool = false,
                 playback_config_locked: bool = false,
@@ -746,7 +746,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         /// Poll `read` until samples arrive or `max_wait` elapses. Avoids tying
         /// readiness to a fixed iteration count (brittle under slow scheduling / CI).
         fn pollReadSamples(system: anytype, out: []i16, max_wait: glib.time.duration.Duration) !usize {
-            const Thread = grt.std.Thread;
             const deadline = glib.time.instant.add(grt.time.instant.now(), max_wait);
             while (grt.time.instant.now() < deadline) {
                 const n = system.read(out) catch |err| switch (err) {
@@ -763,7 +762,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         }
 
         fn waitSpeakerWrites(ctx: anytype, deadline: glib.time.instant.Time) bool {
-            const Thread = grt.std.Thread;
             while (grt.time.instant.now() < deadline) {
                 ctx.mu.lock();
                 const w = ctx.writes;
@@ -775,7 +773,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         }
 
         fn waitMicReads(ctx: anytype, min_reads: usize, deadline: glib.time.instant.Time) bool {
-            const Thread = grt.std.Thread;
             while (grt.time.instant.now() < deadline) {
                 ctx.mu.lock();
                 const reads = ctx.reads;
@@ -984,7 +981,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         }
 
         fn readLoopBuffersProcessedAudio(alloc: glib.std.mem.Allocator) !void {
-            const Thread = grt.std.Thread;
             const TestMic = MicMod.make(grt, 1, 4);
             const TestSpeaker = SpeakerMod.make(grt, 4);
             const ProcessorBackend = struct {
@@ -1006,12 +1002,12 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             const MicCtx = struct {
                 next: i16 = 1,
                 enabled: bool = false,
-                mu: Thread.Mutex = .{},
+                mu: grt.sync.Mutex = .{},
             };
             const SpeakerCtx = struct {
                 enabled: bool = false,
                 writes: usize = 0,
-                mu: Thread.Mutex = .{},
+                mu: grt.sync.Mutex = .{},
             };
 
             const MicBackend = struct {
@@ -1131,7 +1127,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         }
 
         fn slowProcessorDoesNotBlockMicReads(alloc: glib.std.mem.Allocator) !void {
-            const Thread = grt.std.Thread;
             const TestMic = MicMod.make(grt, 1, 4);
             const ProcessorBackend = struct {
                 fn process(frame: TestMic.Frame, out: []i16) Error!usize {
@@ -1154,7 +1149,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 reads: usize = 0,
                 next: i16 = 1,
                 enabled: bool = false,
-                mu: Thread.Mutex = .{},
+                mu: grt.sync.Mutex = .{},
             };
 
             const MicBackend = struct {
@@ -1223,7 +1218,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         }
 
         fn readReturnsWouldBlockWhenRunningAndEmpty(alloc: glib.std.mem.Allocator) !void {
-            const Thread = grt.std.Thread;
             const AtomicBool = grt.std.atomic.Value(bool);
             const TestMic = MicMod.make(grt, 1, 4);
             const TestSpeaker = SpeakerMod.make(grt, 4);
@@ -1249,11 +1243,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             const MicCtx = struct {
                 next: i16 = 1,
                 enabled: bool = false,
-                mu: Thread.Mutex = .{},
+                mu: grt.sync.Mutex = .{},
             };
             const SpeakerCtx = struct {
                 enabled: bool = false,
-                mu: Thread.Mutex = .{},
+                mu: grt.sync.Mutex = .{},
             };
 
             const MicBackend = struct {
@@ -1370,7 +1364,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         }
 
         fn readLoopResetsMissingMicRef(alloc: glib.std.mem.Allocator) !void {
-            const Thread = grt.std.Thread;
             const TestMic = MicMod.make(grt, 1, 4);
             const TestSpeaker = SpeakerMod.make(grt, 4);
             const ProcessorBackend = struct {
@@ -1393,11 +1386,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             const MicCtx = struct {
                 reads: usize = 0,
                 enabled: bool = false,
-                mu: Thread.Mutex = .{},
+                mu: grt.sync.Mutex = .{},
             };
             const SpeakerCtx = struct {
                 enabled: bool = false,
-                mu: Thread.Mutex = .{},
+                mu: grt.sync.Mutex = .{},
             };
 
             const MicBackend = struct {
@@ -1514,7 +1507,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         }
 
         fn startAllowsMicOnlyMode(alloc: glib.std.mem.Allocator) !void {
-            const Thread = grt.std.Thread;
             const TestMic = MicMod.make(grt, 1, 4);
             const ProcessorBackend = struct {
                 fn process(frame: TestMic.Frame, out: []i16) Error!usize {
@@ -1535,7 +1527,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             const MicCtx = struct {
                 next: i16 = 1,
                 enabled: bool = false,
-                mu: Thread.Mutex = .{},
+                mu: grt.sync.Mutex = .{},
             };
 
             const MicBackend = struct {
@@ -1605,7 +1597,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         }
 
         fn startAllowsSpeakerOnlyMode(alloc: glib.std.mem.Allocator) !void {
-            const Thread = grt.std.Thread;
             const TestSpeaker = SpeakerMod.make(grt, 4);
             const TestMic = MicMod.make(grt, 1, 4);
             const ProcessorBackend = struct {
@@ -1627,7 +1618,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             const SpeakerCtx = struct {
                 enabled: bool = false,
                 writes: usize = 0,
-                mu: Thread.Mutex = .{},
+                mu: grt.sync.Mutex = .{},
             };
 
             const SpeakerBackend = struct {

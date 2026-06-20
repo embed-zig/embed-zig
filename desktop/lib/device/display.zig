@@ -10,7 +10,7 @@ pub const Display = struct {
     const pixel_count = @as(usize, width_px) * @as(usize, height_px);
 
     allocator: glib.std.mem.Allocator,
-    mutex: gstd.runtime.std.Thread.Mutex = .{},
+    mutex: gstd.runtime.sync.Mutex = .{},
     pixels: []DisplayApi.Rgb,
     enabled: bool = false,
     brightness: u8 = 0,

@@ -2,6 +2,7 @@
 
 const Channel = @import("../../../Channel.zig");
 pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: Channel.FactoryType) type {
+    const native_std = @import("std");
     const BoundChannel = Channel.make(ChannelFactory(std));
     const Ch = BoundChannel(u32);
     const Thread = std.Thread;
@@ -821,7 +822,7 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
             const CONSUMERS = 4;
             const TOTAL = 1000;
             const Observed = struct {
-                mutex: Thread.Mutex = .{},
+                mutex: native_std.Thread.Mutex = .{},
                 count: u32 = 0,
                 duplicate: bool = false,
                 out_of_range: bool = false,
@@ -899,7 +900,7 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
             const PER_PRODUCER = 500;
             const TOTAL = PRODUCERS * PER_PRODUCER;
             const Observed = struct {
-                mutex: Thread.Mutex = .{},
+                mutex: native_std.Thread.Mutex = .{},
                 count: u32 = 0,
                 duplicate: bool = false,
                 out_of_range: bool = false,

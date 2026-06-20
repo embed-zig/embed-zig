@@ -11,7 +11,7 @@ pub const LedStrip = struct {
     pub const RefreshHook = *const fn (ctx: *anyopaque, strip: *LedStrip) void;
 
     allocator: gstd.runtime.std.mem.Allocator,
-    mutex: gstd.runtime.std.Thread.Mutex = .{},
+    mutex: gstd.runtime.sync.Mutex = .{},
     pixels: []embed.ledstrip.Color,
     refresh_count: usize = 0,
     refresh_ctx: ?*anyopaque = null,

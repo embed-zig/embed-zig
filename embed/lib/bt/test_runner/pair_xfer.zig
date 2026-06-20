@@ -85,7 +85,7 @@ pub fn makePeripheral(comptime grt: type, comptime ServerType: type, host: anyty
 
 fn runCentralRole(comptime grt: type, comptime ClientType: type, host: anytype, allocator: glib.std.mem.Allocator) !void {
     const State = struct {
-        mutex: grt.std.Thread.Mutex = .{},
+        mutex: grt.sync.Mutex = .{},
         found: bool = false,
         addr: Central.BdAddr = .{0} ** 6,
         addr_type: Central.AddrType = .public,
@@ -154,7 +154,7 @@ fn runPeripheralRole(comptime grt: type, comptime ServerType: type, host: anytyp
     const peripheral = host.peripheral();
 
     const State = struct {
-        mutex: grt.std.Thread.Mutex = .{},
+        mutex: grt.sync.Mutex = .{},
         connected_count: u32 = 0,
         disconnected_count: u32 = 0,
         conn_handle: u16 = 0,

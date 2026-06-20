@@ -4,7 +4,6 @@ const glib = @import("glib");
 
 pub fn make(comptime grt: type) type {
     const Allocator = glib.std.mem.Allocator;
-    const Thread = grt.std.Thread;
 
     return struct {
         allocator: Allocator,
@@ -13,8 +12,8 @@ pub fn make(comptime grt: type) type {
         len: usize = 0,
         write_closed: bool = false,
         has_error: bool = false,
-        mutex: Thread.Mutex = .{},
-        cond: Thread.Condition = .{},
+        mutex: grt.sync.Mutex = .{},
+        cond: grt.sync.Condition = .{},
 
         pub fn init(allocator: Allocator, capacity: usize) !@This() {
             return .{

@@ -154,9 +154,9 @@ pub fn make(comptime std: type, comptime options: anytype) type {
         pub const max_name_len = std.Thread.max_name_len;
         pub const default_stack_size = std.Thread.default_stack_size;
 
-        pub const Mutex = std.Thread.Mutex;
-        pub const Condition = std.Thread.Condition;
-        pub const RwLock = std.Thread.RwLock;
+        pub const Mutex = native_std.Thread.Mutex;
+        pub const Condition = native_std.Thread.Condition;
+        pub const RwLock = native_std.Thread.RwLock;
 
         handle: if (use_process_backend) ProcessHandle else std.Thread,
 

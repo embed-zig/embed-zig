@@ -25,8 +25,8 @@ pub fn Subscription(comptime grt: type, comptime ServerType: type) type {
             char_uuid: u16,
             cccd_value: u16,
             att_mtu: u16,
-            mutex: grt.std.Thread.Mutex = .{},
-            cond: grt.std.Thread.Condition = .{},
+            mutex: grt.sync.Mutex = .{},
+            cond: grt.sync.Condition = .{},
             closed: bool = false,
             active_ops: usize = 0,
             ref_count: usize = 1,
@@ -221,7 +221,7 @@ pub fn make(comptime grt: type) type {
             has_read_handler: bool,
             has_write_handler: bool,
             pending_subscriptions: grt.std.AutoHashMapUnmanaged(u16, Self.Subscription) = .{},
-            mutex: grt.std.Thread.Mutex = .{},
+            mutex: grt.sync.Mutex = .{},
 
             fn init(
                 allocator: glib.std.mem.Allocator,
@@ -420,7 +420,7 @@ pub fn make(comptime grt: type) type {
         allocator: glib.std.mem.Allocator,
         peripheral: ?bt.Peripheral = null,
         hook_installed: bool = false,
-        mutex: grt.std.Thread.Mutex = .{},
+        mutex: grt.sync.Mutex = .{},
         routes: grt.std.AutoHashMapUnmanaged(CharKey, Route) = .{},
         xfer_routes: grt.std.AutoHashMapUnmanaged(CharKey, *XferRoute) = .{},
         conns: grt.std.AutoHashMapUnmanaged(u16, ConnState) = .{},

@@ -104,7 +104,7 @@ pub fn makePeripheral(comptime grt: type, host: anytype) glib.testing.TestRunner
 
 fn runCentralRole(comptime grt: type, c: Central) !void {
     const State = struct {
-        mutex: grt.std.Thread.Mutex = .{},
+        mutex: grt.sync.Mutex = .{},
         found: bool = false,
         addr: Central.BdAddr = .{0} ** 6,
         addr_type: Central.AddrType = .public,
@@ -206,7 +206,7 @@ fn runCentralRole(comptime grt: type, c: Central) !void {
 
 fn runPeripheralRole(comptime grt: type, p: Peripheral) !void {
     const State = struct {
-        mutex: grt.std.Thread.Mutex = .{},
+        mutex: grt.sync.Mutex = .{},
         conn_handle: u16 = 0,
         connected: bool = false,
         disconnected: bool = false,
