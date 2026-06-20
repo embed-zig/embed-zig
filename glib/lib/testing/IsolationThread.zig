@@ -146,7 +146,6 @@ pub fn make(comptime std: type, comptime options: anytype) type {
         else
             anyerror;
         pub const YieldError = std.Thread.YieldError;
-        pub const CpuCountError = std.Thread.CpuCountError;
         pub const SetNameError = std.Thread.SetNameError;
         pub const GetNameError = std.Thread.GetNameError;
 
@@ -212,14 +211,6 @@ pub fn make(comptime std: type, comptime options: anytype) type {
             std.Thread.sleep(ns);
         }
 
-        pub fn getCpuCount() CpuCountError!usize {
-            return std.Thread.getCpuCount();
-        }
-
-        pub fn getCurrentId() Id {
-            return std.Thread.getCurrentId();
-        }
-
         pub fn setName(name: []const u8) SetNameError!void {
             return std.Thread.setName(name);
         }
@@ -270,8 +261,6 @@ pub fn TestRunner(comptime std: type) TestRunnerApi {
             _ = @as(*const fn (TestingThread) void, &TestingThread.join);
             _ = @as(*const fn (TestingThread) void, &TestingThread.detach);
             _ = @as(*const fn (u64) void, &TestingThread.sleep);
-            _ = @as(*const fn () TestingThread.CpuCountError!usize, &TestingThread.getCpuCount);
-            _ = @as(*const fn () TestingThread.Id, &TestingThread.getCurrentId);
         }
 
         fn spawnJoinRunsWorker() !void {

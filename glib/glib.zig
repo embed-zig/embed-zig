@@ -288,11 +288,11 @@ pub const runtime = struct {
 
             const Self = @This();
 
+            pub const runtime_thread_guardrail = true;
             pub const SpawnConfig = RawThread.SpawnConfig;
             pub const default_stack_size = RawThread.default_stack_size;
             pub const SpawnError = RawThread.SpawnError;
             pub const YieldError = RawThread.YieldError;
-            pub const CpuCountError = RawThread.CpuCountError;
             pub const SetNameError = RawThread.SetNameError;
             pub const GetNameError = RawThread.GetNameError;
             pub const max_name_len = RawThread.max_name_len;
@@ -324,12 +324,12 @@ pub const runtime = struct {
                 @compileError("grt.std.Thread.sleep is removed; use grt.time.sleep or grt.time.sleepMillis");
             }
 
-            pub fn getCpuCount() CpuCountError!usize {
-                return RawThread.getCpuCount();
+            pub fn getCpuCount() void {
+                @compileError("grt.std.Thread.getCpuCount is removed; use grt.system.cpuCount");
             }
 
-            pub fn getCurrentId() Id {
-                return RawThread.getCurrentId();
+            pub fn getCurrentId() void {
+                @compileError("grt.std.Thread.getCurrentId is removed; use explicit worker ownership state");
             }
 
             pub fn setName(name: []const u8) SetNameError!void {

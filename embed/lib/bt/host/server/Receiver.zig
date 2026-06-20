@@ -36,7 +36,6 @@ pub fn make(comptime grt: type, comptime ServerType: type) type {
             ref_count: usize = 1,
             inbox: Inbox,
             thread: ?grt.std.Thread = null,
-            worker_id: ?grt.std.Thread.Id = null,
 
             const Transport = struct {
                 session: *Session,
@@ -97,7 +96,7 @@ pub fn make(comptime grt: type, comptime ServerType: type) type {
             fn finishTx(self: *@This()) void {
                 self.close();
                 if (self.mux.removeSession(self)) {
-                    self.release(self.mux.allocator);
+                    self.release(self.mux.allocator, false);
                 }
             }
 
@@ -162,8 +161,8 @@ pub fn make(comptime grt: type, comptime ServerType: type) type {
                 self.mutex.unlock();
             }
 
-            fn release(self: *@This(), allocator: glib.std.mem.Allocator) void {
-                const current_thread = grt.std.Thread.getCurrentId();
+            fn release(self: *@This(), allocator: glib.std.mem.Allocator, from_worker: bool) void {
+                var should_join = false;
                 const thread: ?grt.std.Thread = blk: {
                     self.mutex.lock();
                     if (self.ref_count == 0) unreachable;
@@ -175,17 +174,17 @@ pub fn make(comptime grt: type, comptime ServerType: type) type {
                     self.closed = true;
                     const join_thread = self.thread;
                     self.thread = null;
+                    should_join = !from_worker;
                     self.mutex.unlock();
                     break :blk join_thread;
                 };
 
                 self.inbox.close();
                 if (thread) |t| {
-                    if (self.worker_id == null or self.worker_id.? != current_thread) {
+                    if (should_join) {
                         t.join();
                     }
                 }
-                self.worker_id = null;
                 while (true) {
                     const recv_res = self.inbox.recv() catch break;
                     if (!recv_res.ok) break;
@@ -198,8 +197,7 @@ pub fn make(comptime grt: type, comptime ServerType: type) type {
             }
 
             fn task(self: *@This()) void {
-                self.worker_id = grt.std.Thread.getCurrentId();
-                defer self.release(self.mux.allocator);
+                defer self.release(self.mux.allocator, true);
                 defer self.finishTx();
 
                 var tx = Transport{ .session = self };
@@ -248,7 +246,7 @@ pub fn make(comptime grt: type, comptime ServerType: type) type {
             var conn_iter = sessions.iterator();
             while (conn_iter.next()) |entry| {
                 entry.value_ptr.*.close();
-                entry.value_ptr.*.release(self.allocator);
+                entry.value_ptr.*.release(self.allocator, false);
             }
             sessions.deinit(self.allocator);
         }
@@ -266,7 +264,7 @@ pub fn make(comptime grt: type, comptime ServerType: type) type {
 
             if (previous) |session| {
                 session.close();
-                session.release(self.allocator);
+                session.release(self.allocator, false);
             }
 
             const session = Session.init(self.allocator, self, subscription) catch |err| {
@@ -278,7 +276,7 @@ pub fn make(comptime grt: type, comptime ServerType: type) type {
             self.sessions.put(self.allocator, conn_handle, session) catch |err| {
                 self.mutex.unlock();
                 session.close();
-                session.release(self.allocator);
+                session.release(self.allocator, false);
                 return err;
             };
             self.mutex.unlock();
@@ -319,7 +317,7 @@ pub fn make(comptime grt: type, comptime ServerType: type) type {
 
             if (session) |active| {
                 active.close();
-                active.release(self.allocator);
+                active.release(self.allocator, false);
             }
         }
 
@@ -332,7 +330,7 @@ pub fn make(comptime grt: type, comptime ServerType: type) type {
             self.mutex.unlock();
 
             if (session) |active| {
-                defer active.release(self.allocator);
+                defer active.release(self.allocator, false);
                 active.injectRequest(req, rw);
             } else {
                 rw.err(@intFromEnum(att.ErrorCode.request_not_supported));

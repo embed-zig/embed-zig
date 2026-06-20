@@ -5,7 +5,6 @@ pub fn make(comptime std: type) type {
         pub const SpawnConfig = std.Thread.SpawnConfig;
         pub const SpawnError = std.Thread.SpawnError;
         pub const YieldError = std.Thread.YieldError;
-        pub const CpuCountError = std.Thread.CpuCountError;
         pub const SetNameError = std.Thread.SetNameError;
         pub const GetNameError = std.Thread.GetNameError;
         pub const max_name_len = std.Thread.max_name_len;
@@ -41,14 +40,6 @@ pub fn make(comptime std: type) type {
             sleep_calls += 1;
             last_sleep_ns = ns;
             std.Thread.sleep(ns);
-        }
-
-        pub fn getCpuCount() CpuCountError!usize {
-            return std.Thread.getCpuCount();
-        }
-
-        pub fn getCurrentId() Id {
-            return std.Thread.getCurrentId();
         }
 
         pub fn setName(name: []const u8) SetNameError!void {

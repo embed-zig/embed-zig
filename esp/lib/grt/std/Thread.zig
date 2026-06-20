@@ -1,6 +1,5 @@
 const glib = @import("glib");
 const time_sleep = @import("../time/sleep.zig");
-const system = @import("../system.zig");
 const binding = @import("thread/binding.zig");
 const heap_binding = @import("heap/binding.zig");
 const PacketMutex = @import("thread/PacketMutex.zig");
@@ -163,16 +162,6 @@ pub fn sleep(ns: u64) void {
 
 pub fn sleepTicks(ticks: u32) void {
     time_sleep.sleepTicks(ticks);
-}
-
-pub fn getCpuCount() glib.std.Thread.CpuCountError!usize {
-    return try system.cpuCount();
-}
-
-pub fn getCurrentId() Id {
-    const handle = binding.espz_freertos_current_task_handle() orelse
-        @panic("freertos.Thread.getCurrentId: current task handle unavailable");
-    return @intFromPtr(handle);
 }
 
 pub fn setName(name: []const u8) glib.std.Thread.SetNameError!void {

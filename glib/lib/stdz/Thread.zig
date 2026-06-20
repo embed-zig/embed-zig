@@ -41,12 +41,6 @@ const std_compat = struct {
     pub const YieldError = error{
         SystemCannotYield,
     };
-    pub const CpuCountError = error{
-        PermissionDenied,
-        SystemResources,
-        Unsupported,
-        Unexpected,
-    };
     pub const SetNameError = error{
         NameTooLong,
         Unsupported,
@@ -63,7 +57,6 @@ const root = @This();
 pub const SpawnConfig = std_compat.SpawnConfig;
 pub const SpawnError = std_compat.SpawnError;
 pub const YieldError = std_compat.YieldError;
-pub const CpuCountError = std_compat.CpuCountError;
 pub const SetNameError = std_compat.SetNameError;
 pub const GetNameError = std_compat.GetNameError;
 pub const Condition = condition_mod;
@@ -76,8 +69,6 @@ pub const Condition = condition_mod;
 ///   fn detach(Impl) void
 ///   fn yield() YieldError!void
 ///   fn sleep(ns: u64) void
-///   fn getCpuCount() CpuCountError!usize
-///   fn getCurrentId() Id
 ///   fn setName(name: []const u8) SetNameError!void
 ///   fn getName(buf: *[max_name_len:0]u8) GetNameError!?[]const u8
 ///   const default_stack_size: usize
@@ -95,8 +86,6 @@ pub fn make(comptime Impl: type, comptime Heap: type) type {
         _ = @as(*const fn (Impl) void, &Impl.detach);
         _ = @as(*const fn () YieldError!void, &Impl.yield);
         _ = @as(*const fn (u64) void, &Impl.sleep);
-        _ = @as(*const fn () CpuCountError!usize, &Impl.getCpuCount);
-        _ = @as(*const fn () Impl.Id, &Impl.getCurrentId);
         _ = @as(*const fn ([]const u8) SetNameError!void, &Impl.setName);
         _ = @as(*const fn (*[Impl.max_name_len:0]u8) GetNameError!?[]const u8, &Impl.getName);
         _ = @as(usize, Impl.default_stack_size);
@@ -107,7 +96,6 @@ pub fn make(comptime Impl: type, comptime Heap: type) type {
         pub const default_stack_size = Impl.default_stack_size;
         pub const SpawnError = root.SpawnError;
         pub const YieldError = root.YieldError;
-        pub const CpuCountError = root.CpuCountError;
         pub const SetNameError = root.SetNameError;
         pub const GetNameError = root.GetNameError;
         pub const max_name_len = Impl.max_name_len;
@@ -152,14 +140,6 @@ pub fn make(comptime Impl: type, comptime Heap: type) type {
             Impl.sleep(ns);
         }
 
-        pub fn getCpuCount() root.CpuCountError!usize {
-            return Impl.getCpuCount();
-        }
-
-        pub fn getCurrentId() Id {
-            return Impl.getCurrentId();
-        }
-
         pub fn setName(name: []const u8) root.SetNameError!void {
             return Impl.setName(name);
         }
@@ -169,4 +149,3 @@ pub fn make(comptime Impl: type, comptime Heap: type) type {
         }
     };
 }
-

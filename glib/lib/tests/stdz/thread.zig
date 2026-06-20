@@ -33,27 +33,29 @@ pub fn make(comptime std: type) testing_mod.TestRunner {
                     try threadTests(std);
                 }
             }.run));
-            t.run("mutex", testing_mod.TestRunner.fromFn(std, 32 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
-                    _ = tt;
-                    _ = sub_allocator;
-                    try mutexTests(std);
-                }
-            }.run));
-            t.run("condition", testing_mod.TestRunner.fromFn(std, 48 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
-                    _ = tt;
-                    _ = sub_allocator;
-                    try conditionTests(std);
-                }
-            }.run));
-            t.run("rwlock", testing_mod.TestRunner.fromFn(std, 48 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
-                    _ = tt;
-                    _ = sub_allocator;
-                    try rwlockTests(std);
-                }
-            }.run));
+            if (comptime !isRuntimeThreadGuarded(std)) {
+                t.run("mutex", testing_mod.TestRunner.fromFn(std, 32 * 1024, struct {
+                    fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
+                        _ = tt;
+                        _ = sub_allocator;
+                        try mutexTests(std);
+                    }
+                }.run));
+                t.run("condition", testing_mod.TestRunner.fromFn(std, 48 * 1024, struct {
+                    fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
+                        _ = tt;
+                        _ = sub_allocator;
+                        try conditionTests(std);
+                    }
+                }.run));
+                t.run("rwlock", testing_mod.TestRunner.fromFn(std, 48 * 1024, struct {
+                    fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
+                        _ = tt;
+                        _ = sub_allocator;
+                        try rwlockTests(std);
+                    }
+                }.run));
+            }
             return t.wait();
         }
 
@@ -66,6 +68,10 @@ pub fn make(comptime std: type) testing_mod.TestRunner {
     const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
     return testing_mod.TestRunner.make(Runner).new(runner);
+}
+
+fn isRuntimeThreadGuarded(comptime std: type) bool {
+    return @hasDecl(std.Thread, "runtime_thread_guardrail");
 }
 
 fn conditionMakeCase(comptime std: type) !void {
@@ -130,12 +136,6 @@ fn spawnClampsStackSizeToPageSize(comptime std: type) !void {
         pub fn detach(_: @This()) void {}
         pub fn yield() ThreadApi.YieldError!void {}
         pub fn sleep(_: u64) void {}
-        pub fn getCpuCount() ThreadApi.CpuCountError!usize {
-            return 1;
-        }
-        pub fn getCurrentId() Id {
-            return 0;
-        }
         pub fn setName(_: []const u8) ThreadApi.SetNameError!void {}
         pub fn getName(_: *[max_name_len:0]u8) ThreadApi.GetNameError!?[]const u8 {
             return null;
@@ -178,9 +178,6 @@ fn conditionMakeAcceptsMatchingMutexImpl() !void {
 }
 
 fn threadTests(comptime std: type) !void {
-    _ = try std.Thread.getCpuCount();
-    _ = std.Thread.getCurrentId();
-
     var t = try std.Thread.spawn(.{}, struct {
         fn work(l: type) void {
             _ = l;
@@ -189,7 +186,9 @@ fn threadTests(comptime std: type) !void {
     t.join();
 
     try std.Thread.yield();
-    std.Thread.sleep(1_000_000);
+    if (comptime !isRuntimeThreadGuarded(std)) {
+        std.Thread.sleep(1_000_000);
+    }
 
     {
         var counter = std.atomic.Value(u32).init(0);

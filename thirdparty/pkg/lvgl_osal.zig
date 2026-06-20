@@ -27,9 +27,13 @@ pub fn makeWithAllocators(
 
     return struct {
         const Thread = grt.std.Thread;
+        const AtomicUsize = grt.std.atomic.Value(usize);
         const ThreadCallback = *const fn (?*anyopaque) callconv(.c) void;
         const allocation_alignment: glib.std.mem.Alignment = .@"16";
         const allocation_header_len: usize = 16;
+
+        var next_owner_token = AtomicUsize.init(1);
+        threadlocal var owner_token: usize = 0;
 
         const AllocationHeader = extern struct {
             total_len: usize,
@@ -43,38 +47,38 @@ pub fn makeWithAllocators(
         }
 
         const MutexImpl = struct {
-            guard: Thread.Mutex = .{},
-            cond: Thread.Condition = .{},
-            owner: ?Thread.Id = null,
+            guard: grt.sync.Mutex = .{},
+            cond: grt.sync.Condition = .{},
+            owner: usize = 0,
             depth: usize = 0,
 
             fn lock(self: *@This()) void {
-                const current = Thread.getCurrentId();
+                const current = currentOwnerToken();
 
                 self.guard.lock();
                 defer self.guard.unlock();
 
-                while (self.owner) |owner| {
-                    if (owner == current) break;
+                while (self.owner != 0) {
+                    if (self.owner == current) break;
                     self.cond.wait(&self.guard);
                 }
 
-                if (self.owner == null) self.owner = current;
+                if (self.owner == 0) self.owner = current;
                 self.depth += 1;
             }
 
             fn tryLock(self: *@This()) bool {
-                const current = Thread.getCurrentId();
+                const current = currentOwnerToken();
 
                 self.guard.lock();
                 defer self.guard.unlock();
 
-                if (self.owner == null) {
+                if (self.owner == 0) {
                     self.owner = current;
                     self.depth = 1;
                     return true;
                 }
-                if (self.owner.? == current) {
+                if (self.owner == current) {
                     self.depth += 1;
                     return true;
                 }
@@ -83,16 +87,16 @@ pub fn makeWithAllocators(
             }
 
             fn unlock(self: *@This()) bool {
-                const current = Thread.getCurrentId();
+                const current = currentOwnerToken();
 
                 self.guard.lock();
                 defer self.guard.unlock();
 
-                if (self.owner == null or self.owner.? != current or self.depth == 0) return false;
+                if (self.owner == 0 or self.owner != current or self.depth == 0) return false;
 
                 self.depth -= 1;
                 if (self.depth == 0) {
-                    self.owner = null;
+                    self.owner = 0;
                     self.cond.signal();
                 }
 
@@ -101,8 +105,8 @@ pub fn makeWithAllocators(
         };
 
         const ThreadSyncImpl = struct {
-            mutex: Thread.Mutex = .{},
-            cond: Thread.Condition = .{},
+            mutex: grt.sync.Mutex = .{},
+            cond: grt.sync.Condition = .{},
             signaled: bool = false,
 
             fn wait(self: *@This()) void {
@@ -174,6 +178,16 @@ pub fn makeWithAllocators(
 
         fn threadMain(impl: *ThreadImpl) void {
             impl.callback(impl.user_data);
+        }
+
+        fn currentOwnerToken() usize {
+            if (owner_token == 0) {
+                owner_token = next_owner_token.fetchAdd(1, .monotonic);
+                if (owner_token == 0) {
+                    owner_token = next_owner_token.fetchAdd(1, .monotonic);
+                }
+            }
+            return owner_token;
         }
 
         fn spawnConfig(name: ?[*:0]const u8, prio: c_int, stack_size: usize) Thread.SpawnConfig {
