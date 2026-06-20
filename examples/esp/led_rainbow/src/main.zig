@@ -33,7 +33,7 @@ fn run() !void {
         strip.refresh();
         hue +%= 4;
         if (hue >= 1536) hue -= 1536;
-        grt.std.Thread.sleep(frame_interval);
+        grt.time.sleep(frame_interval);
     }
 }
 

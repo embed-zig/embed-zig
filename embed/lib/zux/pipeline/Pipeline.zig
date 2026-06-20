@@ -259,7 +259,7 @@ pub fn make(comptime grt: type, comptime CustomEventRegistarType: type) type {
 
         fn tickLoop(self: *Self) !void {
             while (!self.stopping.load(.acquire)) {
-                Worker.sleep(@intCast(self.tick_interval));
+                grt.time.sleep(self.tick_interval);
                 if (self.stopping.load(.acquire)) return;
 
                 self.tick() catch |err| {
@@ -372,7 +372,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             var attempts: usize = 0;
             while (attempts < 200 and root_impl.seen_count.load(.acquire) == 0) : (attempts += 1) {
-                HarnessLib.Thread.sleep(@as(u64, @intCast(grt.time.duration.MilliSecond)));
+                grt.time.sleep(grt.time.duration.MilliSecond);
             }
 
             try grt.std.testing.expectEqual(@as(u32, 1), root_impl.seen_count.load(.acquire));
@@ -433,7 +433,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             var attempts: usize = 0;
             while (attempts < 50 and root_impl.tick_count.load(.acquire) == 0) : (attempts += 1) {
-                HarnessLib.Thread.sleep(@as(u64, @intCast(grt.time.duration.MilliSecond)));
+                grt.time.sleep(grt.time.duration.MilliSecond);
             }
 
             try grt.std.testing.expect(root_impl.tick_count.load(.acquire) > 0);
@@ -475,7 +475,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             var attempts: usize = 0;
             while (attempts < 50 and root_impl.tick_count.load(.acquire) == 0) : (attempts += 1) {
-                HarnessLib.Thread.sleep(@as(u64, @intCast(grt.time.duration.MilliSecond)));
+                grt.time.sleep(grt.time.duration.MilliSecond);
             }
 
             try grt.std.testing.expect(root_impl.tick_count.load(.acquire) > 0);
@@ -524,7 +524,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             var attempts: usize = 0;
             while (attempts < 50 and root_impl.last_source_id.load(.acquire) == 0) : (attempts += 1) {
-                HarnessLib.Thread.sleep(@as(u64, @intCast(grt.time.duration.MilliSecond)));
+                grt.time.sleep(grt.time.duration.MilliSecond);
             }
 
             try grt.std.testing.expectEqual(@intFromEnum(Message.Origin.manual), root_impl.last_origin.load(.acquire));
@@ -595,7 +595,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             var attempts: usize = 0;
             while (attempts < 50 and root_impl.count.load(.acquire) == 0) : (attempts += 1) {
-                HarnessLib.Thread.sleep(@as(u64, @intCast(grt.time.duration.MilliSecond)));
+                grt.time.sleep(grt.time.duration.MilliSecond);
             }
 
             try grt.std.testing.expectEqual(@as(u32, 1), root_impl.count.load(.acquire));
@@ -675,7 +675,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             var attempts: usize = 0;
             while (attempts < 200 and (root_impl.seen_count.load(.acquire) == 0 or deinit_count.load(.acquire) == 0)) : (attempts += 1) {
-                HarnessLib.Thread.sleep(@as(u64, @intCast(grt.time.duration.MilliSecond)));
+                grt.time.sleep(grt.time.duration.MilliSecond);
             }
 
             try grt.std.testing.expectEqual(@as(u32, 1), root_impl.seen_count.load(.acquire));

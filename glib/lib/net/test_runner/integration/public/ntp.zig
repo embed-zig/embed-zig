@@ -62,7 +62,7 @@ fn runImpl(comptime std: type, comptime Net: type, t: *testing_api.T, alloc: std
             var waited: Net.time.duration.Duration = 0;
             while (waited < timeout) : (waited += Net.time.duration.MilliSecond) {
                 if (flag.load(.acquire)) return;
-                Thread.sleep(@intCast(Net.time.duration.MilliSecond));
+                Net.time.sleep(Net.time.duration.MilliSecond);
             }
             return error.Timeout;
         }
@@ -265,7 +265,7 @@ fn runImpl(comptime std: type, comptime Net: type, t: *testing_api.T, alloc: std
             }.run, .{ &client, &wait_done });
             defer wait_thread.join();
 
-            Thread.sleep(@intCast(20 * Net.time.duration.MilliSecond));
+            Net.time.sleep(20 * Net.time.duration.MilliSecond);
             try testing.expect(!wait_done.load(.acquire));
 
             try waitForTrue(&query_done, 1000 * Net.time.duration.MilliSecond);
@@ -384,7 +384,7 @@ fn waitUntilDeiniting(comptime l: type, comptime Net: type, client: anytype, tim
         const deiniting = client.deiniting;
         client.mutex.unlock();
         if (deiniting) return;
-        l.Thread.sleep(@intCast(Net.time.duration.MilliSecond));
+        Net.time.sleep(Net.time.duration.MilliSecond);
     }
     return error.Timeout;
 }

@@ -15,7 +15,7 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
             var elapsed: time.duration.Duration = 0;
             while (elapsed < timeout) : (elapsed += time.duration.MilliSecond) {
                 if (flag.load(.acquire)) return;
-                Thread.sleep(@intCast(time.duration.MilliSecond));
+                time.sleep(time.duration.MilliSecond);
             }
             return error.TimeoutWaitingForFlag;
         }
@@ -24,7 +24,7 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
             var elapsed: time.duration.Duration = 0;
             while (elapsed < timeout) : (elapsed += time.duration.MilliSecond) {
                 if (flag.load(.acquire) >= expected) return;
-                Thread.sleep(@intCast(time.duration.MilliSecond));
+                time.sleep(time.duration.MilliSecond);
             }
             return error.TimeoutWaitingForCount;
         }
@@ -33,7 +33,7 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
             var elapsed: time.duration.Duration = 0;
             while (elapsed < duration) : (elapsed += time.duration.MilliSecond) {
                 if (flag.load(.acquire)) return error.FlagSetUnexpectedly;
-                Thread.sleep(@intCast(time.duration.MilliSecond));
+                time.sleep(time.duration.MilliSecond);
             }
         }
 
@@ -519,7 +519,7 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
                 var recv_val = Atomic(Event).init(0);
                 const receiver = try Thread.spawn(.{}, struct {
                     fn run(c: *Ch, ok: *Atomic(bool), value: *Atomic(Event)) void {
-                        Thread.sleep(@intCast(time.duration.MilliSecond));
+                        time.sleep(time.duration.MilliSecond);
                         const r = c.recv() catch return;
                         ok.store(r.ok, .release);
                         if (r.ok) value.store(r.value, .release);
@@ -548,7 +548,7 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
                 var recv_val = Atomic(Event).init(0);
                 const receiver = try Thread.spawn(.{}, struct {
                     fn run(c: *Ch, ok: *Atomic(bool), value: *Atomic(Event)) void {
-                        Thread.sleep(@intCast(time.duration.MilliSecond));
+                        time.sleep(time.duration.MilliSecond);
                         const r = c.recv() catch return;
                         ok.store(r.ok, .release);
                         if (r.ok) value.store(r.value, .release);
@@ -582,7 +582,7 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
 
                 const sender = try Thread.spawn(.{}, struct {
                     fn run(c: *Ch) void {
-                        Thread.sleep(@intCast(time.duration.MilliSecond));
+                        time.sleep(time.duration.MilliSecond);
                         _ = c.send(0xD00D) catch {};
                     }
                 }.run, .{&ch});

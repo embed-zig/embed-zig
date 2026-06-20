@@ -625,7 +625,7 @@ pub fn Hci(comptime grt: type) type {
                 if (deadline) |read_deadline| {
                     if (grt.time.instant.now() >= read_deadline) return error.Timeout;
                 }
-                grt.std.Thread.sleep(@intCast(poll_interval));
+                grt.time.sleep(poll_interval);
             }
         }
 
@@ -713,7 +713,7 @@ pub fn Hci(comptime grt: type) type {
             var waited: glib.time.duration.Duration = 0;
             while (waited <= timeout) : (waited += poll_interval) {
                 if (self.popServerPush()) |push| return push;
-                grt.std.Thread.sleep(@intCast(poll_interval));
+                grt.time.sleep(poll_interval);
             }
             return null;
         }
@@ -855,7 +855,7 @@ pub fn Hci(comptime grt: type) type {
                 const find_resp = self.sendAttToHostExpectResponse(find_req) catch |err| switch (err) {
                     error.Timeout => {
                         if (attempt + 1 < CCCD_DISCOVERY_MAX_ATTEMPTS) {
-                            grt.std.Thread.sleep(@intCast(poll_interval));
+                            grt.time.sleep(poll_interval);
                             continue;
                         }
                         return error.Timeout;
@@ -1577,7 +1577,7 @@ pub fn Hci(comptime grt: type) type {
                 self.mutex.unlock();
                 if (ready) break;
                 if (waited >= self.config.peer_timeout) return error.Timeout;
-                grt.std.Thread.sleep(@intCast(poll_interval));
+                grt.time.sleep(poll_interval);
                 waited += poll_interval;
             }
 

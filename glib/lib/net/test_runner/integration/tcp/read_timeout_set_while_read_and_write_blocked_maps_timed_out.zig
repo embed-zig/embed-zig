@@ -23,7 +23,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                         if (waiting) return;
                         if (ctx.err != null) return error.ReadWorkerExitedBeforeWait;
                         if (time.instant.now() >= deadline) return error.ExpectedReadWaiting;
-                        thread_lib.Thread.sleep(@intCast(net.time.duration.MilliSecond));
+                        net.time.sleep(net.time.duration.MilliSecond);
                     }
                 }
 
@@ -36,7 +36,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                         if (waiting) return;
                         if (ctx.err != null) return error.WriteWorkerExitedBeforeWait;
                         if (time.instant.now() >= deadline) return error.ExpectedWriteWaiting;
-                        thread_lib.Thread.sleep(@intCast(net.time.duration.MilliSecond));
+                        net.time.sleep(net.time.duration.MilliSecond);
                     }
                 }
 

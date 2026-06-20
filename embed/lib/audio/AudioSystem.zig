@@ -681,11 +681,11 @@ pub fn Builder(comptime grt: type) type {
 
                     const duration = durationForSamples(sample_count, sample_rate);
                     if (duration <= 0) return;
-                    grt.std.Thread.sleep(@intCast(duration));
+                    grt.time.sleep(duration);
                 }
 
                 fn yieldToScheduler() void {
-                    grt.std.Thread.sleep(1 * grt.time.duration.MilliSecond);
+                    grt.time.sleep(1 * grt.time.duration.MilliSecond);
                 }
 
                 fn durationForSamples(sample_count: usize, sample_rate: u32) glib.time.duration.Duration {
@@ -751,13 +751,13 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             while (grt.time.instant.now() < deadline) {
                 const n = system.read(out) catch |err| switch (err) {
                     error.WouldBlock => {
-                        Thread.sleep(@intCast(grt.time.duration.MilliSecond));
+                        grt.time.sleep(grt.time.duration.MilliSecond);
                         continue;
                     },
                     else => return err,
                 };
                 if (n > 0) return n;
-                Thread.sleep(@intCast(grt.time.duration.MilliSecond));
+                grt.time.sleep(grt.time.duration.MilliSecond);
             }
             return 0;
         }
@@ -769,7 +769,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 const w = ctx.writes;
                 ctx.mu.unlock();
                 if (w > 0) return true;
-                Thread.sleep(@intCast(grt.time.duration.MilliSecond));
+                grt.time.sleep(grt.time.duration.MilliSecond);
             }
             return false;
         }
@@ -781,7 +781,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 const reads = ctx.reads;
                 ctx.mu.unlock();
                 if (reads >= min_reads) return true;
-                Thread.sleep(@intCast(grt.time.duration.MilliSecond));
+                grt.time.sleep(grt.time.duration.MilliSecond);
             }
             return false;
         }
@@ -1135,7 +1135,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             const TestMic = MicMod.make(grt, 1, 4);
             const ProcessorBackend = struct {
                 fn process(frame: TestMic.Frame, out: []i16) Error!usize {
-                    Thread.sleep(@intCast(30 * grt.time.duration.MilliSecond));
+                    grt.time.sleep(30 * grt.time.duration.MilliSecond);
                     const n = @min(frame.mic[0].len, out.len);
                     @memcpy(out[0..n], frame.mic[0][0..n]);
                     return n;

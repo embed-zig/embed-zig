@@ -215,7 +215,8 @@ fn waitSpuriousWakeStillWaitsFullTimeoutCase(comptime std: type, comptime time: 
     const started = time.instant.now();
     const t = try std.Thread.spawn(.{}, struct {
         fn wake(cancel_ctx: *@TypeOf(ctx_api).CancelContext, l: type) void {
-            l.Thread.sleep(@intCast(5 * time_mod.duration.MilliSecond));
+            _ = l;
+            time.sleep(5 * time_mod.duration.MilliSecond);
             cancel_ctx.cond.signal();
         }
     }.wake, .{ cancel_impl, std });
@@ -259,7 +260,7 @@ fn waitValueContextWakesOnParentCancelCase(comptime std: type, comptime time: ty
         }
     }.work, .{&ctx});
 
-    std.Thread.sleep(@intCast(5 * time_mod.duration.MilliSecond));
+    time.sleep(5 * time_mod.duration.MilliSecond);
     cc.cancel();
     t.join();
 

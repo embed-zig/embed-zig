@@ -13,7 +13,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
 
             const Body = struct {
                 fn signalWriteLater(sock: *net.Runtime.Tcp) void {
-                    std.Thread.sleep(@intCast(20 * net.time.duration.MilliSecond));
+                    net.time.sleep(20 * net.time.duration.MilliSecond);
                     sock.signal(.write_interrupt);
                 }
 

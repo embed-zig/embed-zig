@@ -123,7 +123,7 @@ pub fn make(comptime grt: type) type {
                 };
 
                 if (snapshot.poll_interval > 0) {
-                    grt.std.Thread.sleep(@intCast(snapshot.poll_interval));
+                    grt.time.sleep(snapshot.poll_interval);
                 }
             }
         }

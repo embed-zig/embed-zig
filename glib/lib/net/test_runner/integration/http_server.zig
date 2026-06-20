@@ -635,7 +635,7 @@ fn Suite(comptime std: type, comptime net: type) type {
             var conn = try Net.dial(allocator, .tcp, addr4(srv_run.port));
             defer conn.deinit();
             try io.writeAll(@TypeOf(conn), &conn, "GET /slow HTTP/1.1\r\n");
-            Thread.sleep(@intCast(40 * net.time.duration.MilliSecond));
+            net.time.sleep(40 * net.time.duration.MilliSecond);
             try io.writeAll(@TypeOf(conn), &conn, "Host: example.com\r\nConnection: close\r\n\r\n");
 
             var buf: [64]u8 = undefined;
@@ -672,7 +672,7 @@ fn Suite(comptime std: type, comptime net: type) type {
             defer allocator.free(first.body);
             try expectEqualStrings("ok", first.body);
 
-            Thread.sleep(@intCast(40 * net.time.duration.MilliSecond));
+            net.time.sleep(40 * net.time.duration.MilliSecond);
             try io.writeAll(@TypeOf(conn), &conn, "GET /idle-timeout HTTP/1.1\r\nHost: example.com\r\n\r\n");
             var buf: [64]u8 = undefined;
             const n = conn.read(&buf) catch |err| {

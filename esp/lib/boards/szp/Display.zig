@@ -26,7 +26,7 @@ const dma_allocator = esp.heap.Allocator(.{ .caps = .internal_dma_8bit, .alignme
 const DelayImpl = struct {
     pub fn sleep(_: *DelayImpl, duration: esp.grt.time.duration.Duration) void {
         if (duration <= 0) return;
-        esp.grt.std.Thread.sleep(@intCast(duration));
+        esp.grt.time.sleep(duration);
     }
 };
 

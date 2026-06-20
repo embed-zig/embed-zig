@@ -20,7 +20,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                         const waiting = impl.read_waiting;
                         impl.read_mu.unlock();
                         if (waiting) return;
-                        thread_lib.Thread.sleep(@intCast(net.time.duration.MilliSecond));
+                        net.time.sleep(net.time.duration.MilliSecond);
                     }
                 }
 
@@ -51,8 +51,8 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                             };
                         }
 
-                        fn write(ctx: *WriteCtx, comptime thread_lib: type) void {
-                            thread_lib.Thread.sleep(@intCast(60 * net.time.duration.MilliSecond));
+                        fn write(ctx: *WriteCtx, comptime _: type) void {
+                            net.time.sleep(60 * net.time.duration.MilliSecond);
                             _ = ctx.conn.writeTo("ok", ctx.dest) catch |err| {
                                 ctx.err = err;
                             };

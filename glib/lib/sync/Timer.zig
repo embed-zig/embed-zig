@@ -236,7 +236,7 @@ fn resetNullCase(comptime std: type, comptime time: type) !void {
     defer timer.deinit();
 
     timer.reset(time.instant.add(time.instant.now(), 50 * time.duration.MilliSecond));
-    std.Thread.sleep(@intCast(10 * time.duration.MilliSecond));
+    time.sleep(10 * time.duration.MilliSecond);
     timer.reset(null);
 
     try callback_state.expectStable(0, 100 * time.duration.MilliSecond);
@@ -249,7 +249,7 @@ fn earlierResetCase(comptime std: type, comptime time: type) !void {
     defer timer.deinit();
 
     timer.reset(time.instant.add(time.instant.now(), 120 * time.duration.MilliSecond));
-    std.Thread.sleep(@intCast(10 * time.duration.MilliSecond));
+    time.sleep(10 * time.duration.MilliSecond);
     timer.reset(time.instant.add(time.instant.now(), 20 * time.duration.MilliSecond));
 
     _ = try callback_state.waitForCount(1, 100 * time.duration.MilliSecond);
@@ -262,7 +262,7 @@ fn laterResetCase(comptime std: type, comptime time: type) !void {
     defer timer.deinit();
 
     timer.reset(time.instant.add(time.instant.now(), 40 * time.duration.MilliSecond));
-    std.Thread.sleep(@intCast(10 * time.duration.MilliSecond));
+    time.sleep(10 * time.duration.MilliSecond);
     timer.reset(time.instant.add(time.instant.now(), 80 * time.duration.MilliSecond));
 
     try callback_state.expectStable(0, 40 * time.duration.MilliSecond);

@@ -37,7 +37,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                 }
 
                 fn sendLater(sock: *net.Runtime.Tcp) void {
-                    std.Thread.sleep(@intCast(20 * net.time.duration.MilliSecond));
+                    net.time.sleep(20 * net.time.duration.MilliSecond);
                     _ = sock.send("x") catch {};
                 }
 

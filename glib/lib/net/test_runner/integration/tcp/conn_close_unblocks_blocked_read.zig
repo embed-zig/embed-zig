@@ -21,7 +21,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                         const waiting = conn.read_waiting;
                         conn.read_mu.unlock();
                         if (waiting) return;
-                        thread_lib.Thread.sleep(@intCast(net.time.duration.MilliSecond));
+                        net.time.sleep(net.time.duration.MilliSecond);
                     }
                 }
 

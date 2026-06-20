@@ -250,7 +250,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 }
             }.run, .{&state});
 
-            Thread.sleep(@intCast(10 * grt.time.duration.MilliSecond));
+            grt.time.sleep(10 * grt.time.duration.MilliSecond);
             buffer.closeWithError();
             worker.join();
 

@@ -183,7 +183,7 @@ fn firstWinnerTests(comptime std: type, comptime time: type, allocator: std.mem.
         ) void {
             _ = started_count.fetchAdd(1, .acq_rel);
             while (!gate.load(.acquire)) {
-                l.Thread.sleep(@intCast(time.duration.MilliSecond));
+                time.sleep(time.duration.MilliSecond);
             }
             result.store(ctx.success(value), .release);
             attempted.store(true, .release);
@@ -202,7 +202,7 @@ fn firstWinnerTests(comptime std: type, comptime time: type, allocator: std.mem.
         ) void {
             _ = started_count.fetchAdd(1, .acq_rel);
             while (!gate.load(.acquire)) {
-                l.Thread.sleep(@intCast(time.duration.MilliSecond));
+                time.sleep(time.duration.MilliSecond);
             }
             result.store(ctx.success(value), .release);
             attempted.store(true, .release);
@@ -248,8 +248,8 @@ fn raceContextTests(comptime std: type, comptime time: type, allocator: std.mem.
         defer racer.deinit();
 
         try racer.spawn(.{}, struct {
-            fn run(state: R.State, l: type) void {
-                l.Thread.sleep(@intCast(5 * time.duration.MilliSecond));
+            fn run(state: R.State, _: type) void {
+                time.sleep(5 * time.duration.MilliSecond);
                 _ = state.success(3);
             }
         }.run, .{std});
@@ -267,7 +267,7 @@ fn raceContextTests(comptime std: type, comptime time: type, allocator: std.mem.
         try racer.spawn(.{}, struct {
             fn run(state: R.State, l: type) void {
                 _ = state;
-                l.Thread.sleep(@intCast(20 * time.duration.MilliSecond));
+                time.sleep(20 * time.duration.MilliSecond);
             }
         }.run, .{std});
 
@@ -283,8 +283,8 @@ fn raceContextTests(comptime std: type, comptime time: type, allocator: std.mem.
         defer racer.deinit();
 
         try racer.spawn(.{}, struct {
-            fn run(state: R.State, l: type) void {
-                l.Thread.sleep(@intCast(5 * time.duration.MilliSecond));
+            fn run(state: R.State, _: type) void {
+                time.sleep(5 * time.duration.MilliSecond);
                 _ = state.success(11);
             }
         }.run, .{std});
@@ -310,8 +310,8 @@ fn raceContextTests(comptime std: type, comptime time: type, allocator: std.mem.
         defer racer.deinit();
 
         try racer.spawn(.{}, struct {
-            fn run(state: R.State, l: type) void {
-                l.Thread.sleep(@intCast(5 * time.duration.MilliSecond));
+            fn run(state: R.State, _: type) void {
+                time.sleep(5 * time.duration.MilliSecond);
                 _ = state.success(21);
             }
         }.run, .{std});
@@ -342,7 +342,7 @@ fn raceContextTests(comptime std: type, comptime time: type, allocator: std.mem.
         try racer.spawn(.{}, struct {
             fn run(state: R.State, l: type) void {
                 _ = state;
-                l.Thread.sleep(@intCast(50 * time.duration.MilliSecond));
+                time.sleep(50 * time.duration.MilliSecond);
             }
         }.run, .{std});
 
@@ -369,7 +369,7 @@ fn raceContextTests(comptime std: type, comptime time: type, allocator: std.mem.
         try racer.spawn(.{}, struct {
             fn run(state: R.State, l: type) void {
                 _ = state;
-                l.Thread.sleep(@intCast(20 * time.duration.MilliSecond));
+                time.sleep(20 * time.duration.MilliSecond);
             }
         }.run, .{std});
 
@@ -377,8 +377,8 @@ fn raceContextTests(comptime std: type, comptime time: type, allocator: std.mem.
         defer cancel_ctx.deinit();
 
         var cancel_thread = try std.Thread.spawn(.{}, struct {
-            fn run(cc: *context_mod.Context, l: type) void {
-                l.Thread.sleep(@intCast(5 * time.duration.MilliSecond));
+            fn run(cc: *context_mod.Context, _: type) void {
+                time.sleep(5 * time.duration.MilliSecond);
                 cc.cancelWithCause(error.BrokenPipe);
             }
         }.run, .{ &cancel_ctx, std });
@@ -438,7 +438,7 @@ fn cancelTests(comptime std: type, comptime time: type, allocator: std.mem.Alloc
         try racer.spawn(.{}, struct {
             fn run(ctx: R.State, l: type, f: *Flags) void {
                 while (!ctx.done()) {
-                    l.Thread.sleep(@intCast(time.duration.MilliSecond));
+                    time.sleep(time.duration.MilliSecond);
                 }
 
                 f.saw_done.store(true, .release);
@@ -448,8 +448,8 @@ fn cancelTests(comptime std: type, comptime time: type, allocator: std.mem.Alloc
         }.run, .{ std, &flags });
 
         var cancel_thread = try std.Thread.spawn(.{}, struct {
-            fn run(r: *R, l: type) void {
-                l.Thread.sleep(@intCast(5 * time.duration.MilliSecond));
+            fn run(r: *R, _: type) void {
+                time.sleep(5 * time.duration.MilliSecond);
                 r.cancel();
             }
         }.run, .{ &racer, std });
@@ -481,7 +481,7 @@ fn cancelTests(comptime std: type, comptime time: type, allocator: std.mem.Alloc
         try racer.spawn(.{}, struct {
             fn run(ctx: R.State, l: type, f: *Flags) void {
                 while (!ctx.done()) {
-                    l.Thread.sleep(@intCast(time.duration.MilliSecond));
+                    time.sleep(time.duration.MilliSecond);
                 }
 
                 f.saw_done.store(true, .release);
@@ -491,8 +491,8 @@ fn cancelTests(comptime std: type, comptime time: type, allocator: std.mem.Alloc
         }.run, .{ std, &flags });
 
         var cancel_thread = try std.Thread.spawn(.{}, struct {
-            fn run(r: *R, l: type) void {
-                l.Thread.sleep(@intCast(5 * time.duration.MilliSecond));
+            fn run(r: *R, _: type) void {
+                time.sleep(5 * time.duration.MilliSecond);
                 r.cancel();
             }
         }.run, .{ &racer, std });
@@ -521,16 +521,16 @@ fn cancelTests(comptime std: type, comptime time: type, allocator: std.mem.Alloc
         try racer.spawn(.{}, struct {
             fn run(ctx: R.State, l: type, fin: *BoolAtomic) void {
                 while (!ctx.done()) {
-                    l.Thread.sleep(@intCast(time.duration.MilliSecond));
+                    time.sleep(time.duration.MilliSecond);
                 }
-                l.Thread.sleep(@intCast(5 * time.duration.MilliSecond));
+                time.sleep(5 * time.duration.MilliSecond);
                 fin.store(true, .release);
             }
         }.run, .{ std, &finished });
 
         var cancel_thread = try std.Thread.spawn(.{}, struct {
-            fn run(r: *R, l: type) void {
-                l.Thread.sleep(@intCast(5 * time.duration.MilliSecond));
+            fn run(r: *R, _: type) void {
+                time.sleep(5 * time.duration.MilliSecond);
                 r.cancel();
             }
         }.run, .{ &racer, std });
@@ -556,7 +556,7 @@ fn DoneAndWaitFlags(comptime std: type) type {
 
 fn doneAndWaitWorker(ctx: anytype, l: type, tm: type, f: anytype) void {
     while (!ctx.done()) {
-        l.Thread.sleep(@intCast(tm.duration.MilliSecond));
+        tm.sleep(tm.duration.MilliSecond);
     }
 
     // `saw_done` acts as the publication fence for the test thread, so publish
@@ -565,7 +565,7 @@ fn doneAndWaitWorker(ctx: anytype, l: type, tm: type, f: anytype) void {
     f.saw_done.store(true, .release);
 
     while (!f.allow_exit.load(.acquire)) {
-        l.Thread.sleep(@intCast(tm.duration.MilliSecond));
+        tm.sleep(tm.duration.MilliSecond);
     }
 
     f.finished.store(true, .release);
@@ -585,8 +585,8 @@ fn doneAndWaitTests(comptime std: type, comptime time: type, allocator: std.mem.
     try racer.spawn(.{}, doneAndWaitWorker, .{ std, time, &flags });
 
     try racer.spawn(.{}, struct {
-        fn run(ctx: R.State, l: type) void {
-            l.Thread.sleep(@intCast(5 * time.duration.MilliSecond));
+        fn run(ctx: R.State, _: type) void {
+            time.sleep(5 * time.duration.MilliSecond);
             _ = ctx.success(7);
         }
     }.run, .{std});
@@ -623,8 +623,8 @@ fn doneSignalPublishesRejectionBeforeReadyFlagTests(comptime std: type, comptime
 
     try racer.spawn(.{}, doneAndWaitWorker, .{ std, time, &flags });
     try racer.spawn(.{}, struct {
-        fn run(ctx: R.State, l: type) void {
-            l.Thread.sleep(@intCast(5 * time.duration.MilliSecond));
+        fn run(ctx: R.State, _: type) void {
+            time.sleep(5 * time.duration.MilliSecond);
             _ = ctx.success(7);
         }
     }.run, .{std});
@@ -697,7 +697,7 @@ fn waitForTrue(comptime std: type, comptime time: type, flag: *std.atomic.Value(
     var elapsed: time.duration.Duration = 0;
     while (elapsed < timeout) : (elapsed += time.duration.MilliSecond) {
         if (flag.load(.acquire)) return;
-        std.Thread.sleep(@intCast(time.duration.MilliSecond));
+        time.sleep(time.duration.MilliSecond);
     }
     return error.TimeoutWaitingForFlag;
 }
@@ -706,7 +706,7 @@ fn waitForCount(comptime std: type, comptime time: type, count: *std.atomic.Valu
     var elapsed: time.duration.Duration = 0;
     while (elapsed < timeout) : (elapsed += time.duration.MilliSecond) {
         if (count.load(.acquire) >= expected) return;
-        std.Thread.sleep(@intCast(time.duration.MilliSecond));
+        time.sleep(time.duration.MilliSecond);
     }
     return error.TimeoutWaitingForCount;
 }

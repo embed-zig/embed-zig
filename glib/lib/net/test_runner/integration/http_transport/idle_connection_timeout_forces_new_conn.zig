@@ -52,7 +52,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                             try testing.expectEqualStrings("one", body1);
                             resp1.deinit();
 
-                            std.Thread.sleep(@intCast(80 * net.time.duration.MilliSecond));
+                            net.time.sleep(80 * net.time.duration.MilliSecond);
 
                             var req2 = try Http.Request.init(testing.allocator, "GET", url2);
                             var resp2 = try transport.roundTrip(&req2);

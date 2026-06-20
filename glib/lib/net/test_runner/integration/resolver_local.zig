@@ -169,7 +169,7 @@ fn Suite(comptime std: type, comptime net: type) type {
                     var req_buf: [512]u8 = undefined;
                     const req = server_pc.readFrom(&req_buf) catch return;
 
-                    std.Thread.sleep(@intCast(20 * net.time.duration.MilliSecond));
+                    net.time.sleep(20 * net.time.duration.MilliSecond);
 
                     var resp_buf: [512]u8 = undefined;
                     const resp_len = buildAResponse(R, req_buf[0..req.bytes_read], ip, &resp_buf) catch return;
@@ -855,7 +855,7 @@ fn Suite(comptime std: type, comptime net: type) type {
                     // to the worker itself instead of relying on DNS read timing.
                     server.client_hello_received.store(true, .release);
                     while (!server.release.load(.acquire)) {
-                        std.Thread.sleep(@intCast(net.time.duration.MilliSecond));
+                        net.time.sleep(net.time.duration.MilliSecond);
                     }
                 }
             }.run, .{&slow_server});
@@ -878,7 +878,7 @@ fn Suite(comptime std: type, comptime net: type) type {
                     var waited: net.time.duration.Duration = 0;
                     const max_wait = 200 * net.time.duration.MilliSecond;
                     while (!client_hello_received.load(.acquire) and waited < max_wait) : (waited += net.time.duration.MilliSecond) {
-                        std.Thread.sleep(@intCast(net.time.duration.MilliSecond));
+                        net.time.sleep(net.time.duration.MilliSecond);
                     }
 
                     var resp_buf: [512]u8 = undefined;
@@ -927,7 +927,7 @@ fn Suite(comptime std: type, comptime net: type) type {
             errdefer slow_server.release.store(true, .release);
             errdefer wait_thread.join();
 
-            std.Thread.sleep(@intCast(10 * net.time.duration.MilliSecond));
+            net.time.sleep(10 * net.time.duration.MilliSecond);
             try expect(!wait_done.load(.acquire));
 
             slow_server.release.store(true, .release);
@@ -1026,7 +1026,8 @@ fn Suite(comptime std: type, comptime net: type) type {
 
             var cancel_thread = try std.Thread.spawn(threadSpawn(worker_stack), struct {
                 fn run(cc: *context_mod.Context, l: type) void {
-                    l.Thread.sleep(@intCast(5 * net.time.duration.MilliSecond));
+                    _ = l;
+                    net.time.sleep(5 * net.time.duration.MilliSecond);
                     cc.cancelWithCause(error.BrokenPipe);
                 }
             }.run, .{ &cancel_ctx, std });
@@ -1067,7 +1068,7 @@ fn Suite(comptime std: type, comptime net: type) type {
 
                     server.accepted.store(true, .release);
                     while (!server.release.load(.acquire)) {
-                        std.Thread.sleep(@intCast(net.time.duration.MilliSecond));
+                        net.time.sleep(net.time.duration.MilliSecond);
                     }
                 }
             }.run, .{&slow_server});
@@ -1332,7 +1333,7 @@ fn waitForTrue(comptime std: type, flag: *std.atomic.Value(bool), timeout: @impo
     var elapsed: @import("time").duration.Duration = 0;
     while (elapsed < timeout) : (elapsed += @import("time").duration.MilliSecond) {
         if (flag.load(.acquire)) return;
-        std.Thread.sleep(@intCast(@import("time").duration.MilliSecond));
+        net.time.sleep(@import("time").duration.MilliSecond);
     }
     return error.TimeoutWaitingForFlag;
 }
@@ -1344,7 +1345,7 @@ fn waitUntilDeiniting(comptime std: type, resolver: anytype, timeout: @import("t
         const deiniting = resolver.deiniting;
         resolver.mutex.unlock();
         if (deiniting) return;
-        std.Thread.sleep(@intCast(@import("time").duration.MilliSecond));
+        net.time.sleep(@import("time").duration.MilliSecond);
     }
     return error.TimeoutWaitingForDeinit;
 }

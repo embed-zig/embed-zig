@@ -6,7 +6,7 @@ pub fn waitUntilTrue(comptime grt: type, flag: *grt.std.atomic.Value(bool), comp
     while (!flag.load(.acquire)) : (spins += 1) {
         if (spins == 10_000) return err_tag;
         if (spins % 128 == 0) {
-            Thread.sleep(100_000);
+            grt.time.sleep(100_000);
         } else {
             Thread.yield() catch {};
         }

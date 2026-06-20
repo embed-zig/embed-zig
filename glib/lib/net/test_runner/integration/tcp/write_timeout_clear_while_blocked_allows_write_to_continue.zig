@@ -76,7 +76,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                     var stalled = false;
                     var prev = write_ctx.bytes_written.load(.seq_cst);
                     for (0..20) |_| {
-                        Thread.sleep(@intCast(10 * net.time.duration.MilliSecond));
+                        net.time.sleep(10 * net.time.duration.MilliSecond);
                         const current = write_ctx.bytes_written.load(.seq_cst);
                         if (!write_ctx.done.load(.seq_cst) and current == prev) {
                             stalled = true;
@@ -91,7 +91,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                     // Wait past the original deadline before draining to ensure the
                     // blocked write re-evaluates the cleared timeout rather than the
                     // stale deadline it started with.
-                    Thread.sleep(@intCast(initial_timeout + 50 * net.time.duration.MilliSecond));
+                    net.time.sleep(initial_timeout + 50 * net.time.duration.MilliSecond);
 
                     var recv_buf: [chunk_len]u8 = undefined;
                     var total_read: usize = 0;

@@ -197,7 +197,7 @@ pub fn make(comptime grt: type) type {
                     self.state = .idle;
                     return error.Timeout;
                 }
-                grt.std.Thread.sleep(@intCast(poll_interval));
+                grt.time.sleep(poll_interval);
             }
             const link = self.hci.getLink(.central) orelse {
                 self.state = .idle;
@@ -222,7 +222,7 @@ pub fn make(comptime grt: type) type {
             self.hci.disconnect(conn_handle, 0x13);
             var waited: glib.time.duration.Duration = 0;
             while (self.hci.getLinkByHandle(conn_handle) != null and waited < wait_timeout) : (waited += poll_interval) {
-                grt.std.Thread.sleep(@intCast(poll_interval));
+                grt.time.sleep(poll_interval);
             }
             if (self.hci.getLinkByHandle(conn_handle) == null) {
                 self.state = .idle;
@@ -472,7 +472,7 @@ pub fn make(comptime grt: type) type {
                 const find_resp = self.sendAttRequest(conn_handle, find_req, resp_buf) catch |err| switch (err) {
                     error.Timeout => {
                         if (attempt + 1 < CCCD_DISCOVERY_MAX_ATTEMPTS) {
-                            grt.std.Thread.sleep(@intCast(poll_interval));
+                            grt.time.sleep(poll_interval);
                             continue;
                         }
                         return error.Timeout;

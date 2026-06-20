@@ -963,7 +963,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                 fn run(t: *Self, allocator: stdz_mod.mem.Allocator, args: *anyopaque) bool {
                     _ = allocator;
                     _ = args;
-                    TestStd.Thread.sleep(40 * TestTime.duration.MilliSecond);
+                    TestTime.sleep(40 * TestTime.duration.MilliSecond);
                     t.logFatal("child fatal");
                     const cause = t.context().err() orelse return false;
                     return cause == error.TestFailed;
@@ -978,7 +978,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                         fn runLeaf(leaf: *Self, alloc: stdz_mod.mem.Allocator, leaf_args: *anyopaque) bool {
                             _ = alloc;
                             _ = leaf_args;
-                            TestStd.Thread.sleep(300 * TestTime.duration.MilliSecond);
+                            TestTime.sleep(300 * TestTime.duration.MilliSecond);
                             leaf.context().cancelWithCause(error.TestTimeout);
                             leaf.logError("leaf timeout");
                             const cause = leaf.context().err() orelse return false;
@@ -1019,7 +1019,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                     _ = t;
                     _ = allocator;
                     _ = args;
-                    TestStd.Thread.sleep(50 * TestTime.duration.MilliSecond);
+                    TestTime.sleep(50 * TestTime.duration.MilliSecond);
                     return true;
                 }
             };
@@ -1028,7 +1028,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                 fn run(t: *Self, allocator: stdz_mod.mem.Allocator, args: *anyopaque) bool {
                     _ = allocator;
                     _ = args;
-                    TestStd.Thread.sleep(20 * TestTime.duration.MilliSecond);
+                    TestTime.sleep(20 * TestTime.duration.MilliSecond);
                     t.logError("leaf err");
                     return false;
                 }
@@ -1063,7 +1063,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                 fn run(t: *Self, allocator: stdz_mod.mem.Allocator, args: *anyopaque) bool {
                     _ = allocator;
                     _ = args;
-                    TestStd.Thread.sleep(40 * TestTime.duration.MilliSecond);
+                    TestTime.sleep(40 * TestTime.duration.MilliSecond);
                     t.logFatal("deep fatal");
                     const cause = t.context().err() orelse return false;
                     return cause == error.TestFailed;
@@ -1217,7 +1217,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
 
             {
                 var root = new(TestStd, TestTime, .test_run);
-                TestStd.Thread.sleep(220 * TestTime.duration.MilliSecond);
+                TestTime.sleep(220 * TestTime.duration.MilliSecond);
 
                 root.run("child", TaskRunner.make(ChildTask.run, null));
                 try std.testing.expect(!root.wait());
@@ -1237,7 +1237,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
 
             {
                 var root = new(TestStd, TestTime, .test_run);
-                TestStd.Thread.sleep(100 * TestTime.duration.MilliSecond);
+                TestTime.sleep(100 * TestTime.duration.MilliSecond);
 
                 root.run("parent", TaskRunner.make(NestedTimeoutTask.run, null));
                 try std.testing.expect(!root.wait());
@@ -1292,7 +1292,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
 
             {
                 var root = new(TestStd, TestTime, .test_run);
-                TestStd.Thread.sleep(100 * TestTime.duration.MilliSecond);
+                TestTime.sleep(100 * TestTime.duration.MilliSecond);
 
                 root.run("suite", TaskRunner.make(ComplexSuiteTask.run, null));
                 try std.testing.expect(!root.wait());
@@ -1537,7 +1537,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                         t.logError("fast leaf deadline mismatch");
                         return false;
                     }
-                    TestStd.Thread.sleep(10 * TestTime.duration.MilliSecond);
+                    TestTime.sleep(10 * TestTime.duration.MilliSecond);
                     if (t.context().err() != null) {
                         t.logError("fast leaf should stay active");
                         return false;
@@ -1558,7 +1558,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                         t.logError("leaf timeout deadline mismatch");
                         return false;
                     }
-                    TestStd.Thread.sleep(70 * TestTime.duration.MilliSecond);
+                    TestTime.sleep(70 * TestTime.duration.MilliSecond);
                     const cause = t.context().err() orelse {
                         t.logError("leaf timeout missing err");
                         return false;
@@ -1620,7 +1620,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                         t.logError("parallel fast deadline mismatch");
                         return false;
                     }
-                    TestStd.Thread.sleep(10 * TestTime.duration.MilliSecond);
+                    TestTime.sleep(10 * TestTime.duration.MilliSecond);
                     if (t.context().err() != null) {
                         t.logError("parallel fast should stay active");
                         return false;
@@ -1643,7 +1643,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                         t.logError("parallel slow deadline mismatch");
                         return false;
                     }
-                    TestStd.Thread.sleep(70 * TestTime.duration.MilliSecond);
+                    TestTime.sleep(70 * TestTime.duration.MilliSecond);
                     const cause = t.context().err() orelse {
                         t.logError("parallel timeout missing err");
                         return false;
@@ -1690,7 +1690,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                         t.logError("branch timeout deadline mismatch");
                         return false;
                     }
-                    TestStd.Thread.sleep(50 * TestTime.duration.MilliSecond);
+                    TestTime.sleep(50 * TestTime.duration.MilliSecond);
                     const cause = t.context().err() orelse {
                         t.logError("branch timeout missing err");
                         return false;
@@ -1734,7 +1734,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                         t.logError("plain branch inherited timeout");
                         return false;
                     }
-                    TestStd.Thread.sleep(10 * TestTime.duration.MilliSecond);
+                    TestTime.sleep(10 * TestTime.duration.MilliSecond);
                     if (t.context().err() != null) {
                         t.logError("plain branch canceled");
                         return false;

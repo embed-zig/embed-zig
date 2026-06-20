@@ -297,7 +297,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                     defer app.deinit();
 
                     try app.start(.{ .ticker = .manual });
-                    grt.std.Thread.sleep(@intCast(3 * grt.time.duration.MilliSecond));
+                    grt.time.sleep(3 * grt.time.duration.MilliSecond);
                     try grt.std.testing.expectEqual(@as(usize, 0), app.store.stores.counter.get().ticks);
 
                     try app.dispatch(.{

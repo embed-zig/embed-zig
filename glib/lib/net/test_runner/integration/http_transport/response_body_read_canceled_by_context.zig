@@ -48,7 +48,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                                 // Keep the server-side close comfortably behind the
                                 // client-side cancel so this remains a cancellation
                                 // test even on slower ARM runners under heavy load.
-                                std.Thread.sleep(@intCast(300 * net.time.duration.MilliSecond));
+                                net.time.sleep(300 * net.time.duration.MilliSecond);
                                 io.writeAll(@TypeOf(c), &c, "late") catch {};
                             }
                         }.run,
@@ -73,8 +73,8 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                                 defer resp.deinit();
 
                                 const cancel_thread = try std.Thread.spawn(.{}, struct {
-                                    fn run(cancel_ctx: context_mod.Context, comptime thread_lib: type) void {
-                                        thread_lib.Thread.sleep(@intCast(30 * net.time.duration.MilliSecond));
+                                    fn run(cancel_ctx: context_mod.Context, comptime _: type) void {
+                                        net.time.sleep(30 * net.time.duration.MilliSecond);
                                         cancel_ctx.cancel();
                                     }
                                 }.run, .{ ctx, std });

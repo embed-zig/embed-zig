@@ -67,7 +67,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                                     ctx.err = error.ShortWrite;
                                     return;
                                 }
-                                if (seq % 8 == 7) Thread.sleep(@intCast(net.time.duration.MilliSecond));
+                                if (seq % 8 == 7) net.time.sleep(net.time.duration.MilliSecond);
                             }
                         }
                     };

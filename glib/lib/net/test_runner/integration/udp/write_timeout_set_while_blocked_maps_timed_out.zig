@@ -179,7 +179,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                                     const elapsed = @import("time").instant.sub(net.time.instant.now(), started);
                                     if (elapsed >= duration) return error.TimedOut;
                                 }
-                                std.Thread.sleep(@intCast(net.time.duration.MilliSecond));
+                                net.time.sleep(net.time.duration.MilliSecond);
                             }
                         }
                     };
@@ -198,7 +198,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                         const waiting = impl.write_waiting;
                         impl.write_mu.unlock();
                         if (waiting) return;
-                        thread_lib.Thread.sleep(@intCast(net.time.duration.MilliSecond));
+                        net.time.sleep(net.time.duration.MilliSecond);
                     }
                 }
 
@@ -233,13 +233,13 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                         };
                     }
 
-                    fn closeConnLater(conn: Conn, comptime thread_lib: type) void {
-                        thread_lib.Thread.sleep(@intCast(200 * net.time.duration.MilliSecond));
+                    fn closeConnLater(conn: Conn, comptime _: type) void {
+                        net.time.sleep(200 * net.time.duration.MilliSecond);
                         conn.close();
                     }
 
-                    fn closePacketLater(conn: PacketConn, comptime thread_lib: type) void {
-                        thread_lib.Thread.sleep(@intCast(200 * net.time.duration.MilliSecond));
+                    fn closePacketLater(conn: PacketConn, comptime _: type) void {
+                        net.time.sleep(200 * net.time.duration.MilliSecond);
                         conn.close();
                     }
                 };
@@ -315,7 +315,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                     ready.waitUntilReady();
                     waitUntilWriteWaiting(conn_impl, std);
                     conn.setWriteDeadline(null);
-                    std.Thread.sleep(@intCast(50 * net.time.duration.MilliSecond));
+                    net.time.sleep(50 * net.time.duration.MilliSecond);
                     state.setWriteReady(true);
 
                     write_thread.join();
@@ -344,7 +344,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                     ready.waitUntilReady();
                     waitUntilWriteWaiting(conn_impl, std);
                     conn.setWriteDeadline(null);
-                    std.Thread.sleep(@intCast(50 * net.time.duration.MilliSecond));
+                    net.time.sleep(50 * net.time.duration.MilliSecond);
                     state.setWriteReady(true);
 
                     write_thread.join();

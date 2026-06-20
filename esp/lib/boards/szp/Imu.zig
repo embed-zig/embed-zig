@@ -9,7 +9,7 @@ const qmi8658_address = @intFromEnum(Qmi8658.Address.sa0_low);
 
 const DelayImpl = struct {
     fn sleep(_: *DelayImpl, duration: esp.grt.time.duration.Duration) void {
-        esp.grt.std.Thread.sleep(duration);
+        esp.grt.time.sleep(duration);
     }
 };
 

@@ -191,7 +191,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                             while (!state.started) state.cond.wait(&state.mutex);
                             state.mutex.unlock();
 
-                            std.Thread.sleep(@intCast(20 * net.time.duration.MilliSecond));
+                            net.time.sleep(20 * net.time.duration.MilliSecond);
 
                             state.mutex.lock();
                             const finished_early = state.finished;

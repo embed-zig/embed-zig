@@ -330,7 +330,7 @@ fn runPeripheralRole(comptime grt: type, p: Peripheral) !void {
         }
         if (disconnected) break;
 
-        grt.std.Thread.sleep(@intCast(poll_interval));
+        grt.time.sleep(poll_interval);
     }
 
     try grt.std.testing.expectEqual(Peripheral.State.idle, p.getState());
@@ -350,7 +350,7 @@ fn waitForFoundDevice(comptime grt: type, state: anytype, timeout: glib.time.dur
         const addr_type = state.addr_type;
         state.mutex.unlock();
         if (found) return .{ .addr = addr, .addr_type = addr_type };
-        grt.std.Thread.sleep(@intCast(poll_interval));
+        grt.time.sleep(poll_interval);
     }
     return error.Timeout;
 }
@@ -362,7 +362,7 @@ fn waitForConnHandle(comptime grt: type, state: anytype, timeout: glib.time.dura
         const conn_handle = state.conn_handle;
         state.mutex.unlock();
         if (conn_handle != 0) return conn_handle;
-        grt.std.Thread.sleep(@intCast(poll_interval));
+        grt.time.sleep(poll_interval);
     }
     return error.Timeout;
 }
@@ -374,7 +374,7 @@ fn waitForNotification(comptime grt: type, state: anytype, want_count: u32, time
         const count = state.notification_count;
         state.mutex.unlock();
         if (count >= want_count) return;
-        grt.std.Thread.sleep(@intCast(poll_interval));
+        grt.time.sleep(poll_interval);
     }
     return error.Timeout;
 }
@@ -393,7 +393,7 @@ fn waitForDisconnected(comptime grt: type, state: anytype, timeout: glib.time.du
         const disconnected = state.disconnected;
         state.mutex.unlock();
         if (disconnected) return;
-        grt.std.Thread.sleep(@intCast(poll_interval));
+        grt.time.sleep(poll_interval);
     }
     return error.Timeout;
 }
@@ -405,7 +405,7 @@ fn waitForPeripheralConnected(comptime grt: type, state: anytype, timeout: glib.
         const connected = state.connected;
         state.mutex.unlock();
         if (connected) return;
-        grt.std.Thread.sleep(@intCast(poll_interval));
+        grt.time.sleep(poll_interval);
     }
     return error.Timeout;
 }
@@ -421,7 +421,7 @@ fn waitForDisconnectRace(comptime grt: type, p: Peripheral, state: anytype, conn
 
     var waited: glib.time.duration.Duration = 0;
     while (waited < 50 * glib.time.duration.MilliSecond) : (waited += poll_interval) {
-        grt.std.Thread.sleep(@intCast(poll_interval));
+        grt.time.sleep(poll_interval);
         if (p.getState() != .connected or isDisconnectRace(state, conn_handle)) return true;
     }
     return false;

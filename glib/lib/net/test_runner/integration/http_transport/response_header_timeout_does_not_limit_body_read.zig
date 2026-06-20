@@ -44,7 +44,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                                     &c,
                                     "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\n",
                                 ) catch {};
-                                std.Thread.sleep(@intCast(50 * net.time.duration.MilliSecond));
+                                net.time.sleep(50 * net.time.duration.MilliSecond);
                                 io.writeAll(@TypeOf(c), &c, "hello") catch {};
                             }
                         }.run,

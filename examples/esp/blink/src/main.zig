@@ -36,7 +36,7 @@ fn run() !void {
 
         log.info("blink state={s} board={s}", .{ if (led_on) "on" else "off", boardName() });
         led_on = !led_on;
-        grt.std.Thread.sleep(blink_interval);
+        grt.time.sleep(blink_interval);
     }
 }
 

@@ -75,7 +75,7 @@ fn initExpander() !void {
 fn powerOnPeripherals() !void {
     const driver = try ensureExpander();
     try driver.writeMask(power_mask, 0);
-    esp.grt.std.Thread.sleep(200 * esp.grt.time.duration.MilliSecond);
+    esp.grt.time.sleep(200 * esp.grt.time.duration.MilliSecond);
     try driver.writeMask(power_mask, power_mask);
 }
 

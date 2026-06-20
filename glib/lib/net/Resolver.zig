@@ -331,7 +331,7 @@ pub fn Resolver(comptime std: type, comptime net: type) type {
                         self.ctx.cancel();
                         return;
                     }
-                    Thread.sleep(@intCast(worker_attempt_cancel_poll));
+                    net.time.sleep(worker_attempt_cancel_poll);
                 }
             }
         };

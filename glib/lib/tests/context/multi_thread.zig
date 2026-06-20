@@ -73,7 +73,7 @@ fn multiThreadCancelWakesWaiterCase(comptime std: type, comptime time: type, all
         }
     }.work, .{&cc});
 
-    std.Thread.sleep(@intCast(5 * time_mod.duration.MilliSecond));
+    time.sleep(5 * time_mod.duration.MilliSecond);
     cc.cancel();
     t.join();
 
@@ -98,7 +98,7 @@ fn multiThreadCustomCauseWakesWaiterCase(comptime std: type, comptime time: type
         }
     }.work, .{&cc});
 
-    std.Thread.sleep(@intCast(5 * time_mod.duration.MilliSecond));
+    time.sleep(5 * time_mod.duration.MilliSecond);
     cc.cancelWithCause(error.BrokenPipe);
     t.join();
 
@@ -125,7 +125,7 @@ fn multiThreadParentCancelWakesChildWaiterCase(comptime std: type, comptime time
         }
     }.work, .{&child});
 
-    std.Thread.sleep(@intCast(5 * time_mod.duration.MilliSecond));
+    time.sleep(5 * time_mod.duration.MilliSecond);
     parent.cancel();
     t.join();
 
@@ -173,7 +173,7 @@ fn multiThreadDeadlineReparentKeepsChildDeadlineCase(comptime std: type, comptim
         }
     }.work, .{&child});
 
-    std.Thread.sleep(@intCast(1 * time_mod.duration.MilliSecond));
+    time.sleep(1 * time_mod.duration.MilliSecond);
     parent.deinit();
     t.join();
 

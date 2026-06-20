@@ -73,7 +73,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                     var stalled = false;
                     var prev = write_ctx.bytes_written.load(.seq_cst);
                     for (0..50) |_| {
-                        Thread.sleep(@intCast(10 * net.time.duration.MilliSecond));
+                        net.time.sleep(10 * net.time.duration.MilliSecond);
                         const current = write_ctx.bytes_written.load(.seq_cst);
                         if (!write_ctx.done.load(.seq_cst) and current == prev) {
                             stalled = true;

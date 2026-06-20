@@ -20,7 +20,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                         const waiting = impl.read_waiting;
                         impl.read_mu.unlock();
                         if (waiting) return;
-                        thread_lib.Thread.sleep(@intCast(net.time.duration.MilliSecond));
+                        net.time.sleep(net.time.duration.MilliSecond);
                     }
                 }
 
@@ -45,8 +45,8 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                             ctx.err = error.ExpectedTimedOut;
                         }
 
-                        fn closeLater(conn: net.PacketConn, comptime thread_lib: type) void {
-                            thread_lib.Thread.sleep(@intCast(200 * net.time.duration.MilliSecond));
+                        fn closeLater(conn: net.PacketConn, comptime _: type) void {
+                            net.time.sleep(200 * net.time.duration.MilliSecond);
                             conn.close();
                         }
                     };

@@ -42,7 +42,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                         fn run(listener: *Net.TcpListener) void {
                             var conn = listener.accept() catch return;
                             defer conn.deinit();
-                            Thread.sleep(@intCast(300 * net.time.duration.MilliSecond));
+                            net.time.sleep(300 * net.time.duration.MilliSecond);
                         }
                     }.run, .{listener_impl});
                     defer server_thread.join();

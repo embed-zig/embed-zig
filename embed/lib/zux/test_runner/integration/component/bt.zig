@@ -92,7 +92,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
             var attempts: usize = 0;
             const poll_interval = 10 * grt.time.duration.MilliSecond;
             while (attempts < 50 and sink.found_count == 0) : (attempts += 1) {
-                grt.std.Thread.sleep(@intCast(poll_interval));
+                grt.time.sleep(poll_interval);
             }
 
             advertiser.stopAdvertising();

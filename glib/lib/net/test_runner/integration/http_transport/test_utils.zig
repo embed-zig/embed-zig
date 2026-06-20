@@ -191,7 +191,8 @@ pub fn make2(comptime std: type, comptime net: type) type {
                     const content_type = serverContentType(server_spec);
 
                     if (serverDelayMs(server_spec) != 0) {
-                        std.Thread.sleep(@intCast(@as(net.time.duration.Duration, @intCast(serverDelayMs(server_spec))) * net.time.duration.MilliSecond));
+                        const delay_ms: net.time.duration.Duration = @intCast(serverDelayMs(server_spec));
+                        net.time.sleep(delay_ms * net.time.duration.MilliSecond);
                     }
 
                     const reason = HttpNs.status.text(status_code) orelse "Unknown";

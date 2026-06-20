@@ -36,7 +36,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                                 var req_buf: [4096]u8 = undefined;
                                 const req_head = try Utils.readRequestHead(conn, &req_buf);
                                 try testing.expect(Utils.hasRequestLine(req_head, "CONNECT example.com:443 HTTP/1.1"));
-                                std.Thread.sleep(@intCast(150 * net.time.duration.MilliSecond));
+                                net.time.sleep(150 * net.time.duration.MilliSecond);
                             }
                         }.run,
                         struct {

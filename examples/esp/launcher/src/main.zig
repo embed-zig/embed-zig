@@ -86,6 +86,6 @@ fn run() !void {
     defer launcher.stop() catch {};
 
     while (true) {
-        esp.grt.std.Thread.sleep(sleep_interval);
+        esp.grt.time.sleep(sleep_interval);
     }
 }

@@ -290,7 +290,7 @@ fn runPeripheralRole(comptime grt: type, comptime ServerType: type, host: anytyp
             server.stopAdvertising();
             try startAdvertising(&server);
         }
-        grt.std.Thread.sleep(@intCast(poll_interval));
+        grt.time.sleep(poll_interval);
     }
     if (waited > reconnect_timeout) return error.Timeout;
 
@@ -387,7 +387,7 @@ fn waitForFoundDevice(comptime grt: type, state: anytype, wait: glib.time.durati
         const addr_type = state.addr_type;
         state.mutex.unlock();
         if (found) return .{ .addr = addr, .addr_type = addr_type };
-        grt.std.Thread.sleep(@intCast(poll_interval));
+        grt.time.sleep(poll_interval);
     }
     return error.Timeout;
 }
@@ -399,7 +399,7 @@ fn waitForDisconnectCount(comptime grt: type, state: anytype, want: u32, wait: g
         const disconnected_count = state.disconnected_count;
         state.mutex.unlock();
         if (disconnected_count >= want) return;
-        grt.std.Thread.sleep(@intCast(poll_interval));
+        grt.time.sleep(poll_interval);
     }
     return error.Timeout;
 }

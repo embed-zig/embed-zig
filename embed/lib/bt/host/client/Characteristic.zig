@@ -201,7 +201,7 @@ pub fn Characteristic(comptime grt: type, comptime ClientType: type, comptime Su
                 self.write(data) catch |err| switch (err) {
                     error.AttError, error.Timeout => {
                         if (attempt + 1 < control_write_max_attempts) {
-                            grt.std.Thread.sleep(@intCast(control_write_retry_delay));
+                            grt.time.sleep(control_write_retry_delay);
                             continue;
                         }
                         return err;

@@ -21,7 +21,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                         const waiting = conn.write_waiting;
                         conn.write_mu.unlock();
                         if (waiting) return;
-                        thread_lib.Thread.sleep(@intCast(net.time.duration.MilliSecond));
+                        net.time.sleep(net.time.duration.MilliSecond);
                     }
                 }
 
@@ -83,8 +83,8 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                     io_ctx.cancel();
 
                     var close_thread = try Thread.spawn(.{}, struct {
-                        fn run(conn: *Net.TcpConn, comptime thread_lib: type) void {
-                            thread_lib.Thread.sleep(@intCast(200 * net.time.duration.MilliSecond));
+                        fn run(conn: *Net.TcpConn, comptime _: type) void {
+                            net.time.sleep(200 * net.time.duration.MilliSecond);
                             conn.close();
                         }
                     }.run, .{ client, std });

@@ -70,15 +70,15 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                     ready.waitUntilReady();
 
                     var cancel_thread = try Thread.spawn(.{}, struct {
-                        fn run(ctx: context_mod.Context, comptime thread_lib: type) void {
-                            thread_lib.Thread.sleep(@intCast(30 * net.time.duration.MilliSecond));
+                        fn run(ctx: context_mod.Context, comptime _: type) void {
+                            net.time.sleep(30 * net.time.duration.MilliSecond);
                             ctx.cancel();
                         }
                     }.run, .{ io_ctx, std });
 
                     var close_thread = try Thread.spawn(.{}, struct {
-                        fn run(conn: *Net.TcpConn, comptime thread_lib: type) void {
-                            thread_lib.Thread.sleep(@intCast(200 * net.time.duration.MilliSecond));
+                        fn run(conn: *Net.TcpConn, comptime _: type) void {
+                            net.time.sleep(200 * net.time.duration.MilliSecond);
                             conn.close();
                         }
                     }.run, .{ client, std });

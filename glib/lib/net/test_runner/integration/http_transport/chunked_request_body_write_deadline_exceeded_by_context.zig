@@ -144,8 +144,8 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                                 defer if (!joined) thread.join();
 
                                 const deadline_thread = try std.Thread.spawn(.{}, struct {
-                                    fn run(deadline_ctx: context_mod.Context, comptime thread_lib: type) void {
-                                        thread_lib.Thread.sleep(@intCast(30 * net.time.duration.MilliSecond));
+                                    fn run(deadline_ctx: context_mod.Context, comptime _: type) void {
+                                        net.time.sleep(30 * net.time.duration.MilliSecond);
                                         deadline_ctx.cancelWithCause(error.DeadlineExceeded);
                                     }
                                 }.run, .{ ctx, std });

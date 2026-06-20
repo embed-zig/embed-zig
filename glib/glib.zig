@@ -162,7 +162,8 @@ pub const runtime = struct {
     };
 
     pub fn make(comptime options: Options) type {
-        const runtime_std = @import("stdz").make(options.stdz_impl);
+        const runtime_std_raw = @import("stdz").make(options.stdz_impl);
+        const runtime_std = stdWithoutThreadSleep(runtime_std_raw);
         const runtime_time = @import("time").make(options.time_impl);
         const runtime_system = @import("glib_system").make(options.system_impl);
         const runtime_sync = options.sync_impl;
@@ -203,5 +204,140 @@ pub const runtime = struct {
         }
         if (!@hasDecl(ns, "runtime_marker")) return false;
         return @TypeOf(ns.runtime_marker) == TypeMarker;
+    }
+
+    fn stdWithoutThreadSleep(comptime RawStd: type) type {
+        return struct {
+            pub const heap = RawStd.heap;
+            pub const Thread = ThreadWithoutSleep(RawStd.Thread);
+            pub const log = RawStd.log;
+            pub const posix = RawStd.posix;
+            pub const ascii = RawStd.ascii;
+            pub const mem = RawStd.mem;
+            pub const fmt = RawStd.fmt;
+            pub const json = RawStd.json;
+            pub const meta = RawStd.meta;
+            pub const Io = RawStd.Io;
+            pub const debug = RawStd.debug;
+            pub const atomic = RawStd.atomic;
+            pub const base64 = RawStd.base64;
+            pub const builtin = RawStd.builtin;
+            pub const testing = RawStd.testing;
+            pub const Random = RawStd.Random;
+            pub const crypto = RawStd.crypto;
+            pub const math = RawStd.math;
+
+            pub const array_list = RawStd.array_list;
+            pub const ArrayList = RawStd.ArrayList;
+            pub const ArrayListAligned = RawStd.ArrayListAligned;
+            pub const ArrayListAlignedUnmanaged = RawStd.ArrayListAlignedUnmanaged;
+            pub const ArrayListUnmanaged = RawStd.ArrayListUnmanaged;
+
+            pub const MultiArrayList = RawStd.MultiArrayList;
+            pub const SegmentedList = RawStd.SegmentedList;
+
+            pub const hash_map = RawStd.hash_map;
+            pub const HashMap = RawStd.HashMap;
+            pub const HashMapUnmanaged = RawStd.HashMapUnmanaged;
+            pub const AutoHashMap = RawStd.AutoHashMap;
+            pub const AutoHashMapUnmanaged = RawStd.AutoHashMapUnmanaged;
+            pub const StringHashMap = RawStd.StringHashMap;
+            pub const StringHashMapUnmanaged = RawStd.StringHashMapUnmanaged;
+
+            pub const array_hash_map = RawStd.array_hash_map;
+            pub const ArrayHashMap = RawStd.ArrayHashMap;
+            pub const ArrayHashMapUnmanaged = RawStd.ArrayHashMapUnmanaged;
+            pub const AutoArrayHashMap = RawStd.AutoArrayHashMap;
+            pub const AutoArrayHashMapUnmanaged = RawStd.AutoArrayHashMapUnmanaged;
+            pub const StringArrayHashMap = RawStd.StringArrayHashMap;
+            pub const StringArrayHashMapUnmanaged = RawStd.StringArrayHashMapUnmanaged;
+
+            pub const BufMap = RawStd.BufMap;
+            pub const BufSet = RawStd.BufSet;
+
+            pub const PriorityQueue = RawStd.PriorityQueue;
+            pub const PriorityDequeue = RawStd.PriorityDequeue;
+
+            pub const bit_set = RawStd.bit_set;
+            pub const StaticBitSet = RawStd.StaticBitSet;
+            pub const DynamicBitSet = RawStd.DynamicBitSet;
+            pub const DynamicBitSetUnmanaged = RawStd.DynamicBitSetUnmanaged;
+
+            pub const DoublyLinkedList = RawStd.DoublyLinkedList;
+            pub const SinglyLinkedList = RawStd.SinglyLinkedList;
+
+            pub const Treap = RawStd.Treap;
+
+            pub const enums = RawStd.enums;
+            pub const EnumArray = RawStd.EnumArray;
+            pub const EnumMap = RawStd.EnumMap;
+            pub const EnumSet = RawStd.EnumSet;
+
+            pub const static_string_map = RawStd.static_string_map;
+            pub const StaticStringMap = RawStd.StaticStringMap;
+            pub const StaticStringMapWithEql = RawStd.StaticStringMapWithEql;
+
+            pub const BitStack = RawStd.BitStack;
+        };
+    }
+
+    fn ThreadWithoutSleep(comptime RawThread: type) type {
+        return struct {
+            impl: RawThread,
+
+            const Self = @This();
+
+            pub const SpawnConfig = RawThread.SpawnConfig;
+            pub const default_stack_size = RawThread.default_stack_size;
+            pub const SpawnError = RawThread.SpawnError;
+            pub const YieldError = RawThread.YieldError;
+            pub const CpuCountError = RawThread.CpuCountError;
+            pub const SetNameError = RawThread.SetNameError;
+            pub const GetNameError = RawThread.GetNameError;
+            pub const max_name_len = RawThread.max_name_len;
+
+            pub const Id = RawThread.Id;
+
+            pub const Mutex = RawThread.Mutex;
+            pub const Condition = RawThread.Condition;
+            pub const RwLock = RawThread.RwLock;
+
+            pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) SpawnError!Self {
+                return .{ .impl = try RawThread.spawn(config, f, args) };
+            }
+
+            pub fn join(self: Self) void {
+                self.impl.join();
+            }
+
+            pub fn detach(self: Self) void {
+                self.impl.detach();
+            }
+
+            pub fn yield() YieldError!void {
+                return RawThread.yield();
+            }
+
+            pub fn sleep(ns: u64) void {
+                _ = ns;
+                @compileError("grt.std.Thread.sleep is removed; use grt.time.sleep or grt.time.sleepMillis");
+            }
+
+            pub fn getCpuCount() CpuCountError!usize {
+                return RawThread.getCpuCount();
+            }
+
+            pub fn getCurrentId() Id {
+                return RawThread.getCurrentId();
+            }
+
+            pub fn setName(name: []const u8) SetNameError!void {
+                return RawThread.setName(name);
+            }
+
+            pub fn getName(buf: *[max_name_len:0]u8) GetNameError!?[]const u8 {
+                return RawThread.getName(buf);
+            }
+        };
     }
 };

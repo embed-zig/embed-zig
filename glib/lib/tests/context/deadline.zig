@@ -190,7 +190,7 @@ fn deadlineChildOfElapsedParentStartsCanceledCase(comptime std: type, comptime t
     const bg = ctx_api.background();
     var parent = try ctx_api.withDeadline(bg, time_mod.instant.add(ctx_api.now(), 1 * time_mod.duration.MilliSecond));
     defer parent.deinit();
-    std.Thread.sleep(@intCast(5 * time_mod.duration.MilliSecond));
+    time.sleep(5 * time_mod.duration.MilliSecond);
 
     var child = try ctx_api.withDeadline(parent, time_mod.instant.add(ctx_api.now(), 60000 * time_mod.duration.MilliSecond));
     defer child.deinit();
@@ -229,7 +229,8 @@ fn deadlineSpuriousTimerWakeStillWaitsForDeadlineCase(comptime std: type, compti
     const started = time.instant.now();
     const t = try std.Thread.spawn(.{}, struct {
         fn wake(deadline_ctx: *@TypeOf(ctx_api).DeadlineContext, l: type) void {
-            l.Thread.sleep(@intCast(5 * time_mod.duration.MilliSecond));
+            _ = l;
+            time.sleep(5 * time_mod.duration.MilliSecond);
             deadline_ctx.timer_cond.signal();
         }
     }.wake, .{ deadline_impl, std });
@@ -300,11 +301,11 @@ fn deadlineReparentedChildKeepsOwnDeadlineCase(comptime std: type, comptime time
         }
     }.deinitParent, .{&parent});
 
-    std.Thread.sleep(@intCast(2 * time_mod.duration.MilliSecond));
+    time.sleep(2 * time_mod.duration.MilliSecond);
     ReparentThread.Condition.releaseTimedWaitHook();
     reparent_thread.join();
 
-    std.Thread.sleep(@intCast(120 * time_mod.duration.MilliSecond));
+    time.sleep(120 * time_mod.duration.MilliSecond);
     const got_deadline = child.deadline() orelse return error.ReparentedDeadlineChildShouldKeepOwnDeadline;
     if (got_deadline != child_deadline) return error.ReparentedDeadlineChildShouldKeepOwnDeadline;
     if (child.err() != null) return error.ReparentedDeadlineChildShouldNotUseOldDeadline;

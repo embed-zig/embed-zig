@@ -73,8 +73,8 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                     ready.waitUntilReady();
 
                     var close_thread = try Thread.spawn(.{}, struct {
-                        fn run(conn: *Net.TcpConn, comptime thread_lib: type) void {
-                            thread_lib.Thread.sleep(@intCast(200 * net.time.duration.MilliSecond));
+                        fn run(conn: *Net.TcpConn, comptime _: type) void {
+                            net.time.sleep(200 * net.time.duration.MilliSecond);
                             conn.close();
                         }
                     }.run, .{ client, std });

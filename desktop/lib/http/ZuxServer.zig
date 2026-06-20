@@ -209,7 +209,7 @@ pub fn make(comptime Launcher: type) type {
                         }
                     }
 
-                    gstd.runtime.std.Thread.sleep(200 * std.time.ns_per_ms);
+                    gstd.runtime.time.sleep(200 * std.time.ns_per_ms);
                 }
             }
         };
@@ -255,7 +255,7 @@ pub fn make(comptime Launcher: type) type {
                     var heartbeat_ticks: usize = 0;
 
                     while (true) {
-                        gstd.runtime.std.Thread.sleep(20 * std.time.ns_per_ms);
+                        gstd.runtime.time.sleep(20 * std.time.ns_per_ms);
 
                         const previous_display_event_seq = self.last_display_event_seq;
                         self.last_display_event_seq = try self.runtime.writeDisplayEventsSince(

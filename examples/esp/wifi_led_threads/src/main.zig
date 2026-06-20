@@ -77,7 +77,7 @@ fn run() !void {
     wifi_thread.detach();
 
     while (true) {
-        grt.std.Thread.sleep(@intCast(5 * grt.time.duration.Second));
+        grt.time.sleep(5 * grt.time.duration.Second);
     }
 }
 
@@ -87,7 +87,7 @@ fn wifiLoop(state: *AppState) void {
 
     while (true) {
         setLedState(state, .red);
-        grt.std.Thread.sleep(if (first_attempt) initial_red_delay else retry_delay);
+        grt.time.sleep(if (first_attempt) initial_red_delay else retry_delay);
         first_attempt = false;
 
         setLedState(state, .connecting);
@@ -115,7 +115,7 @@ fn wifiLoop(state: *AppState) void {
                 state.wifi_disconnected_events.load(.acquire),
             });
             while (true) {
-                grt.std.Thread.sleep(@intCast(5 * grt.time.duration.Second));
+                grt.time.sleep(5 * grt.time.duration.Second);
             }
         }
     }
@@ -146,14 +146,14 @@ fn ledLoop(state: *AppState) void {
                     has_last_state = true;
                     last_state = .red;
                 }
-                grt.std.Thread.sleep(@intCast(100 * grt.time.duration.MilliSecond));
+                grt.time.sleep(100 * grt.time.duration.MilliSecond);
             },
             .connecting => {
                 setLedRgb(state, if (blink_on) 32 else 0, if (blink_on) 24 else 0, 0);
                 blink_on = !blink_on;
                 has_last_state = true;
                 last_state = .connecting;
-                grt.std.Thread.sleep(blink_interval);
+                grt.time.sleep(blink_interval);
             },
             .green => {
                 if (!has_last_state or last_state != .green) {
@@ -161,7 +161,7 @@ fn ledLoop(state: *AppState) void {
                     has_last_state = true;
                     last_state = .green;
                 }
-                grt.std.Thread.sleep(@intCast(250 * grt.time.duration.MilliSecond));
+                grt.time.sleep(250 * grt.time.duration.MilliSecond);
             },
         }
     }

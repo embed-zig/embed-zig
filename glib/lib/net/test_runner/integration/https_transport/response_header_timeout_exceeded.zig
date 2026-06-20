@@ -67,7 +67,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                                 thread_err = err;
                                 return;
                             };
-                            Thread.sleep(@intCast(150 * net.time.duration.MilliSecond));
+                            net.time.sleep(150 * net.time.duration.MilliSecond);
                         }
                     }.run, .{ listener_impl, &server_result });
                     defer server_thread.join();
