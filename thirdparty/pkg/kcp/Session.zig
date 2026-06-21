@@ -494,6 +494,7 @@ pub fn make(comptime grt: type) type {
         }
 
         fn writeTxLocked(self: *Self, buf: []const u8) usize {
+            if (self.tx_len == 0) self.tx_head = 0;
             const n = @min(buf.len, self.txSpaceLocked());
             if (n == 0) return 0;
             ringWrite(self.tx_buf, &self.tx_head, &self.tx_len, buf[0..n]);
@@ -568,6 +569,7 @@ pub fn make(comptime grt: type) type {
         }
 
         fn rxContiguousWriteSpanLocked(self: *Self) []u8 {
+            if (self.rx_len == 0) self.rx_head = 0;
             const space = self.rxSpaceLocked();
             if (space == 0) return self.rx_buf[0..0];
             const tail = (self.rx_head + self.rx_len) % self.rx_buf.len;
@@ -996,4 +998,45 @@ fn emptyDebugState() DebugState {
         .ssthresh = 0,
         .xmit = 0,
     };
+}
+
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
+    return glib.testing.TestRunner.fromFn(grt.std, 128 * 1024, struct {
+        fn run(_: *glib.testing.T, allocator: grt.std.mem.Allocator) !void {
+            _ = allocator;
+            const std = grt.std;
+            const Session = make(grt);
+
+            var tx_storage: [8]u8 = undefined;
+            var rx_storage: [8]u8 = undefined;
+            var session: Session = .{
+                .allocator = undefined,
+                .pc = undefined,
+                .remote = undefined,
+                .inst = undefined,
+                .segment_pool = undefined,
+                .output_ctx = undefined,
+                .config = .{},
+                .start_at = grt.time.instant.now(),
+                .udp_pkg_buf = &.{},
+                .udp_pkg_lens = &.{},
+                .tx_buf = &tx_storage,
+                .rx_buf = &rx_storage,
+            };
+
+            session.tx_head = 6;
+            session.tx_len = 0;
+            try std.testing.expectEqual(@as(usize, 4), session.writeTxLocked("abcd"));
+            try std.testing.expectEqual(@as(usize, 0), session.tx_head);
+            try std.testing.expectEqual(@as(usize, 4), session.tx_len);
+            try std.testing.expectEqualSlices(u8, "abcd", tx_storage[0..4]);
+
+            session.rx_head = 6;
+            session.rx_len = 0;
+            const span = session.rxContiguousWriteSpanLocked();
+            try std.testing.expectEqual(@as(usize, 0), session.rx_head);
+            try std.testing.expectEqual(@as(usize, rx_storage.len), span.len);
+            try std.testing.expectEqual(@intFromPtr(&rx_storage[0]), @intFromPtr(span.ptr));
+        }
+    }.run);
 }
