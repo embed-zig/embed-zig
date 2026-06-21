@@ -13,6 +13,7 @@ pub const createWithAllocator = c.ikcp_create_with_allocator;
 pub const release = c.ikcp_release;
 pub const setOutput = c.ikcp_setoutput;
 pub const recv = c.ikcp_recv;
+pub const peeksize = c.ikcp_peeksize;
 pub const send = c.ikcp_send;
 pub const update = c.ikcp_update;
 pub const check = c.ikcp_check;

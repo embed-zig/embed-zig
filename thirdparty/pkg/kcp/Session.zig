@@ -406,8 +406,13 @@ pub fn make(comptime grt: type) type {
             var count: usize = 0;
             while (true) {
                 self.mu.lock();
+                const peek_size = self.kcpRecvPeekSizeLocked();
+                if (peek_size == 0 or self.rxSpaceLocked() < peek_size) {
+                    self.mu.unlock();
+                    break;
+                }
                 const span = self.rxContiguousWriteSpanLocked();
-                if (span.len == 0) {
+                if (span.len < peek_size) {
                     self.mu.unlock();
                     break;
                 }
@@ -505,6 +510,7 @@ pub fn make(comptime grt: type) type {
             const n = @min(out.len, self.rx_len);
             if (n == 0) return 0;
             ringRead(self.rx_buf, &self.rx_head, &self.rx_len, out[0..n]);
+            if (self.rx_len == 0) self.rx_head = 0;
             return n;
         }
 
@@ -582,7 +588,20 @@ pub fn make(comptime grt: type) type {
             defer self.mu.unlock();
             return self.udp_pkg_len > 0 or
                 self.tx_len > 0 or
-                (self.rxSpaceLocked() > 0 and self.inst.*.nrcv_que > 0);
+                self.canDrainKcpRecvLocked();
+        }
+
+        fn canDrainKcpRecvLocked(self: *Self) bool {
+            const peek_size = self.kcpRecvPeekSizeLocked();
+            return peek_size > 0 and
+                self.rxSpaceLocked() >= peek_size and
+                self.rxContiguousWriteSpanLocked().len >= peek_size;
+        }
+
+        fn kcpRecvPeekSizeLocked(self: *Self) usize {
+            const size = kcp.peeksize(self.inst);
+            if (size <= 0) return 0;
+            return @intCast(size);
         }
 
         fn waitForDriveWork(self: *Self, duration: glib.time.duration.Duration) void {
