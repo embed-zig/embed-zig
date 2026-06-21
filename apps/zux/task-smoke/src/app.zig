@@ -19,11 +19,11 @@ fn MinimalZuxApp(comptime platform_grt: type) type {
         pub const PipelineConfig = struct {
             capacity: usize = 64,
             tick_interval: platform_grt.time.duration.Duration = 10 * platform_grt.time.duration.MilliSecond,
-            spawn_config: platform_grt.std.Thread.SpawnConfig = .{},
+            task_options: glib.task.Options = .{ .min_stack_size = 16 * 1024 },
         };
         pub const PollerConfig = struct {
             poll_interval: platform_grt.time.duration.Duration = 10 * platform_grt.time.duration.MilliSecond,
-            spawn_config: platform_grt.std.Thread.SpawnConfig = .{},
+            task_options: glib.task.Options = .{ .min_stack_size = 8 * 1024 },
         };
         pub const InitConfig = struct {
             allocator: platform_grt.std.mem.Allocator,

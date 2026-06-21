@@ -43,7 +43,8 @@ pub fn make(comptime platform_grt: type) type {
                     _ = allocator;
 
                     t.timeout(240 * glib.time.duration.Second);
-                    t.run("sync/unit", sync.test_runner.unit.make(platform_grt.std, platform_grt.time));
+                    const test_std = testing.std.make(platform_grt.std, .{});
+                    t.run("sync/unit", sync.test_runner.unit.make(test_std, platform_grt.time));
                     return t.wait();
                 }
 

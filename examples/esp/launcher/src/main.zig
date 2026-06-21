@@ -1,4 +1,5 @@
 const std = @import("std");
+const glib = @import("glib");
 const esp = @import("esp");
 const config = @import("esp_launcher_config");
 const lvgl_osal = @import("lvgl_osal");
@@ -20,11 +21,9 @@ const PlatformCtx = struct {
     pub const AudioSystem = Board.AudioSystem;
     pub const fs = esp.fs;
 
-    pub fn bleSpeedThreadSpawnConfig() esp.grt.std.Thread.SpawnConfig {
+    pub fn bleSpeedTaskOptions() glib.task.Options {
         return .{
-            .name = "ble_speed",
-            .stack_size = 32 * 1024,
-            .core_id = 1,
+            .min_stack_size = 32 * 1024,
         };
     }
 };
@@ -73,11 +72,11 @@ pub export fn zig_esp_main() void {
 fn run() !void {
     var app_heap_allocator = std.heap.FixedBufferAllocator.init(&app_heap);
     var launcher = try App.init(app_heap_allocator.allocator(), .{
-        .pipeline_spawn_config = .{
-            .stack_size = 24 * 1024,
+        .pipeline_task_options = .{
+            .min_stack_size = 24 * 1024,
         },
-        .poller_spawn_config = .{
-            .stack_size = 16 * 1024,
+        .poller_task_options = .{
+            .min_stack_size = 16 * 1024,
         },
     });
     defer launcher.deinit();

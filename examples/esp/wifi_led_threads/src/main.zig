@@ -13,7 +13,6 @@ const retry_delay: u64 = @intCast(2 * grt.time.duration.Second);
 const initial_red_delay: u64 = @intCast(500 * grt.time.duration.MilliSecond);
 const connect_timeout_ms: u32 = 15_000;
 const blink_interval: u64 = @intCast(250 * grt.time.duration.MilliSecond);
-const task_allocator = esp.heap.Allocator(.{ .caps = .internal_8bit });
 
 const LedState = enum(u8) {
     red,
@@ -54,27 +53,21 @@ fn run() !void {
     };
     app_state.wifi.addEventHook(@ptrCast(&app_state), wifiEventHook);
 
-    const led_thread = grt.std.Thread.spawn(.{
-        .name = "led_loop",
-        .stack_size = 4096,
-        .priority = 4,
-        .allocator = task_allocator,
-    }, ledLoop, .{&app_state}) catch |err| {
-        log.err("failed to spawn led thread: {s}", .{@errorName(err)});
-        @panic("failed to spawn led thread");
+    const led_task = grt.task.go("wifi_led/led", .{
+        .min_stack_size = 4096,
+    }, grt.task.Routine.init(&app_state, ledLoop)) catch |err| {
+        log.err("failed to spawn led task: {s}", .{@errorName(err)});
+        @panic("failed to spawn led task");
     };
-    led_thread.detach();
+    led_task.detach();
 
-    const wifi_thread = grt.std.Thread.spawn(.{
-        .name = "wifi_loop",
-        .stack_size = 8192,
-        .priority = 5,
-        .allocator = task_allocator,
-    }, wifiLoop, .{&app_state}) catch |err| {
-        log.err("failed to spawn wifi thread: {s}", .{@errorName(err)});
-        @panic("failed to spawn wifi thread");
+    const wifi_task = grt.task.go("wifi_led/wifi", .{
+        .min_stack_size = 8192,
+    }, grt.task.Routine.init(&app_state, wifiLoop)) catch |err| {
+        log.err("failed to spawn wifi task: {s}", .{@errorName(err)});
+        @panic("failed to spawn wifi task");
     };
-    wifi_thread.detach();
+    wifi_task.detach();
 
     while (true) {
         grt.time.sleep(5 * grt.time.duration.Second);

@@ -22,11 +22,11 @@ fn MinimalZuxApp(comptime platform_grt: type) type {
         pub const PipelineConfig = struct {
             capacity: usize = 64,
             tick_interval: platform_grt.time.duration.Duration = 10 * platform_grt.time.duration.MilliSecond,
-            spawn_config: platform_grt.std.Thread.SpawnConfig = .{},
+            task_options: glib.task.Options = .{ .min_stack_size = 16 * 1024 },
         };
         pub const PollerConfig = struct {
             poll_interval: platform_grt.time.duration.Duration = 10 * platform_grt.time.duration.MilliSecond,
-            spawn_config: platform_grt.std.Thread.SpawnConfig = .{},
+            task_options: glib.task.Options = .{ .min_stack_size = 8 * 1024 },
         };
         pub const InitConfig = struct {
             allocator: platform_grt.std.mem.Allocator,
@@ -136,7 +136,7 @@ pub fn make(comptime platform_ctx: type, comptime platform_grt: type) type {
 
 pub fn testRunner(comptime platform_ctx: type, comptime platform_grt: type) glib.testing.TestRunner {
     const Runner = struct {
-        spawn_config: platform_grt.std.Thread.SpawnConfig = preferencesSmokeThreadSpawnConfig(platform_ctx, platform_grt),
+        task_options: glib.task.Options = preferencesSmokeTaskOptions(platform_ctx),
 
         pub fn init(self: *@This(), allocator: platform_grt.std.mem.Allocator) !void {
             _ = self;
@@ -165,11 +165,11 @@ pub fn testRunner(comptime platform_ctx: type, comptime platform_grt: type) glib
     return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }
 
-fn preferencesSmokeThreadSpawnConfig(comptime platform_ctx: type, comptime platform_grt: type) platform_grt.std.Thread.SpawnConfig {
-    if (comptime @hasDecl(platform_ctx, "preferencesSmokeThreadSpawnConfig")) {
-        return platform_ctx.preferencesSmokeThreadSpawnConfig();
+fn preferencesSmokeTaskOptions(comptime platform_ctx: type) glib.task.Options {
+    if (comptime @hasDecl(platform_ctx, "preferencesSmokeTaskOptions")) {
+        return platform_ctx.preferencesSmokeTaskOptions();
     }
-    return .{};
+    return .{ .min_stack_size = 24 * 1024 };
 }
 
 pub fn run(comptime platform_ctx: type, comptime platform_grt: type) !void {
