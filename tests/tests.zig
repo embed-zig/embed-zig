@@ -68,7 +68,7 @@ const glib_integration_macos_modules = .{};
 const gstd_unit_base_modules = .{
     @import("gstd_unit/runtime_system_gstd.zig"),
     @import("gstd_unit/runtime_task_gstd.zig"),
-    @import("gstd_unit/runtime_thread_gstd_small_explicit_stack.zig"),
+    @import("gstd_unit/runtime_task_gstd_explicit_stack.zig"),
     @import("gstd_unit/runtime_time_gstd.zig"),
 };
 

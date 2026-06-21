@@ -29,7 +29,6 @@ test "gstd/runtime/unit/time/gstd" {
     try std.testing.expect(elapsed < glib.time.duration.Second);
 
     gstd.runtime.time.sleep(0);
-    gstd.runtime.time.sleepNanos(0);
     gstd.runtime.time.sleepMillis(0);
     const sleep_start = gstd.runtime.time.instant.now();
     gstd.runtime.time.sleep(1 * glib.time.duration.MilliSecond);

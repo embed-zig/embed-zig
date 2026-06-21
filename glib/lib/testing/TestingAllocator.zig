@@ -8,6 +8,8 @@ const mem = stdz.mem;
 const T = @import("T.zig");
 const TestRunnerApi = @import("TestRunner.zig");
 
+extern fn espz_freertos_task_delay(ticks: u32) void;
+
 const AtomicBool = atomic.Value(bool);
 const Self = @This();
 
@@ -51,12 +53,20 @@ pub fn peakLiveBytes(self: *const Self) usize {
 fn lock(self: *Self) void {
     while (true) {
         if (self.lock_state.cmpxchgStrong(false, true, .acquire, .acquire) == null) return;
-        while (self.lock_state.load(.acquire)) {}
+        while (self.lock_state.load(.acquire)) {
+            waitForLock();
+        }
     }
 }
 
 fn unlock(self: *Self) void {
     self.lock_state.store(false, .release);
+}
+
+fn waitForLock() void {
+    if (comptime builtin.target.os.tag == .freestanding) {
+        espz_freertos_task_delay(1);
+    }
 }
 
 fn canGrow(self: *const Self, delta: usize) bool {
@@ -191,9 +201,11 @@ pub fn TestRunner(comptime std: type) TestRunnerApi {
         }
 
         fn testTracksPeakConcurrentLiveBytes() !void {
+            const native_std = @import("std");
+            const NativeWorker = @field(native_std, "Thread");
             const Sync = struct {
-                mutex: std.Thread.Mutex = .{},
-                cond: std.Thread.Condition = .{},
+                mutex: NativeWorker.Mutex = .{},
+                cond: NativeWorker.Condition = .{},
                 ready_count: usize = 0,
                 release: bool = false,
             };
@@ -217,8 +229,8 @@ pub fn TestRunner(comptime std: type) TestRunnerApi {
             const alloc_inst = allocator_state.allocator();
             var sync: Sync = .{};
 
-            const t1 = try std.Thread.spawn(.{}, Worker.run, .{ &sync, alloc_inst });
-            const t2 = try std.Thread.spawn(.{}, Worker.run, .{ &sync, alloc_inst });
+            const t1 = try NativeWorker.spawn(.{}, Worker.run, .{ &sync, alloc_inst });
+            const t2 = try NativeWorker.spawn(.{}, Worker.run, .{ &sync, alloc_inst });
 
             sync.mutex.lock();
             while (sync.ready_count < 2) {

@@ -2,9 +2,8 @@ const context_mod = @import("context");
 const testing_api = @import("testing");
 const time_mod = @import("time");
 
-pub fn Racer(comptime std: type, comptime time: type, comptime sync: type, comptime T: type) type {
+pub fn Racer(comptime std: type, comptime time: type, comptime sync: type, comptime task: type, comptime T: type) type {
     const Allocator = std.mem.Allocator;
-    const Thread = std.Thread;
     const Atomic = std.atomic.Value;
 
     return struct {
@@ -104,14 +103,7 @@ pub fn Racer(comptime std: type, comptime time: type, comptime sync: type, compt
         /// Task return type must be `void` or `!void`. The task is responsible
         /// for exiting on its own; Racer only records winner publication and
         /// task completion.
-        pub fn spawn(self: *Self, config: Thread.SpawnConfig, comptime f: anytype, args: anytype) Thread.SpawnError!void {
-            var spawn_config = config;
-            if (@hasField(Thread.SpawnConfig, "allocator")) {
-                if (spawn_config.allocator == null) {
-                    spawn_config.allocator = self.allocator;
-                }
-            }
-
+        pub fn spawn(self: *Self, options: task.Options, comptime name: []const u8, comptime f: anytype, args: anytype) (Allocator.Error || task.SpawnError)!void {
             startTask(self.shared);
             errdefer finishTask(self.shared);
 
@@ -139,8 +131,30 @@ pub fn Racer(comptime std: type, comptime time: type, comptime sync: type, compt
                 }
             };
 
-            var t = try Thread.spawn(spawn_config, Wrapper.run, .{ self.shared, args });
-            t.detach();
+            const TaskContext = struct {
+                allocator: Allocator,
+                shared: *SharedState,
+                args: @TypeOf(args),
+
+                fn run(ctx: *@This()) void {
+                    defer ctx.allocator.destroy(ctx);
+                    Wrapper.run(ctx.shared, ctx.args);
+                }
+            };
+
+            const ctx = try self.allocator.create(TaskContext);
+            errdefer self.allocator.destroy(ctx);
+            ctx.* = .{
+                .allocator = self.allocator,
+                .shared = self.shared,
+                .args = args,
+            };
+            var t = try task.go(name, options, task.Routine.init(ctx, TaskContext.run));
+            if (@hasDecl(task.Handle, "detach")) {
+                t.detach();
+            } else {
+                @compileError("sync.Racer task handle must support detach");
+            }
         }
 
         /// Waits until either a winner is published or all tasks finish.
@@ -225,15 +239,46 @@ pub fn Racer(comptime std: type, comptime time: type, comptime sync: type, compt
 }
 
 pub fn TestRunner(comptime std: type, comptime time: type) testing_api.TestRunner {
+    const task_mod = @import("task");
     const native_std = @import("std");
     const sync = struct {
-        pub const Mutex = @import("Mutex.zig").make(native_std.Thread.Mutex);
-        pub const Condition = @import("Condition.zig").make(native_std.Thread.Condition);
+        const NativeWorker = @field(native_std, "Thread");
+
+        pub const Mutex = @import("Mutex.zig").make(NativeWorker.Mutex);
+        pub const Condition = @import("Condition.zig").make(NativeWorker.Condition);
+    };
+    const task = struct {
+        const NativeWorker = @field(native_std, "Thread");
+
+        pub const Handle = NativeWorker;
+        pub const Options = task_mod.Options;
+        pub const Routine = task_mod.Routine;
+        pub const SpawnError = NativeWorker.SpawnError;
+
+        pub fn go(_: []const u8, options: Options, routine: Routine) SpawnError!Handle {
+            return NativeWorker.spawn(.{
+                .stack_size = stackSize(options.min_stack_size),
+            }, runRoutine, .{routine});
+        }
+
+        pub fn currentToken() usize {
+            const value: usize = @intCast(NativeWorker.getCurrentId());
+            return if (value == 0) 1 else value;
+        }
+
+        fn runRoutine(routine: Routine) void {
+            routine.run();
+        }
+
+        fn stackSize(min_stack_size: usize) usize {
+            if (min_stack_size == 0) return NativeWorker.SpawnConfig.default_stack_size;
+            return min_stack_size;
+        }
     };
 
     const TestCase = struct {
         fn run() !void {
-            const R = Racer(std, time, sync, u32);
+            const R = Racer(std, time, sync, task, u32);
 
             var racer = try R.init(std.testing.allocator);
             defer racer.deinit();

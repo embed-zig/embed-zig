@@ -1,0 +1,91 @@
+const glib = @import("glib");
+const Native = @import("task/Native.zig");
+
+pub fn Impl(comptime policy: anytype) type {
+    return struct {
+        pub fn make(comptime grt: type) type {
+            @setEvalBranchQuota(10_000);
+
+            comptime var builder = glib.task.Builder();
+
+            const fields = @typeInfo(@TypeOf(policy)).@"struct".fields;
+            inline for (fields) |field| {
+                builder.handle(field.name, PolicyHandler(grt, policyEntry(@field(policy, field.name))));
+            }
+
+            builder.onError(ErrorHandler);
+            return builder.make();
+        }
+    };
+}
+
+const Entry = struct {
+    priority: ?u8 = null,
+    core_id: ?i32 = null,
+    allocator: ?glib.std.mem.Allocator = null,
+};
+
+fn PolicyHandler(comptime grt: type, comptime entry: Entry) type {
+    return struct {
+        pub const Handle = Native;
+        pub const SpawnError = Native.SpawnError;
+
+        pub fn go(
+            name: []const u8,
+            options: glib.task.Options,
+            routine: glib.task.Routine,
+        ) SpawnError!Handle {
+            var name_buf: [Native.max_name_len:0]u8 = undefined;
+            const task_name = taskName(grt, name, &name_buf);
+
+            var spawn_config: Native.SpawnConfig = .{
+                .name = task_name.ptr,
+                .stack_size = options.min_stack_size,
+            };
+            if (entry.priority) |priority| spawn_config.priority = priority;
+            if (entry.core_id) |core_id| spawn_config.core_id = core_id;
+            if (entry.allocator) |allocator| spawn_config.allocator = allocator;
+
+            return Native.spawn(spawn_config, routine);
+        }
+
+        pub fn currentToken() usize {
+            return Native.currentToken();
+        }
+    };
+}
+
+const ErrorHandler = struct {
+    pub fn onError(_: []const u8, _: anyerror) void {
+        @panic("esp task.go failed");
+    }
+};
+
+fn policyEntry(comptime value: anytype) Entry {
+    const Value = @TypeOf(value);
+    return switch (@typeInfo(Value)) {
+        .@"struct" => .{
+            .priority = if (@hasField(Value, "priority")) value.priority else null,
+            .core_id = if (@hasField(Value, "core_id")) value.core_id else null,
+            .allocator = if (@hasField(Value, "allocator")) value.allocator else null,
+        },
+        else => @compileError("task policy entry must be a struct"),
+    };
+}
+
+fn taskName(comptime grt: type, name: []const u8, buf: *[Native.max_name_len:0]u8) [:0]const u8 {
+    _ = grt;
+    const fallback = "task";
+    const source = if (name.len == 0) fallback else name;
+    const max_len = Native.max_name_len;
+    const len = @min(source.len, max_len);
+
+    for (source[0..len], 0..) |c, i| {
+        buf[i] = switch (c) {
+            '/', '.', ' ', ':' => '_',
+            else => c,
+        };
+    }
+    buf[len] = 0;
+    return buf[0..len :0];
+}

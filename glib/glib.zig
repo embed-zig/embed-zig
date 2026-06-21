@@ -94,7 +94,6 @@ pub const std = struct {
 pub const testing = struct {
     pub const std = testing_mod.std;
     pub const T = testing_mod.T;
-    pub const IsolationThread = testing_mod.IsolationThread;
     pub const TestingAllocator = testing_mod.TestingAllocator;
     pub const CountingAllocator = testing_mod.CountingAllocator;
     pub const LimitAllocator = testing_mod.LimitAllocator;
@@ -141,11 +140,11 @@ pub const io = @import("io");
 pub const encoding = @import("encoding");
 pub const mime = @import("mime");
 pub const net = @import("net");
-pub const fs = @import("fs");
 pub const path = @import("path");
+pub const fs = @import("fs");
 pub const compress = @import("compress");
-pub const crypto = @import("crypto");
 pub const archive = @import("archive");
+pub const crypto = @import("crypto");
 pub const runtime = struct {
     const Runtime = @This();
     const TypeMarker = struct {};
@@ -163,38 +162,36 @@ pub const runtime = struct {
 
     pub fn make(comptime options: Options) type {
         const runtime_std_raw = @import("stdz").make(options.stdz_impl);
-        const runtime_std = stdWithoutThreadSleep(runtime_std_raw);
         const runtime_time = @import("time").make(options.time_impl);
         const runtime_system = @import("glib_system").make(options.system_impl);
         const runtime_sync = options.sync_impl;
         const channel_factory = options.channel_factory;
-        const net_impl = options.net_impl;
         const fs_impl = options.fs_impl;
-        const runtime_sync_ns = struct {
-            pub const Arc = @import("sync").Arc;
-            pub const Mutex = @import("sync").Mutex.make(runtime_sync.Mutex);
-            pub const Condition = @import("sync").Condition.make(runtime_sync.Condition);
-            pub const RwLock = @import("sync").RwLock.make(runtime_sync.RwLock);
-            pub const ChannelFactory = channel_factory;
-            pub const Channel = @import("sync").Channel(runtime_std, channel_factory);
-
-            pub fn Racer(comptime T: type) type {
-                return @import("sync").RacerWithSync(runtime_std, runtime_time, @This(), T);
-            }
-        };
 
         return struct {
+            const Self = @This();
             const runtime_marker: TypeMarker = .{};
             pub const runtime = Runtime;
-            pub const std = runtime_std;
+            pub const task = if (options.task_impl == void) void else options.task_impl.make(Self);
+            pub const std = stdWithoutThreadSleep(runtime_std_raw, Self.task);
             pub const time = runtime_time;
             pub const system = runtime_system;
-            pub const context = @import("context").makeWithSync(runtime_std, runtime_time, runtime_sync_ns);
-            pub const task = if (options.task_impl == void) void else options.task_impl.make(@This());
-            pub const sync = runtime_sync_ns;
-            pub const net = @import("net").makeWithSync(runtime_std, runtime_time, runtime_sync_ns, net_impl);
-            pub const fs = @import("fs").make(runtime_std, fs_impl);
-            pub const compress = if (options.compress_impl == void) void else @import("compress").make(runtime_std, options.compress_impl);
+            pub const sync = struct {
+                pub const Arc = @import("sync").Arc;
+                pub const Mutex = @import("sync").Mutex.make(runtime_sync.Mutex);
+                pub const Condition = @import("sync").Condition.make(runtime_sync.Condition);
+                pub const RwLock = @import("sync").RwLock.make(runtime_sync.RwLock);
+                pub const ChannelFactory = channel_factory;
+                pub const Channel = @import("sync").Channel(Self.std, channel_factory);
+
+                pub fn Racer(comptime T: type) type {
+                    return @import("sync").RacerWithTask(Self.std, runtime_time, @This(), Self.task, T);
+                }
+            };
+            pub const context = @import("context").makeWithTask(Self.std, runtime_time, Self.sync, Self.task);
+            pub const net = @import("net").makeWithTask(Self.std, runtime_time, Self.sync, Self.task, options.net_impl);
+            pub const fs = @import("fs").make(Self.std, fs_impl);
+            pub const compress = if (options.compress_impl == void) void else @import("compress").make(Self.std, options.compress_impl);
         };
     }
 
@@ -207,10 +204,11 @@ pub const runtime = struct {
         return @TypeOf(ns.runtime_marker) == TypeMarker;
     }
 
-    fn stdWithoutThreadSleep(comptime RawStd: type) type {
+    fn stdWithoutThreadSleep(comptime RawStd: type, comptime Task: type) type {
         return struct {
             pub const heap = RawStd.heap;
-            pub const Thread = ThreadWithoutSleep(RawStd.Thread);
+            pub const Thread = RemovedThreadNamespace;
+            pub const task = Task;
             pub const log = RawStd.log;
             pub const posix = RawStd.posix;
             pub const ascii = RawStd.ascii;
@@ -282,67 +280,32 @@ pub const runtime = struct {
         };
     }
 
-    fn ThreadWithoutSleep(comptime RawThread: type) type {
-        return struct {
-            impl: RawThread,
+    const RemovedThreadNamespace = struct {
+        pub const removed_thread_guardrail = true;
+        pub const SpawnConfig = RemovedThreadMember("SpawnConfig", "grt.task.Options");
+        pub const SpawnError = RemovedThreadMember("SpawnError", "the selected grt.task.SpawnError");
+        pub const Mutex = RemovedThreadMember("Mutex", "grt.sync.Mutex");
+        pub const Condition = RemovedThreadMember("Condition", "grt.sync.Condition");
+        pub const RwLock = RemovedThreadMember("RwLock", "grt.sync.RwLock");
 
-            const Self = @This();
+        pub fn spawn(_: anytype, comptime _: anytype, _: anytype) void {
+            @compileError("grt.std.Thread.spawn is removed; use grt.task.go");
+        }
 
-            pub const runtime_thread_guardrail = true;
-            pub const SpawnConfig = RawThread.SpawnConfig;
-            pub const default_stack_size = RawThread.default_stack_size;
-            pub const SpawnError = RawThread.SpawnError;
-            pub const YieldError = RawThread.YieldError;
-            pub const SetNameError = RawThread.SetNameError;
-            pub const GetNameError = RawThread.GetNameError;
-            pub const max_name_len = RawThread.max_name_len;
+        pub fn sleep(_: u64) void {
+            @compileError("grt.std.Thread.sleep is removed; use grt.time.sleep or grt.time.sleepMillis");
+        }
 
-            pub const Id = RawThread.Id;
+        pub fn getCurrentId() void {
+            @compileError("grt.std.Thread.getCurrentId is removed; use explicit task-owned state");
+        }
 
-            pub const Mutex = RemovedThreadSyncType("Mutex", "grt.sync.Mutex or glib.sync.Mutex");
-            pub const Condition = RemovedThreadSyncType("Condition", "grt.sync.Condition or glib.sync.Condition");
-            pub const RwLock = RemovedThreadSyncType("RwLock", "grt.sync.RwLock or glib.sync.RwLock");
+        pub fn getCpuCount() void {
+            @compileError("grt.std.Thread.getCpuCount is removed; use grt.system.cpuCount");
+        }
+    };
 
-            pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) SpawnError!Self {
-                return .{ .impl = try RawThread.spawn(config, f, args) };
-            }
-
-            pub fn join(self: Self) void {
-                self.impl.join();
-            }
-
-            pub fn detach(self: Self) void {
-                self.impl.detach();
-            }
-
-            pub fn yield() YieldError!void {
-                return RawThread.yield();
-            }
-
-            pub fn sleep(ns: u64) void {
-                _ = ns;
-                @compileError("grt.std.Thread.sleep is removed; use grt.time.sleep or grt.time.sleepMillis");
-            }
-
-            pub fn getCpuCount() void {
-                @compileError("grt.std.Thread.getCpuCount is removed; use grt.system.cpuCount");
-            }
-
-            pub fn getCurrentId() void {
-                @compileError("grt.std.Thread.getCurrentId is removed; use explicit worker ownership state");
-            }
-
-            pub fn setName(name: []const u8) SetNameError!void {
-                return RawThread.setName(name);
-            }
-
-            pub fn getName(buf: *[max_name_len:0]u8) GetNameError!?[]const u8 {
-                return RawThread.getName(buf);
-            }
-        };
-    }
-
-    fn RemovedThreadSyncType(comptime name: []const u8, comptime replacement: []const u8) type {
+    fn RemovedThreadMember(comptime name: []const u8, comptime replacement: []const u8) type {
         return struct {
             comptime {
                 @compileError("grt.std.Thread." ++ name ++ " is removed; use " ++ replacement);

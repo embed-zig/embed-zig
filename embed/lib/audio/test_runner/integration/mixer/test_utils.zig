@@ -1,14 +1,12 @@
 const glib = @import("glib");
 pub fn waitUntilTrue(comptime grt: type, flag: *grt.std.atomic.Value(bool), comptime err_tag: anyerror) !void {
-    const Thread = grt.std.Thread;
-
     var spins: usize = 0;
     while (!flag.load(.acquire)) : (spins += 1) {
         if (spins == 10_000) return err_tag;
         if (spins % 128 == 0) {
             grt.time.sleep(100_000);
         } else {
-            Thread.yield() catch {};
+            grt.time.sleep(0);
         }
     }
 }

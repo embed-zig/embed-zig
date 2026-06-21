@@ -196,6 +196,8 @@ pub fn TestRunner(comptime std: type, comptime net: type) @import("testing").Tes
             {
                 const fake_net = struct {
                     pub const time = net.time;
+                    pub const sync = net.sync;
+                    pub const Context = net.Context;
 
                     pub const Runtime = struct {
                         pub const Tcp = struct {

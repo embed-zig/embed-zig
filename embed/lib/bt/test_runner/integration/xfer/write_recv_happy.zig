@@ -5,19 +5,38 @@ const write_mod = @import("../../../host/xfer/write.zig");
 const recv_mod = @import("../../../host/xfer/recv.zig");
 
 pub fn make(comptime grt: type) glib.testing.TestRunner {
-    return glib.testing.TestRunner.fromFn(grt.std, 96 * 1024, struct {
-        fn run(t: *glib.testing.T, allocator: glib.std.mem.Allocator) !void {
-            _ = t;
-            try runCase(grt, allocator);
+    const Runner = struct {
+        task_options: glib.task.Options = .{ .min_stack_size = 96 * 1024 },
+        xfer_task_options: glib.task.Options = .{ .min_stack_size = 64 * 1024 },
+
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
         }
-    }.run);
+
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
+            _ = t;
+            runCase(grt, allocator, self.xfer_task_options) catch return false;
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }
 
 pub fn run(comptime grt: type, allocator: glib.std.mem.Allocator) !void {
-    try runCase(grt, allocator);
+    try runCase(grt, allocator, .{ .min_stack_size = 64 * 1024 });
 }
 
-fn runCase(comptime grt: type, allocator: glib.std.mem.Allocator) !void {
+fn runCase(comptime grt: type, allocator: glib.std.mem.Allocator, task_options: glib.task.Options) !void {
     const Harness = harness_mod.make(grt);
 
     var harness = try Harness.init(allocator);
@@ -73,10 +92,10 @@ fn runCase(comptime grt: type, allocator: glib.std.mem.Allocator) !void {
         .transport = harness.right(),
     };
 
-    const write_thread = try grt.std.Thread.spawn(.{}, WriteTask.run, .{&write_task});
-    const recv_thread = try grt.std.Thread.spawn(.{}, RecvTask.run, .{&recv_task});
-    write_thread.join();
-    recv_thread.join();
+    const write_task_handle = try grt.task.go("testing/bt/xfer/write", task_options, glib.task.Routine.init(&write_task, WriteTask.run));
+    const recv_task_handle = try grt.task.go("testing/bt/xfer/recv", task_options, glib.task.Routine.init(&recv_task, RecvTask.run));
+    write_task_handle.join();
+    recv_task_handle.join();
 
     try grt.std.testing.expect(write_task.err == null);
     try grt.std.testing.expect(recv_task.err == null);

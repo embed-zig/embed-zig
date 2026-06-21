@@ -6,10 +6,10 @@ const control = @import("cmux/control.zig");
 const frame = @import("cmux/frame.zig");
 const Session = @import("cmux/Session.zig");
 
-pub fn Cmux(comptime std: type, comptime time: type) type {
+pub fn Cmux(comptime std: type, comptime time: type, comptime Sync: type, comptime Task: type) type {
     const Allocator = std.mem.Allocator;
-    const SessionType = Session.make(std, time);
-    const ChannelConnType = ChannelConn.make(std, time);
+    const SessionType = Session.make(std, time, Sync, Task);
+    const ChannelConnType = ChannelConn.make(std, time, Sync, Task);
 
     return struct {
         allocator: Allocator,
@@ -111,20 +111,43 @@ pub fn Cmux(comptime std: type, comptime time: type) type {
 
 pub fn TestRunner(comptime std: type, comptime time: type) @import("testing").TestRunner {
     const testing_api = @import("testing");
-    const Tp = Cmux(std, time);
-    const Thread = std.Thread;
+    const native_std = @import("std");
+    const NativeWorker = @field(native_std, "Thread");
+    const Sync = struct {
+        pub const Mutex = NativeWorker.Mutex;
+        pub const Condition = NativeWorker.Condition;
+    };
+    const Task = struct {
+        pub const Handle = NativeWorker;
+        pub const Options = @import("task").Options;
+        pub const SpawnError = NativeWorker.SpawnError;
+
+        pub fn go(_: []const u8, options: Options, routine: @import("task").Routine) SpawnError!Handle {
+            return NativeWorker.spawn(.{ .stack_size = options.min_stack_size }, struct {
+                fn run(task_routine: @import("task").Routine) void {
+                    task_routine.run();
+                }
+            }.run, .{routine});
+        }
+
+        pub fn currentToken() usize {
+            const value: usize = @intCast(NativeWorker.getCurrentId());
+            return if (value == 0) 1 else value;
+        }
+    };
+    const Tp = Cmux(std, time, Sync, Task);
 
     const TestCase = struct {
         const Pipe = struct {
-            mutex: Thread.Mutex = .{},
-            cond: Thread.Condition = .{},
+            mutex: NativeWorker.Mutex = .{},
+            cond: NativeWorker.Condition = .{},
             closed: bool = false,
             data: std.ArrayList(u8) = .{},
         };
 
         const PairState = struct {
             allocator: std.mem.Allocator,
-            mutex: Thread.Mutex = .{},
+            mutex: NativeWorker.Mutex = .{},
             refs: usize = 2,
             ab: Pipe = .{},
             ba: Pipe = .{},
@@ -333,7 +356,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) @import("testing").Te
                 unexpected: bool = false,
             };
             var result = Result{};
-            const worker = try Thread.spawn(.{}, struct {
+            const worker = try NativeWorker.spawn(.{}, struct {
                 fn run(cmux: *Tp, res: *Result) void {
                     _ = cmux.listener.accept() catch |err| {
                         res.closed = err == error.Closed;
@@ -367,7 +390,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) @import("testing").Te
                 unexpected: bool = false,
             };
             var result = Result{};
-            const worker = try Thread.spawn(.{}, struct {
+            const worker = try NativeWorker.spawn(.{}, struct {
                 fn run(conn: *NetConn, res: *Result) void {
                     var buf: [8]u8 = undefined;
                     _ = conn.read(&buf) catch |err| {
@@ -416,7 +439,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) @import("testing").Te
                 unexpected: bool = false,
             };
             var result = Result{};
-            const worker = try Thread.spawn(.{}, struct {
+            const worker = try NativeWorker.spawn(.{}, struct {
                 fn run(cmux: *Tp, res: *Result) void {
                     _ = cmux.listener.accept() catch |err| {
                         res.closed = err == error.Closed;

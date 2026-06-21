@@ -2,7 +2,6 @@
 
 const time_mod = @import("time");
 const io = @import("io");
-const context_mod = @import("context");
 const Conn = @import("../Conn.zig");
 const Listener = @import("../Listener.zig");
 const Header = @import("Header.zig");
@@ -20,9 +19,11 @@ const TextprotoReader = textproto_reader_mod.Reader(BufferedConnReader);
 
 pub fn Server(comptime std: type, comptime net: type) type {
     const Allocator = std.mem.Allocator;
-    const Thread = std.Thread;
-    const Context = context_mod.Context;
-    const ContextNs = context_mod.make(std, net.time);
+    const Sync = net.sync;
+    const Task = net.task;
+    const LegacySpawnConfig = @import("../LegacySpawnConfig.zig");
+    const Context = @import("context").Context;
+    const ContextNs = net.Context;
     const Handler = handler_mod.Handler(std);
     const HandlerFunc = handler_mod.HandlerFunc(std);
     const ServeMux = serve_mux_mod.ServeMux(std);
@@ -39,7 +40,8 @@ pub fn Server(comptime std: type, comptime net: type) type {
 
         pub const Options = struct {
             handler: ?Handler = null,
-            spawn_config: Thread.SpawnConfig = .{},
+            spawn_config: ?LegacySpawnConfig = null,
+            task_options: Task.Options = .{ .min_stack_size = 64 * 1024 },
             read_header_timeout: ?time_mod.duration.Duration = null,
             read_timeout: ?time_mod.duration.Duration = null,
             write_timeout: ?time_mod.duration.Duration = null,
@@ -58,8 +60,8 @@ pub fn Server(comptime std: type, comptime net: type) type {
         };
 
         const SharedState = struct {
-            mutex: Thread.Mutex = .{},
-            cond: Thread.Condition = .{},
+            mutex: Sync.Mutex = .{},
+            cond: Sync.Condition = .{},
             listener: ?Listener = null,
             serving: bool = false,
             closed_permanently: bool = false,
@@ -78,6 +80,23 @@ pub fn Server(comptime std: type, comptime net: type) type {
         const ChunkedState = struct {
             remaining_in_chunk: usize = 0,
             final_chunk_seen: bool = false,
+        };
+
+        const ConnWorker = struct {
+            allocator: Allocator,
+            server: *Self,
+            conn: Conn,
+            conn_id: usize,
+
+            fn run(worker: *ConnWorker) void {
+                const allocator = worker.allocator;
+                const server = worker.server;
+                const conn = worker.conn;
+                const conn_id = worker.conn_id;
+                allocator.destroy(worker);
+
+                server.connectionWorker(conn, conn_id);
+            }
         };
 
         pub const RequestBodyState = struct {
@@ -203,10 +222,15 @@ pub fn Server(comptime std: type, comptime net: type) type {
 
             var contexts = try ContextNs.init(allocator);
             errdefer contexts.deinit();
+            var owned_options = options;
+            if (options.spawn_config) |spawn_config| {
+                owned_options.task_options.min_stack_size = spawn_config.stack_size;
+                owned_options.spawn_config = null;
+            }
 
             var self = Self{
                 .allocator = allocator,
-                .options = options,
+                .options = owned_options,
                 .shared = shared,
                 .contexts = contexts,
                 .handler = undefined,
@@ -281,7 +305,7 @@ pub fn Server(comptime std: type, comptime net: type) type {
                     serve_err = err;
                     return serve_err;
                 };
-                const thread = Thread.spawn(self.options.spawn_config, Self.connectionWorker, .{ self, conn, conn_id }) catch |err| {
+                const worker = self.allocator.create(ConnWorker) catch |err| {
                     self.unregisterConn(conn_id);
                     var doomed = conn;
                     doomed.deinit();
@@ -289,7 +313,27 @@ pub fn Server(comptime std: type, comptime net: type) type {
                     serve_err = err;
                     return serve_err;
                 };
-                thread.detach();
+                worker.* = .{
+                    .allocator = self.allocator,
+                    .server = self,
+                    .conn = conn,
+                    .conn_id = conn_id,
+                };
+
+                const task = Task.go(
+                    "net/http/server/conn",
+                    self.options.task_options,
+                    Task.Routine.init(worker, ConnWorker.run),
+                ) catch |err| {
+                    self.allocator.destroy(worker);
+                    self.unregisterConn(conn_id);
+                    var doomed = conn;
+                    doomed.deinit();
+                    self.initiateHardClose();
+                    serve_err = err;
+                    return serve_err;
+                };
+                task.detach();
             }
         }
 

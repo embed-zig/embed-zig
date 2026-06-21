@@ -3,6 +3,8 @@ const client_mod = @import("../../PerfClient.zig");
 const protocol = @import("../../PerfProtocol.zig");
 const server_mod = @import("../../PerfServer.zig");
 
+const server_task_options: glib.task.Options = .{ .min_stack_size = 96 * 1024 };
+
 pub fn make(comptime grt: type, allocator: glib.std.mem.Allocator) glib.testing.TestRunner {
     _ = allocator;
     const Runner = struct {
@@ -57,9 +59,9 @@ fn runKcpSmoke(comptime grt: type, allocator: glib.std.mem.Allocator, t: *glib.t
 
     var server_result: ?anyerror = null;
     var server_task = ServerTask{ .server = &server, .out = &server_result };
-    const thread = try grt.task.go("kcp/test_server", .{}, glib.task.Routine.init(&server_task, ServerTask.run));
+    const thread = try grt.task.go("testing/kcp/server", server_task_options, glib.task.Routine.init(&server_task, ServerTask.run));
 
-    grt.time.sleepNanos(50 * glib.time.duration.MilliSecond);
+    grt.time.sleep(50 * glib.time.duration.MilliSecond);
 
     var client = Client.init(allocator);
     const result = try client.run(addr, .{

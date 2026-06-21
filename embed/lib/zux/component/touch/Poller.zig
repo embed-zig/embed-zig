@@ -8,6 +8,7 @@ const PipelinePoller = @import("../../pipeline/Poller.zig");
 pub fn make(comptime grt: type) type {
     return struct {
         const Self = @This();
+        const log = grt.std.log.scoped(.zux_touch);
 
         pub const Error = error{
             InvalidState,
@@ -21,7 +22,7 @@ pub fn make(comptime grt: type) type {
         touch: drivers.Touch,
         source_id: u32,
         poll_interval: glib.time.duration.Duration = PipelinePoller.default_poll_interval,
-        spawn_config: grt.std.Thread.SpawnConfig = .{},
+        task_options: glib.task.Options = .{ .min_stack_size = 8 * 1024 },
         out: ?Emitter = null,
         state_mu: grt.sync.Mutex = .{},
         running: bool = false,
@@ -29,7 +30,7 @@ pub fn make(comptime grt: type) type {
         last_pressed: ?bool = null,
         last_point_count: usize = 0,
         last_primary: ?drivers.Touch.Point = null,
-        thread: ?grt.std.Thread = null,
+        task: ?grt.task.Handle = null,
 
         pub fn init(self: *Self, touch: drivers.Touch, config: Config) PipelinePoller {
             self.* = .{
@@ -47,12 +48,12 @@ pub fn make(comptime grt: type) type {
 
         pub fn start(self: *Self, config: PipelinePoller.Config) Error!void {
             self.state_mu.lock();
-            if (self.running or self.thread != null or self.out == null) {
+            if (self.running or self.task != null or self.out == null) {
                 self.state_mu.unlock();
                 return error.InvalidState;
             }
             self.poll_interval = config.poll_interval;
-            self.spawn_config = adaptSpawnConfig(config.spawn_config);
+            self.task_options = config.task_options;
             self.running = true;
             self.async_failed = false;
             self.last_pressed = null;
@@ -60,7 +61,11 @@ pub fn make(comptime grt: type) type {
             self.last_primary = null;
             self.state_mu.unlock();
 
-            const thread = grt.std.Thread.spawn(self.spawn_config, Self.run, .{self}) catch {
+            const task = grt.task.go(
+                "zux/touch/poller",
+                self.task_options,
+                glib.task.Routine.init(self, Self.run),
+            ) catch {
                 self.state_mu.lock();
                 self.running = false;
                 self.state_mu.unlock();
@@ -68,18 +73,19 @@ pub fn make(comptime grt: type) type {
             };
 
             self.state_mu.lock();
-            self.thread = thread;
+            self.task = task;
             self.state_mu.unlock();
+            log.info("poller started source={} interval_ns={}", .{ self.source_id, self.poll_interval });
         }
 
         pub fn stop(self: *Self) void {
             self.state_mu.lock();
             self.running = false;
-            const thread = self.thread;
-            self.thread = null;
+            const task = self.task;
+            self.task = null;
             self.state_mu.unlock();
 
-            if (thread) |t| {
+            if (task) |t| {
                 t.join();
             }
         }
@@ -118,7 +124,8 @@ pub fn make(comptime grt: type) type {
                     };
                 };
 
-                self.pollOnce(snapshot.out, snapshot.source_id) catch {
+                self.pollOnce(snapshot.out, snapshot.source_id) catch |err| {
+                    log.err("poll failed source={} err={s}", .{ snapshot.source_id, @errorName(err) });
                     self.failAsync();
                 };
 
@@ -148,6 +155,14 @@ pub fn make(comptime grt: type) type {
             self.last_primary = primary;
             self.state_mu.unlock();
 
+            log.info("emit raw_touch source={} pressed={} count={} x={} y={}", .{
+                source_id,
+                pressed,
+                sample.len,
+                if (primary) |point| point.x else 0,
+                if (primary) |point| point.y else 0,
+            });
+
             try out.emit(.{
                 .origin = .source,
                 .timestamp = grt.time.instant.now(),
@@ -169,19 +184,6 @@ pub fn make(comptime grt: type) type {
             self.state_mu.lock();
             defer self.state_mu.unlock();
             self.async_failed = true;
-        }
-
-        fn adaptSpawnConfig(source: @FieldType(PipelinePoller.Config, "spawn_config")) grt.std.Thread.SpawnConfig {
-            var out: grt.std.Thread.SpawnConfig = .{};
-            const Source = @TypeOf(source);
-
-            inline for (@typeInfo(grt.std.Thread.SpawnConfig).@"struct".fields) |field| {
-                if (@hasField(Source, field.name)) {
-                    @field(out, field.name) = @field(source, field.name);
-                }
-            }
-
-            return out;
         }
     };
 }

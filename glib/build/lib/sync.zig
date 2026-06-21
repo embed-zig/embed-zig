@@ -15,6 +15,7 @@ pub fn create(
 pub fn link(mod: *std.Build.Module, deps: anytype) void {
     mod.addImport("context", deps.context);
     mod.addImport("stdz", deps.stdz);
+    mod.addImport("task", deps.task);
     mod.addImport("testing", deps.testing);
     mod.addImport("time", deps.time);
 }

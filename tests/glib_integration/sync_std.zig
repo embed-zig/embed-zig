@@ -16,11 +16,12 @@ test "glib/sync/integration/std" {
     const std = @import("std");
 
     std.testing.log_level = .info;
+    const test_std = glib.testing.std.make(std, .{});
 
-    var t = glib.testing.T.new(std, gstd.runtime.time, .sync);
+    var t = glib.testing.T.new(test_std, gstd.runtime.time, .sync);
     defer t.deinit();
     t.timeout(20 * glib.time.duration.Second);
 
-    t.run("glib/sync/integration/std", glib.sync.test_runner.integration.make(std, gstd.runtime.time, gstd.runtime.sync.ChannelFactory));
+    t.run("glib/sync/integration/std", glib.sync.test_runner.integration.make(test_std, gstd.runtime.time, gstd.runtime.sync.ChannelFactory));
     if (!t.wait()) return error.TestFailed;
 }

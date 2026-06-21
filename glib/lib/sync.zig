@@ -32,15 +32,22 @@ pub fn Channel(comptime std: type, comptime factory: channel.FactoryType) channe
 }
 
 pub fn Racer(comptime std: type, comptime time: type, comptime T: type) type {
-    const sync = struct {
-        pub const Mutex = @import("sync/Mutex.zig").make(std.Thread.Mutex);
-        pub const Condition = @import("sync/Condition.zig").make(std.Thread.Condition);
-    };
-    return RacerWithSync(std, time, sync, T);
+    _ = std;
+    _ = time;
+    _ = T;
+    @compileError("sync.Racer requires explicit sync and task; use RacerWithTask");
 }
 
 pub fn RacerWithSync(comptime std: type, comptime time: type, comptime sync: type, comptime T: type) type {
-    return racer_mod.Racer(std, time, sync, T);
+    _ = std;
+    _ = time;
+    _ = sync;
+    _ = T;
+    @compileError("sync.RacerWithSync is removed; use RacerWithTask");
+}
+
+pub fn RacerWithTask(comptime std: type, comptime time: type, comptime sync: type, comptime task: type, comptime T: type) type {
+    return racer_mod.Racer(std, time, sync, task, T);
 }
 
 pub const test_runner = struct {

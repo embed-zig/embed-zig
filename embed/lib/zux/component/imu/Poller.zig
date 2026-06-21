@@ -17,25 +17,25 @@ pub fn make(comptime grt: type) type {
         pub const Config = struct {
             source_id: u32,
             poll_interval: glib.time.duration.Duration = default_poll_interval,
-            spawn_config: grt.std.Thread.SpawnConfig = .{},
+            task_options: glib.task.Options = .{ .min_stack_size = 8 * 1024 },
         };
 
         imu: drivers.imu,
         source_id: u32,
         poll_interval: glib.time.duration.Duration = default_poll_interval,
-        spawn_config: grt.std.Thread.SpawnConfig = .{},
+        task_options: glib.task.Options = .{ .min_stack_size = 8 * 1024 },
         out: ?Emitter = null,
         state_mu: grt.sync.Mutex = .{},
         running: bool = false,
         async_failed: bool = false,
-        thread: ?grt.std.Thread = null,
+        task: ?grt.task.Handle = null,
 
         pub fn init(imu: drivers.imu, config: Config) Self {
             return .{
                 .imu = imu,
                 .source_id = config.source_id,
                 .poll_interval = config.poll_interval,
-                .spawn_config = config.spawn_config,
+                .task_options = config.task_options,
             };
         }
 
@@ -47,7 +47,7 @@ pub fn make(comptime grt: type) type {
 
         pub fn start(self: *Self) Error!void {
             self.state_mu.lock();
-            if (self.running or self.thread != null or self.out == null) {
+            if (self.running or self.task != null or self.out == null) {
                 self.state_mu.unlock();
                 return error.InvalidState;
             }
@@ -55,7 +55,11 @@ pub fn make(comptime grt: type) type {
             self.async_failed = false;
             self.state_mu.unlock();
 
-            const thread = grt.std.Thread.spawn(self.spawn_config, Self.run, .{self}) catch {
+            const task = grt.task.go(
+                "zux/imu/poller",
+                self.task_options,
+                glib.task.Routine.init(self, Self.run),
+            ) catch {
                 self.state_mu.lock();
                 self.running = false;
                 self.state_mu.unlock();
@@ -63,18 +67,18 @@ pub fn make(comptime grt: type) type {
             };
 
             self.state_mu.lock();
-            self.thread = thread;
+            self.task = task;
             self.state_mu.unlock();
         }
 
         pub fn stop(self: *Self) void {
             self.state_mu.lock();
             self.running = false;
-            const thread = self.thread;
-            self.thread = null;
+            const task = self.task;
+            self.task = null;
             self.state_mu.unlock();
 
-            if (thread) |t| {
+            if (task) |t| {
                 t.join();
             }
         }

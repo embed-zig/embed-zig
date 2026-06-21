@@ -187,6 +187,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
 
                 const FakeNet = struct {
                     pub const time = net.time;
+                    pub const sync = net.sync;
                     pub const Runtime = FakeRuntime;
                 };
 

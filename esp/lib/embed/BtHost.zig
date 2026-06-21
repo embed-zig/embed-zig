@@ -4,7 +4,6 @@ const esp = @import("esp");
 const LocalHci = @import("bt/LocalHci.zig");
 
 const BtHost = @This();
-const thread_allocator = esp.heap.Allocator(.{ .caps = .internal_8bit, .alignment = .align_u32 });
 
 pub const Config = struct {
     allocator: esp.grt.std.mem.Allocator,
@@ -25,10 +24,8 @@ pub fn init(config: Config) !BtHost {
     const Host = embed.bt.Host.makeHciTransport(esp.grt);
     const host = try Host.init(config.allocator, transport.handle(), .{
         .hci = .{
-            .spawn_config = .{
-                .name = "bt_hci",
-                .stack_size = 8 * 1024,
-                .allocator = thread_allocator,
+            .task_options = .{
+                .min_stack_size = 8 * 1024,
             },
         },
         .source_id = config.source_id,

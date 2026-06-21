@@ -8,11 +8,11 @@ It is not a wrapper around `std.Thread`. The module owns only:
 - static path routing from task names to handlers
 - a `Routine` executable object
 - a joinable `go` entrypoint on the generated task runtime
+- a `currentToken` identity entrypoint for runtime-owned task-local ownership checks
 
 Platform handlers decide how a task is started. A handler may create an OS
 thread, a FreeRTOS task, a fiber, or any other execution unit. The handler may
-also choose stack size, priority, CPU affinity, allocator, or memory region from
-the task name.
+choose priority, CPU affinity, allocator, or memory region from the task name.
 
 ## Shape
 
@@ -31,8 +31,9 @@ Runtime code then calls:
 
 ```zig
 const routine = task.Routine.init(&app, runUiApp);
-const handle = try Task.go("ui/app", .{}, routine);
+const handle = try Task.go("ui/app", .{ .min_stack_size = 16 * 1024 }, routine);
 handle.join();
+const owner_token = Task.currentToken();
 ```
 
 `Routine` is `ptr + vtable`; it makes state lifetime explicit at the call site.
@@ -41,8 +42,12 @@ the handle by joining it or transferring it to a parent/supervisor. The public
 API does not provide a fire-and-forget detach helper.
 
 `Options.min_stack_size` is a lower-bound resource hint, not a thread config.
-The platform handler still owns stack policy, memory placement, priority, core
-affinity, pool selection, and whether dynamic stack growth is available.
+Every `go` call should provide the smallest known stack requirement for that
+task. Platform handlers forward or satisfy it while owning memory placement,
+priority, core affinity, and pool selection.
+`currentToken()` returns a non-zero value that identifies the current execution
+unit for ownership checks such as recursive mutexes. It is not a public thread
+ID and must not be used for scheduling or persistence.
 
 ## Routing
 

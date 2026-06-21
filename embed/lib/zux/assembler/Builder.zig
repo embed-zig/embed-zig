@@ -153,10 +153,7 @@ pub fn build(builder: root, comptime context: anytype) type {
 
         pub fn start(self: *@This(), config: Poller.Config) !void {
             self.inner.poll_interval = config.poll_interval;
-            self.inner.spawn_config = adaptSpawnConfig(
-                context.grt.std.Thread.SpawnConfig,
-                config.spawn_config,
-            );
+            self.inner.task_options = config.task_options;
             try self.inner.start();
         }
 

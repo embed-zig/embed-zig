@@ -9,7 +9,6 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run(allocator: glib.std.mem.Allocator) !void {
             const Atomic = grt.std.atomic.Value;
-            const Thread = grt.std.Thread;
 
             const mixer = try DefaultMixerType.init(.{
                 .allocator = allocator,
@@ -31,7 +30,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
 
             var state = State{ .track = handle.track };
 
-            const writer = try Thread.spawn(.{}, struct {
+            const writer = try grt.task.go("testing/audio/backpressure_writer", .{ .min_stack_size = 8 * 1024 }, glib.task.Routine.init(&state, struct {
                 fn run(s: *State) void {
                     s.started.store(true, .release);
                     s.track.write(.{ .rate = 16000, .channels = .mono }, &.{ 3, 4 }) catch |err| {
@@ -41,13 +40,13 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                     };
                     s.finished.store(true, .release);
                 }
-            }.run, .{&state});
+            }.run));
 
             try test_utils.waitUntilTrue(grt, &state.started, error.WriterDidNotStart);
 
             for (0..1000) |_| {
                 if (state.finished.load(.acquire)) break;
-                Thread.yield() catch {};
+                grt.time.sleep(0);
             }
             try grt.std.testing.expect(!state.finished.load(.acquire));
 

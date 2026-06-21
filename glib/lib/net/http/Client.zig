@@ -20,9 +20,10 @@ const RedirectAction = enum {
     preserve_method,
 };
 
-pub fn Client(comptime std: type) type {
+pub fn Client(comptime std: type, comptime Sync: type) type {
     const Allocator = std.mem.Allocator;
-    const Thread = std.Thread;
+    const Mutex = Sync.Mutex;
+    const Condition = Sync.Condition;
 
     return struct {
         allocator: Allocator,
@@ -38,8 +39,8 @@ pub fn Client(comptime std: type) type {
         };
 
         const SharedState = struct {
-            mutex: Thread.Mutex = .{},
-            cond: Thread.Condition = .{},
+            mutex: Mutex = .{},
+            cond: Condition = .{},
             deiniting: bool = false,
             active_calls: usize = 0,
             active_requests: usize = 0,
@@ -592,11 +593,14 @@ fn splitReference(comptime std: type, input: []const u8) ReferenceParts {
     return parts;
 }
 
-pub fn TestRunner(comptime std: type) testing_api.TestRunner {
+pub fn TestRunner(comptime std: type, comptime Sync: type, comptime Task: type) testing_api.TestRunner {
+    const Mutex = Sync.Mutex;
+    const Condition = Sync.Condition;
+
     return testing_api.TestRunner.fromFn(std, 3 * 1024 * 1024, struct {
         fn run(_: *testing_api.T, allocator: std.mem.Allocator) !void {
             const testing = std.testing;
-            const HttpClient = Client(std);
+            const HttpClient = Client(std, Sync);
 
             {
                 const MockRoundTripper = struct {
@@ -920,11 +924,14 @@ pub fn TestRunner(comptime std: type) testing_api.TestRunner {
                     started: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
                     finished: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
                 };
-                const gen = struct {
-                    fn run(client: *HttpClient, flags: *Flags) void {
-                        flags.started.store(true, .seq_cst);
-                        client.deinit();
-                        flags.finished.store(true, .seq_cst);
+                const DeinitTask = struct {
+                    client: *HttpClient,
+                    flags: *Flags,
+
+                    fn run(self: *@This()) void {
+                        self.flags.started.store(true, .seq_cst);
+                        self.client.deinit();
+                        self.flags.finished.store(true, .seq_cst);
                     }
                 };
                 var mock = MockRoundTripper{};
@@ -936,12 +943,14 @@ pub fn TestRunner(comptime std: type) testing_api.TestRunner {
                 var resp = try client.do(&req);
                 try testing.expectEqual(@as(usize, 1), client.shared.active_requests);
                 var flags = Flags{};
-                const thread = try std.Thread.spawn(.{}, gen.run, .{ &client, &flags });
+                var deinit_task = DeinitTask{ .client = &client, .flags = &flags };
+                const thread = try Task.go(
+                    "net/http/client/deinit",
+                    .{},
+                    Task.Routine.init(&deinit_task, DeinitTask.run),
+                );
                 while (!flags.started.load(.seq_cst)) {
-                    std.Thread.yield() catch {};
-                }
-                for (0..16) |_| {
-                    std.Thread.yield() catch {};
+                    _ = flags.started.load(.seq_cst);
                 }
                 try testing.expect(!flags.finished.load(.seq_cst));
                 resp.deinit();
@@ -967,8 +976,8 @@ pub fn TestRunner(comptime std: type) testing_api.TestRunner {
                 };
                 const BlockingFactory = struct {
                     alloc: std.mem.Allocator,
-                    mutex: std.Thread.Mutex = .{},
-                    cond: std.Thread.Condition = .{},
+                    mutex: Mutex = .{},
+                    cond: Condition = .{},
                     started: bool = false,
                     allow_return: bool = false,
                     pub fn getBody(self: *@This()) anyerror!ReadCloser {
@@ -1008,15 +1017,17 @@ pub fn TestRunner(comptime std: type) testing_api.TestRunner {
                     }
                 };
                 const DoState = struct {
-                    mutex: std.Thread.Mutex = .{},
-                    cond: std.Thread.Condition = .{},
+                    mutex: Mutex = .{},
+                    cond: Condition = .{},
+                    client: *HttpClient,
+                    req: *Request,
                     finished: bool = false,
                     resp: ?Response = null,
                     err: ?anyerror = null,
                 };
                 const DoTask = struct {
-                    fn run(client: *HttpClient, req: *Request, state: *DoState) void {
-                        const result = client.do(req);
+                    fn run(state: *DoState) void {
+                        const result = state.client.do(state.req);
                         state.mutex.lock();
                         defer state.mutex.unlock();
                         if (result) |r| {
@@ -1031,11 +1042,12 @@ pub fn TestRunner(comptime std: type) testing_api.TestRunner {
                 const DeinitState = struct {
                     started: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
                     finished: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+                    client: *HttpClient,
                 };
                 const DeinitTask = struct {
-                    fn run(client: *HttpClient, state: *DeinitState) void {
+                    fn run(state: *DeinitState) void {
                         state.started.store(true, .seq_cst);
-                        client.deinit();
+                        state.client.deinit();
                         state.finished.store(true, .seq_cst);
                     }
                 };
@@ -1050,16 +1062,21 @@ pub fn TestRunner(comptime std: type) testing_api.TestRunner {
                 req = req.withBody(ReadCloser.init(&initial_body));
                 req = req.withGetBody(Request.GetBody.init(&factory));
                 req.content_length = 1;
-                var do_state = DoState{};
-                const do_thread = try std.Thread.spawn(.{}, DoTask.run, .{ &client, &req, &do_state });
+                var do_state = DoState{ .client = &client, .req = &req };
+                const do_thread = try Task.go(
+                    "net/http/client/do",
+                    .{},
+                    Task.Routine.init(&do_state, DoTask.run),
+                );
                 factory.waitUntilStarted();
-                var deinit_state = DeinitState{};
-                const deinit_thread = try std.Thread.spawn(.{}, DeinitTask.run, .{ &client, &deinit_state });
+                var deinit_state = DeinitState{ .client = &client };
+                const deinit_thread = try Task.go(
+                    "net/http/client/deinit",
+                    .{},
+                    Task.Routine.init(&deinit_state, DeinitTask.run),
+                );
                 while (!deinit_state.started.load(.seq_cst)) {
-                    std.Thread.yield() catch {};
-                }
-                for (0..16) |_| {
-                    std.Thread.yield() catch {};
+                    _ = deinit_state.started.load(.seq_cst);
                 }
                 try testing.expect(!deinit_state.finished.load(.seq_cst));
                 factory.allow();

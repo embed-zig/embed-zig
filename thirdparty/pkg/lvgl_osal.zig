@@ -26,14 +26,10 @@ pub fn makeWithAllocators(
     }
 
     return struct {
-        const Thread = grt.std.Thread;
-        const AtomicUsize = grt.std.atomic.Value(usize);
+        const Task = grt.task;
         const ThreadCallback = *const fn (?*anyopaque) callconv(.c) void;
         const allocation_alignment: glib.std.mem.Alignment = .@"16";
         const allocation_header_len: usize = 16;
-
-        var next_owner_token = AtomicUsize.init(1);
-        threadlocal var owner_token: usize = 0;
 
         const AllocationHeader = extern struct {
             total_len: usize,
@@ -129,7 +125,7 @@ pub fn makeWithAllocators(
         };
 
         const ThreadImpl = struct {
-            handle: Thread,
+            handle: Task.Handle,
             callback: ThreadCallback,
             user_data: ?*anyopaque,
         };
@@ -181,36 +177,23 @@ pub fn makeWithAllocators(
         }
 
         fn currentOwnerToken() usize {
-            if (owner_token == 0) {
-                owner_token = next_owner_token.fetchAdd(1, .monotonic);
-                if (owner_token == 0) {
-                    owner_token = next_owner_token.fetchAdd(1, .monotonic);
-                }
-            }
-            return owner_token;
+            const value = Task.currentToken();
+            return if (value == 0) 1 else value;
         }
 
-        fn spawnConfig(name: ?[*:0]const u8, prio: c_int, stack_size: usize) Thread.SpawnConfig {
-            const defaults = Thread.SpawnConfig{};
-            return .{
-                .stack_size = normalizeStackSize(stack_size),
-                .allocator = os_allocator,
-                .priority = clampPriority(prio, defaults.priority),
-                .name = name orelse defaults.name,
-                .core_id = defaults.core_id,
-            };
+        fn taskOptions(stack_size: usize) glib.task.Options {
+            return .{ .min_stack_size = normalizeStackSize(stack_size) };
+        }
+
+        fn taskName(name: ?[*:0]const u8) []const u8 {
+            const ptr = name orelse return "lvgl";
+            return glib.std.mem.sliceTo(ptr, 0);
         }
 
         fn normalizeStackSize(stack_size: usize) usize {
             if (stack_size == 0) return 0;
             if (stack_size < grt.std.heap.pageSize()) return 0;
             return stack_size;
-        }
-
-        fn clampPriority(prio: c_int, fallback: u8) u8 {
-            if (prio < 0) return fallback;
-            if (prio > @as(c_int, grt.std.math.maxInt(u8))) return grt.std.math.maxInt(u8);
-            return @intCast(prio);
         }
 
         fn createImpl(comptime T: type) ?*T {
@@ -335,7 +318,8 @@ pub fn makeWithAllocators(
                 .callback = cb,
                 .user_data = user_data,
             };
-            impl.handle = Thread.spawn(spawnConfig(name, prio, stack_size), threadMain, .{impl}) catch {
+            _ = prio;
+            impl.handle = Task.go(taskName(name), taskOptions(stack_size), glib.task.Routine.init(impl, threadMain)) catch {
                 destroyImpl(ThreadImpl, impl);
                 return invalid();
             };

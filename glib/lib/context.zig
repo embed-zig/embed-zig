@@ -39,7 +39,6 @@
 //!   var wake_fd = some_posix_socket;
 //!   try cancel_ctx.bindFd(std, &wake_fd);
 
-const stdz = @import("stdz");
 const time_mod = @import("time");
 pub const Context = @import("context/Context.zig");
 const cancel_context = @import("context/CancelContext.zig");
@@ -48,15 +47,20 @@ const internal = @import("context/internal.zig");
 const value_context = @import("context/ValueContext.zig");
 
 pub fn make(comptime std: type, comptime time: type) type {
-    const sync = struct {
-        pub const Mutex = std.Thread.Mutex;
-        pub const Condition = std.Thread.Condition;
-        pub const RwLock = std.Thread.RwLock;
-    };
-    return makeWithSync(std, time, sync);
+    if (!@hasDecl(std, "sync") or !@hasDecl(std, "task")) {
+        @compileError("context.make requires std.sync and std.task; use context.makeWithTask for explicit runtime wiring");
+    }
+    return makeWithTask(std, time, std.sync, std.task);
 }
 
 pub fn makeWithSync(comptime std: type, comptime time: type, comptime sync: type) type {
+    _ = std;
+    _ = time;
+    _ = sync;
+    @compileError("context.makeWithSync is removed; use context.makeWithTask with runtime task");
+}
+
+pub fn makeWithTask(comptime std: type, comptime time: type, comptime sync: type, comptime task: type) type {
     const Background = struct {
         tree: Context.TreeLink = .{},
         tree_rw: sync.RwLock = .{},
@@ -93,7 +97,7 @@ pub fn makeWithSync(comptime std: type, comptime time: type, comptime sync: type
                 time.sleep(duration);
                 return null;
             }
-            while (true) time.sleepNanos(stdz.math.maxInt(u64));
+            while (true) time.sleep(time_mod.duration.Hour);
         }
 
         fn cancelFn(_: *anyopaque) void {}
@@ -169,7 +173,7 @@ pub fn makeWithSync(comptime std: type, comptime time: type, comptime sync: type
 
         const Self = @This();
         pub const CancelContext = cancel_context.make(std, time, sync);
-        pub const DeadlineContext = deadline_context.make(std, time, sync);
+        pub const DeadlineContext = deadline_context.make(std, time, sync, task);
         pub fn ValueContext(comptime T: type) type {
             return value_context.make(std, time, sync, T);
         }

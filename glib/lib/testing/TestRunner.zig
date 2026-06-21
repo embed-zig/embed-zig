@@ -3,20 +3,23 @@
 //! `make(TestRunner).new(ctx)` borrows `ctx`, calls `ctx.init(allocator)` from
 //! `run()`, then forwards to `ctx.run(t, allocator)`.
 //!
-//! Factory: `fromFn` — `run_fn(t, allocator)` on a worker thread; `stack_size` sets
-//! `spawn_config.stack_size` for that worker (callers choose an explicit size per case).
+//! Factory: `fromFn` — `run_fn(t, allocator)` on a worker task; `stack_size` sets
+//! `task_options.min_stack_size` for that worker (callers choose an explicit size per case).
 
 const builtin = @import("builtin");
 const stdz = @import("stdz");
+const task = @import("task");
 const time_mod = @import("time");
 const Self = @This();
 const T = @import("T.zig");
+
+const default_task_options: task.Options = .{ .min_stack_size = 96 * 1024 };
 
 var default_ctx_byte: u8 = 0;
 
 ctx: *anyopaque,
 vtable: *const VTable,
-spawn_config: stdz.Thread.SpawnConfig = .{},
+task_options: task.Options = default_task_options,
 memory_limit: ?usize = null,
 
 pub const VTable = struct {
@@ -27,7 +30,7 @@ pub const VTable = struct {
 const Options = struct {
     ctx: *anyopaque = defaultCtx(),
     vtable: *const VTable,
-    spawn_config: stdz.Thread.SpawnConfig = .{},
+    task_options: task.Options = default_task_options,
     memory_limit: ?usize = null,
 };
 
@@ -35,7 +38,7 @@ fn init(options: Options) Self {
     return .{
         .ctx = options.ctx,
         .vtable = options.vtable,
-        .spawn_config = options.spawn_config,
+        .task_options = options.task_options,
         .memory_limit = options.memory_limit,
     };
 }
@@ -80,7 +83,7 @@ pub fn make(comptime RunnerType: type) type {
             return init(.{
                 .ctx = @ptrCast(ctx),
                 .vtable = &Impl.vtable,
-                .spawn_config = if (@hasField(RunnerType, "spawn_config")) ctx.spawn_config else .{},
+                .task_options = if (@hasField(RunnerType, "task_options")) ctx.task_options else default_task_options,
                 .memory_limit = if (@hasField(RunnerType, "memory_limit")) ctx.memory_limit else null,
             });
         }
@@ -93,7 +96,7 @@ pub fn fromFn(
     comptime run_fn: *const fn (t: *T, allocator: std.mem.Allocator) anyerror!void,
 ) Self {
     const Runner = struct {
-        spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = stack_size },
+        task_options: task.Options = .{ .min_stack_size = stack_size },
 
         pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
@@ -191,11 +194,11 @@ pub fn TestRunner(comptime std: type, comptime time: type) Self {
                     .runFn = Helper.run,
                     .deinitFn = Helper.deinit,
                 },
-                .spawn_config = .{ .stack_size = 1234 },
+                .task_options = .{ .min_stack_size = 1234 },
                 .memory_limit = 99,
             });
 
-            try std.testing.expectEqual(@as(usize, 1234), runner.spawn_config.stack_size);
+            try std.testing.expectEqual(@as(usize, 1234), runner.task_options.min_stack_size);
             try std.testing.expectEqual(@as(?usize, 99), runner.memory_limit);
             try std.testing.expect(runner.run(&handle, std.testing.allocator));
             try std.testing.expectEqual(@as(usize, 1), state.run_hits);
@@ -210,7 +213,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) Self {
                 seed: usize,
                 init_allocator_ptr: usize,
                 deinit_hits: usize = 0,
-                spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 4096 },
+                task_options: task.Options = .{ .min_stack_size = 4096 },
                 memory_limit: ?usize = 21,
 
                 pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
@@ -240,7 +243,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) Self {
             const RunnerType = Self.make(OwnedArgs);
             var runner = RunnerType.new(&ctx);
 
-            try std.testing.expectEqual(@as(usize, 4096), runner.spawn_config.stack_size);
+            try std.testing.expectEqual(@as(usize, 4096), runner.task_options.min_stack_size);
             try std.testing.expectEqual(@as(?usize, 21), runner.memory_limit);
             try std.testing.expect(runner.run(&t, std.testing.allocator));
             try std.testing.expectEqual(@as(usize, 0), ctx.deinit_hits);
@@ -280,8 +283,11 @@ pub fn TestRunner(comptime std: type, comptime time: type) Self {
 
         fn testInitFailureMarksTestFailed() !void {
             const Support = struct {
+                const native_std = @import("std");
+                const NativeWorker = @field(native_std, "Thread");
+
                 var entries: std.ArrayListUnmanaged([]u8) = .{};
-                var mutex: std.Thread.Mutex = .{};
+                var mutex: NativeWorker.Mutex = .{};
 
                 fn reset() void {
                     mutex.lock();

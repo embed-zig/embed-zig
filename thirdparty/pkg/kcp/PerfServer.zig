@@ -12,6 +12,11 @@ const ping_payload_size = 8;
 const kcp_progress_interval_bytes = 512 * 1024;
 const default_udp_socket_buffer_size = 4 * 1024 * 1024;
 const default_tcp_socket_buffer_size = 48 * 1600;
+const kcp_read_task_options: glib.task.Options = .{ .min_stack_size = 96 * 1024 };
+const kcp_drive_task_options: glib.task.Options = .{ .min_stack_size = 96 * 1024 };
+const kcp_write_task_options: glib.task.Options = .{ .min_stack_size = 96 * 1024 };
+const netperf_send_task_options: glib.task.Options = .{ .min_stack_size = 96 * 1024 };
+const netperf_recv_task_options: glib.task.Options = .{ .min_stack_size = 96 * 1024 };
 
 pub fn make(comptime grt: type) type {
     const std = grt.std;
@@ -178,6 +183,7 @@ pub fn make(comptime grt: type) type {
             var stop = AtomicBool.init(false);
             var read_result = DriveResult{};
             var drive_result = DriveResult{};
+            var write_result = DriveResult{};
             var read_task = ReadLoopTask{
                 .session = &session,
                 .stop = &stop,
@@ -188,12 +194,19 @@ pub fn make(comptime grt: type) type {
                 .stop = &stop,
                 .out = &drive_result,
             };
-            const read_handle = try grt.std.Thread.spawn(.{}, ReadLoopTask.run, .{&read_task});
-            const drive_handle = try grt.std.Thread.spawn(.{}, DriveLoopTask.run, .{&drive_task});
+            var write_task = WriteLoopTask{
+                .session = &session,
+                .stop = &stop,
+                .out = &write_result,
+            };
+            const read_handle = try grt.task.go("kcp/read", kcp_read_task_options, glib.task.Routine.init(&read_task, ReadLoopTask.run));
+            const drive_handle = try grt.task.go("kcp/drive", kcp_drive_task_options, glib.task.Routine.init(&drive_task, DriveLoopTask.run));
+            const write_handle = try grt.task.go("kcp/write", kcp_write_task_options, glib.task.Routine.init(&write_task, WriteLoopTask.run));
             var drive_joined = false;
             defer if (!drive_joined) {
                 stop.store(true, .release);
                 _ = session.tick() catch {};
+                write_handle.join();
                 drive_handle.join();
                 read_handle.join();
             };
@@ -203,11 +216,13 @@ pub fn make(comptime grt: type) type {
 
             stop.store(true, .release);
             _ = session.tick() catch {};
+            write_handle.join();
             drive_handle.join();
             read_handle.join();
             drive_joined = true;
             if (read_result.err) |err| return err;
             if (drive_result.err) |err| return err;
+            if (write_result.err) |err| return err;
             return result;
         }
 
@@ -288,9 +303,9 @@ pub fn make(comptime grt: type) type {
 
         fn runPacketTransfer(allocator: std.mem.Allocator, pc: PacketConn, remote: AddrPort, request: Protocol.Request) !Protocol.Result {
             return switch (request.direction) {
-                .down => try sendPacket(allocator, pc, remote, request.bytes, request.udpPayload(), request.udp_pps),
+                .down => try sendPacket(allocator, pc, remote, request.bytes, request.udpPayload()),
                 .up => try recvPacket(allocator, pc, request.bytes, request.udpPayload()),
-                .duplex => try duplexPacket(allocator, pc, remote, request.bytes, request.udpPayload(), request.udp_pps),
+                .duplex => try duplexPacket(allocator, pc, remote, request.bytes, request.udpPayload()),
                 .ping => error.UnsupportedProtocolDirection,
             };
         }
@@ -360,7 +375,6 @@ pub fn make(comptime grt: type) type {
                 .no_congestion_control = request.kcp.no_congestion_control,
                 .stream = request.kcp.stream,
                 .send_batch_bytes = 8192,
-                .output_pps_limit = request.udp_pps,
                 .write_timeout = kcp_write_timeout,
                 .output_write_timeout = kcp_write_timeout,
             };
@@ -458,7 +472,7 @@ pub fn make(comptime grt: type) type {
             };
         }
 
-        fn sendPacket(allocator: std.mem.Allocator, pc: PacketConn, remote: AddrPort, bytes: usize, chunk: usize, pps: u32) !Protocol.Result {
+        fn sendPacket(allocator: std.mem.Allocator, pc: PacketConn, remote: AddrPort, bytes: usize, chunk: usize) !Protocol.Result {
             const payload = try allocator.alloc(u8, chunk);
             defer allocator.free(payload);
             fillPattern(payload);
@@ -470,7 +484,6 @@ pub fn make(comptime grt: type) type {
                 const written = try pc.writeTo(payload[0..n], remote);
                 sent += written;
                 packets +%= 1;
-                paceUdpSend(started, packets, pps);
             }
             return .{
                 .sent_bytes = sent,
@@ -589,20 +602,20 @@ pub fn make(comptime grt: type) type {
             var recv_result = ThreadResult{};
             var send_task = SendConnTask{ .conn = send_conn, .bytes = bytes, .chunk = chunk, .out = &send_result };
             var recv_task = RecvConnTask{ .conn = recv_conn, .bytes = bytes, .out = &recv_result };
-            const send_handle = try grt.task.go("netperf/send", .{}, glib.task.Routine.init(&send_task, SendConnTask.run));
-            const recv_handle = try grt.task.go("netperf/recv", .{}, glib.task.Routine.init(&recv_task, RecvConnTask.run));
+            const send_handle = try grt.task.go("netperf/send", netperf_send_task_options, glib.task.Routine.init(&send_task, SendConnTask.run));
+            const recv_handle = try grt.task.go("netperf/recv", netperf_recv_task_options, glib.task.Routine.init(&recv_task, RecvConnTask.run));
             send_handle.join();
             recv_handle.join();
             return mergeThreadResults(send_result, recv_result);
         }
 
-        fn duplexPacket(allocator: std.mem.Allocator, pc: PacketConn, remote: AddrPort, bytes: usize, chunk: usize, pps: u32) !Protocol.Result {
+        fn duplexPacket(allocator: std.mem.Allocator, pc: PacketConn, remote: AddrPort, bytes: usize, chunk: usize) !Protocol.Result {
             var send_result = ThreadResult{};
             var recv_result = ThreadResult{};
-            var send_task = SendPacketTask{ .allocator = allocator, .pc = pc, .remote = remote, .bytes = bytes, .chunk = chunk, .pps = pps, .out = &send_result };
+            var send_task = SendPacketTask{ .allocator = allocator, .pc = pc, .remote = remote, .bytes = bytes, .chunk = chunk, .out = &send_result };
             var recv_task = RecvPacketTask{ .allocator = allocator, .pc = pc, .bytes = bytes, .chunk = chunk, .out = &recv_result };
-            const send_handle = try grt.task.go("netperf/send", .{}, glib.task.Routine.init(&send_task, SendPacketTask.run));
-            const recv_handle = try grt.task.go("netperf/recv", .{}, glib.task.Routine.init(&recv_task, RecvPacketTask.run));
+            const send_handle = try grt.task.go("netperf/send", netperf_send_task_options, glib.task.Routine.init(&send_task, SendPacketTask.run));
+            const recv_handle = try grt.task.go("netperf/recv", netperf_recv_task_options, glib.task.Routine.init(&recv_task, RecvPacketTask.run));
             send_handle.join();
             recv_handle.join();
             return mergeThreadResults(send_result, recv_result);
@@ -613,8 +626,8 @@ pub fn make(comptime grt: type) type {
             var recv_result = ThreadResult{};
             var send_task = SendKcpTask{ .session = session, .bytes = bytes, .chunk = chunk, .out = &send_result };
             var recv_task = RecvKcpTask{ .session = session, .bytes = bytes, .out = &recv_result };
-            const send_handle = try grt.task.go("netperf/send", .{}, glib.task.Routine.init(&send_task, SendKcpTask.run));
-            const recv_handle = try grt.task.go("netperf/recv", .{}, glib.task.Routine.init(&recv_task, RecvKcpTask.run));
+            const send_handle = try grt.task.go("netperf/send", netperf_send_task_options, glib.task.Routine.init(&send_task, SendKcpTask.run));
+            const recv_handle = try grt.task.go("netperf/recv", netperf_recv_task_options, glib.task.Routine.init(&recv_task, RecvKcpTask.run));
             send_handle.join();
             recv_handle.join();
             return mergeThreadResults(send_result, recv_result);
@@ -636,6 +649,16 @@ pub fn make(comptime grt: type) type {
 
             fn run(self: *@This()) void {
                 driveLoopThread(self.session, self.stop, self.out);
+            }
+        };
+
+        const WriteLoopTask = struct {
+            session: *Session,
+            stop: *AtomicBool,
+            out: *DriveResult,
+
+            fn run(self: *@This()) void {
+                writeLoopThread(self.session, self.stop, self.out);
             }
         };
 
@@ -676,11 +699,10 @@ pub fn make(comptime grt: type) type {
             remote: AddrPort,
             bytes: usize,
             chunk: usize,
-            pps: u32,
             out: *ThreadResult,
 
             fn run(self: *@This()) void {
-                sendPacketThread(self.allocator, self.pc, self.remote, self.bytes, self.chunk, self.pps, self.out);
+                sendPacketThread(self.allocator, self.pc, self.remote, self.bytes, self.chunk, self.out);
             }
         };
 
@@ -731,8 +753,8 @@ pub fn make(comptime grt: type) type {
             };
         }
 
-        fn sendPacketThread(allocator: std.mem.Allocator, pc: PacketConn, remote: AddrPort, bytes: usize, chunk: usize, pps: u32, out: *ThreadResult) void {
-            out.result = sendPacket(allocator, pc, remote, bytes, chunk, pps) catch |err| {
+        fn sendPacketThread(allocator: std.mem.Allocator, pc: PacketConn, remote: AddrPort, bytes: usize, chunk: usize, out: *ThreadResult) void {
+            out.result = sendPacket(allocator, pc, remote, bytes, chunk) catch |err| {
                 out.err = err;
                 return;
             };
@@ -770,6 +792,14 @@ pub fn make(comptime grt: type) type {
         fn readLoopThread(session: *Session, stop: *AtomicBool, out: *DriveResult) void {
             session.readLoop(stop) catch |err| {
                 std.log.scoped(.netperf_kcp).err("read loop failed: {s}", .{@errorName(err)});
+                out.err = err;
+                return;
+            };
+        }
+
+        fn writeLoopThread(session: *Session, stop: *AtomicBool, out: *DriveResult) void {
+            session.writeLoop(stop) catch |err| {
+                std.log.scoped(.netperf_kcp).err("write loop failed: {s}", .{@errorName(err)});
                 out.err = err;
                 return;
             };
@@ -858,16 +888,6 @@ pub fn make(comptime grt: type) type {
             for (buf, 0..) |*b, i| b.* = @truncate(i);
         }
 
-        fn paceUdpSend(started: glib.time.instant.Time, packets: u32, pps: u32) void {
-            if (pps == 0) return;
-            const target_elapsed = (@as(u64, packets) * @as(u64, @intCast(glib.time.duration.Second))) / pps;
-            const elapsed = elapsedSince(started);
-            if (target_elapsed > elapsed) {
-                const wait: glib.time.duration.Duration = @intCast(target_elapsed - elapsed);
-                grt.time.sleep(wait);
-            }
-        }
-
         fn logUdpLoss(log: anytype, request: Protocol.Request, server_result: Protocol.Result, client_result: Protocol.Result) void {
             const expected = switch (request.direction) {
                 .down => server_result.packets,
@@ -887,8 +907,8 @@ pub fn make(comptime grt: type) type {
             else
                 (@as(f64, @floatFromInt(lost)) * 100.0) / @as(f64, @floatFromInt(expected));
             log.info(
-                "udp_loss expected_packets={d} received_packets={d} lost_packets={d} loss={d:.2}% pps={d}",
-                .{ expected, received, lost, loss_rate, request.udp_pps },
+                "udp_loss expected_packets={d} received_packets={d} lost_packets={d} loss={d:.2}%",
+                .{ expected, received, lost, loss_rate },
             );
         }
 

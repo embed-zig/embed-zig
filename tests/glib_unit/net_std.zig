@@ -15,10 +15,11 @@ const gstd = @import("gstd");
 const posix_net_impl = gstd.test_support.net;
 
 test "glib/net/unit/std" {
-    const std = @import("std");
+    const RawStd = @import("std");
 
-    std.testing.log_level = .info;
+    RawStd.testing.log_level = .info;
 
+    const std = glib.testing.std.make(RawStd, .{ .isolate_thread = false });
     const std_net = glib.net.make(std, gstd.runtime.time, gstd.runtime.net.Runtime);
 
     var t = glib.testing.T.new(std, gstd.runtime.time, .net);

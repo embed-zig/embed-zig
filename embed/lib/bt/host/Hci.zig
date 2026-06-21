@@ -3,7 +3,7 @@
 //! Holds a Transport, runs the event loop, and dispatches HCI events
 //! through the protocol layers (GAP, L2CAP, ATT, GATT).
 //!
-//! Takes `comptime grt: type` for platform primitives (Thread, Mutex, time).
+//! Takes `comptime grt: type` for platform primitives (task, Mutex, time).
 
 const glib = @import("glib");
 
@@ -42,8 +42,8 @@ pub fn make(comptime grt: type) type {
         };
 
         pub const Config = struct {
-            spawn_config: grt.std.Thread.SpawnConfig = .{
-                .stack_size = 4096,
+            task_options: glib.task.Options = .{
+                .min_stack_size = 4096,
             },
             transport_read_timeout: glib.time.duration.Duration = 100 * glib.time.duration.MilliSecond,
             transport_write_timeout: glib.time.duration.Duration = 200 * glib.time.duration.MilliSecond,
@@ -65,7 +65,7 @@ pub fn make(comptime grt: type) type {
         cond: grt.sync.Condition = .{},
         running: bool = false,
         initialized: bool = false,
-        recv_thread: ?grt.std.Thread = null,
+        recv_task: ?grt.task.Handle = null,
         active_roles: u8 = 0,
         async_error: ?Api.Error = null,
         dispatching_peripheral_att: bool = false,
@@ -99,7 +99,7 @@ pub fn make(comptime grt: type) type {
         pub fn retain(self: *Self) Api.Error!void {
             var need_start = false;
             self.mutex.lock();
-            if (self.active_roles == 0 and self.recv_thread == null) {
+            if (self.active_roles == 0 and self.recv_task == null) {
                 need_start = true;
             }
             self.active_roles += 1;
@@ -145,7 +145,7 @@ pub fn make(comptime grt: type) type {
         /// Initialize the controller: reset, read BD_ADDR, set event masks.
         pub fn start(self: *Self) !void {
             self.mutex.lock();
-            if (self.recv_thread != null) {
+            if (self.recv_task != null) {
                 self.mutex.unlock();
                 return;
             }
@@ -155,9 +155,9 @@ pub fn make(comptime grt: type) type {
             self.mutex.unlock();
 
             self.transport.setReadDeadline(null);
-            const thread = try grt.std.Thread.spawn(self.config.spawn_config, recvLoop, .{self});
+            const task = try grt.task.go("bt/hci/recv", self.config.task_options, glib.task.Routine.init(self, recvLoop));
             self.mutex.lock();
-            self.recv_thread = thread;
+            self.recv_task = task;
             self.mutex.unlock();
             errdefer self.stop();
 
@@ -207,9 +207,9 @@ pub fn make(comptime grt: type) type {
             self.mutex.unlock();
             self.transport.setReadDeadline(grt.time.instant.now());
 
-            if (self.recv_thread) |t| {
-                t.join();
-                self.recv_thread = null;
+            if (self.recv_task) |task| {
+                task.join();
+                self.recv_task = null;
             }
         }
 

@@ -3,14 +3,13 @@ const NetConn = @import("../Conn.zig");
 const root = @This();
 
 pub fn ServerConn(comptime std: type, comptime net: type) type {
-    _ = net;
     const common = @import("common.zig").make(std);
     const alert = @import("alert.zig").make(std);
     const kdf = @import("kdf.zig").make(std);
     const record = @import("record.zig").make(std);
     const server_handshake = @import("server_handshake.zig").make(std);
     const Allocator = std.mem.Allocator;
-    const Mutex = std.Thread.Mutex;
+    const Mutex = net.sync.Mutex;
 
     return struct {
         pub const Config = server_handshake.Config;
@@ -453,11 +452,18 @@ pub fn ServerConn(comptime std: type, comptime net: type) type {
         pub fn init(allocator: Allocator, inner: NetConn, config: Config) InitError!NetConn {
             const self = try allocator.create(Self);
             errdefer allocator.destroy(self);
-            self.* = .{
-                .allocator = allocator,
-                .inner = inner,
-                .handshake_state = try server_handshake.ServerHandshake(NetConn).init(inner, config),
-            };
+            self.* = undefined;
+            self.allocator = allocator;
+            self.inner = inner;
+            self.handshake_complete = false;
+            self.closed = false;
+            self.handshake_mu = .{};
+            self.read_mu = .{};
+            self.write_mu = .{};
+            self.pending_start = 0;
+            self.pending_end = 0;
+            self.handshake_msg_len = 0;
+            try self.handshake_state.initInPlace(inner, config);
             return NetConn.init(self);
         }
 

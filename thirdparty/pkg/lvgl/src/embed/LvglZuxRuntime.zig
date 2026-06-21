@@ -705,6 +705,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         }
 
         fn threadedRenderUsesRenderArgument(_: *glib.testing.T, allocator: glib.std.mem.Allocator) !void {
+            const task_options: glib.task.Options = .{ .min_stack_size = 16 * 1024 };
             const Hook = struct {
                 fn render(_: *@This(), _: *Runtime, app: *TestApp) !void {
                     app.render_count += 1;
@@ -720,11 +721,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             defer runtime.deinit();
             runtime.setRenderFunc(&hook, Hook.render);
 
-            const worker = try grt.std.Thread.spawn(.{}, struct {
+            const worker = try grt.task.go("testing/lvgl", task_options, glib.task.Routine.init(&runtime, struct {
                 fn run(rt: *Runtime) void {
                     _ = rt.runOnce(null);
                 }
-            }.run, .{&runtime});
+            }.run));
             defer worker.join();
 
             try runtime.render(&app);

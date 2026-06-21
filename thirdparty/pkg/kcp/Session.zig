@@ -3,9 +3,11 @@ const kcp = @import("../kcp.zig");
 
 const AddrPort = glib.net.netip.AddrPort;
 const ikcp_max_send_segments: usize = 127;
-const udp_pkg_ring_slots: usize = 64;
-const udp_pkg_capacity: usize = 2048;
+const udp_ring_slots: usize = 64;
+const udp_packet_capacity: usize = 2048;
 const read_loop_poll_ms: u32 = 100;
+const drive_busy_wait_ms: u32 = 1;
+const drive_recv_message_limit: usize = 16;
 
 pub const Config = struct {
     mtu: u32 = 1400,
@@ -19,11 +21,10 @@ pub const Config = struct {
     stream: bool = true,
     ack_flush_min_count: usize = 4,
     send_batch_bytes: usize = 8192,
-    output_pps_limit: ?u32 = null,
     write_timeout: ?glib.time.duration.Duration = null,
     read_timeout: ?glib.time.duration.Duration = null,
     output_write_timeout: ?glib.time.duration.Duration = null,
-    tick_rx_packets: ?usize = 256,
+    tick_rx_packets: ?usize = 16,
     pump_batch_limit: ?usize = null,
     tx_buffer_capacity: usize = 32 * 1024,
     rx_buffer_capacity: usize = 64 * 1024,
@@ -108,13 +109,17 @@ pub fn make(comptime grt: type) type {
         config: Config,
         stats: Stats = .{},
         start_at: glib.time.instant.Time,
-        udp_pkg_buf: []u8,
-        udp_pkg_lens: []usize,
+        udp_rx_buf: []u8,
+        udp_rx_lens: []usize,
+        udp_tx_buf: []u8,
+        udp_tx_lens: []usize,
         tx_buf: []u8,
         rx_buf: []u8,
-        udp_pkg_head: usize = 0,
-        udp_pkg_len: usize = 0,
-        udp_pkg_reserved: bool = false,
+        udp_rx_head: usize = 0,
+        udp_rx_len: usize = 0,
+        udp_rx_reserved: bool = false,
+        udp_tx_head: usize = 0,
+        udp_tx_len: usize = 0,
         tx_head: usize = 0,
         tx_len: usize = 0,
         rx_head: usize = 0,
@@ -176,8 +181,10 @@ pub fn make(comptime grt: type) type {
                 .output_ctx = undefined,
                 .config = config,
                 .start_at = start_at,
-                .udp_pkg_buf = undefined,
-                .udp_pkg_lens = undefined,
+                .udp_rx_buf = undefined,
+                .udp_rx_lens = undefined,
+                .udp_tx_buf = undefined,
+                .udp_tx_lens = undefined,
                 .tx_buf = undefined,
                 .rx_buf = undefined,
             };
@@ -187,10 +194,14 @@ pub fn make(comptime grt: type) type {
             const allocator = self.allocator;
             const config = self.config;
 
-            self.udp_pkg_buf = try allocator.alloc(u8, udp_pkg_ring_slots * udp_pkg_capacity);
-            errdefer allocator.free(self.udp_pkg_buf);
-            self.udp_pkg_lens = try allocator.alloc(usize, udp_pkg_ring_slots);
-            errdefer allocator.free(self.udp_pkg_lens);
+            self.udp_rx_buf = try allocator.alloc(u8, udp_ring_slots * udp_packet_capacity);
+            errdefer allocator.free(self.udp_rx_buf);
+            self.udp_rx_lens = try allocator.alloc(usize, udp_ring_slots);
+            errdefer allocator.free(self.udp_rx_lens);
+            self.udp_tx_buf = try allocator.alloc(u8, udp_ring_slots * udp_packet_capacity);
+            errdefer allocator.free(self.udp_tx_buf);
+            self.udp_tx_lens = try allocator.alloc(usize, udp_ring_slots);
+            errdefer allocator.free(self.udp_tx_lens);
             self.tx_buf = try allocator.alloc(u8, config.tx_buffer_capacity);
             errdefer allocator.free(self.tx_buf);
             self.rx_buf = try allocator.alloc(u8, config.rx_buffer_capacity);
@@ -225,8 +236,10 @@ pub fn make(comptime grt: type) type {
             if (self.owns_segment_pool) self.segment_pool.deinit();
             self.allocator.free(self.rx_buf);
             self.allocator.free(self.tx_buf);
-            self.allocator.free(self.udp_pkg_lens);
-            self.allocator.free(self.udp_pkg_buf);
+            self.allocator.free(self.udp_tx_lens);
+            self.allocator.free(self.udp_tx_buf);
+            self.allocator.free(self.udp_rx_lens);
+            self.allocator.free(self.udp_rx_buf);
             self.* = undefined;
         }
 
@@ -321,6 +334,19 @@ pub fn make(comptime grt: type) type {
             }
         }
 
+        pub fn writeLoop(self: *Self, stop: *AtomicBool) !void {
+            var frame_storage: [udp_packet_capacity]u8 = undefined;
+            while (!stop.load(.acquire)) {
+                if (self.isClosed() and self.udpTxLen() == 0) return;
+                const frame = self.waitAndPopUdpTxPacket(&frame_storage, stop);
+                if (frame.len == 0) continue;
+                self.writePacketNow(frame) catch |err| {
+                    self.setDriverErr(err);
+                    return err;
+                };
+            }
+        }
+
         pub fn close(self: *Self) void {
             self.mu.lock();
             defer self.mu.unlock();
@@ -366,13 +392,15 @@ pub fn make(comptime grt: type) type {
             var progressed = false;
             const tick_started = grt.time.instant.now();
             if (try self.drainUdpRingToKcp(self.tickRxLimit()) > 0) progressed = true;
-            if (try self.drainKcpRecvToRxRing() > 0) progressed = true;
+            if (try self.drainKcpRecvToRxRing(drive_recv_message_limit) > 0) progressed = true;
             if (try self.drainTxRingToKcp()) progressed = true;
             try self.updateInner();
-            if (try self.drainKcpRecvToRxRing() > 0) progressed = true;
+            if (try self.drainKcpRecvToRxRing(drive_recv_message_limit) > 0) progressed = true;
             const wait_ms = self.nextWaitMs();
             self.logDriveState(progressed, wait_ms);
-            if (!progressed and !self.hasImmediateWork()) {
+            if (self.hasImmediateWork()) {
+                self.waitForDriveWork(driveBusyWaitDuration());
+            } else {
                 const wait_duration = self.remainingInterval(tick_started, wait_ms);
                 self.waitForDriveWork(wait_duration);
             }
@@ -402,9 +430,9 @@ pub fn make(comptime grt: type) type {
             return progressed;
         }
 
-        fn drainKcpRecvToRxRing(self: *Self) !usize {
+        fn drainKcpRecvToRxRing(self: *Self, max_messages: usize) !usize {
             var count: usize = 0;
-            while (true) {
+            while (count < max_messages) {
                 self.mu.lock();
                 const peek_size = self.kcpRecvPeekSizeLocked();
                 if (peek_size == 0 or self.rxSpaceLocked() < peek_size) {
@@ -458,12 +486,12 @@ pub fn make(comptime grt: type) type {
 
             while (true) {
                 self.mu.lock();
-                if (self.udp_pkg_len == 0) {
+                if (self.udp_rx_len == 0) {
                     self.mu.unlock();
                     break;
                 }
-                const index = self.udp_pkg_head;
-                const frame = self.udpPacketSlot(index)[0..self.udp_pkg_lens[index]];
+                const index = self.udp_rx_head;
+                const frame = self.udpRxPacketSlot(index)[0..self.udp_rx_lens[index]];
                 if (frame.len >= kcp.OVERHEAD and readLe32(frame) == self.inst.*.conv) {
                     self.inst.*.current = self.nowMs();
                     const rc = kcp.input(self.inst, @ptrCast(frame.ptr), @intCast(frame.len));
@@ -477,8 +505,8 @@ pub fn make(comptime grt: type) type {
                     if (self.ackCountInner() > 0) flush_pending_ack = true;
                     self.stats.udp_in_packets +%= 1;
                 }
-                self.udp_pkg_head = (self.udp_pkg_head + 1) % udp_pkg_ring_slots;
-                self.udp_pkg_len -= 1;
+                self.udp_rx_head = (self.udp_rx_head + 1) % udp_ring_slots;
+                self.udp_rx_len -= 1;
                 self.cond.broadcast();
                 self.mu.unlock();
 
@@ -531,42 +559,47 @@ pub fn make(comptime grt: type) type {
             self.mu.lock();
             defer self.mu.unlock();
             if (self.closed) return null;
-            if (self.udp_pkg_reserved) return null;
-            if (self.udp_pkg_len >= udp_pkg_ring_slots) return null;
-            const index = (self.udp_pkg_head + self.udp_pkg_len) % udp_pkg_ring_slots;
-            self.udp_pkg_reserved = true;
+            if (self.udp_rx_reserved) return null;
+            if (self.udp_rx_len >= udp_ring_slots) return null;
+            const index = (self.udp_rx_head + self.udp_rx_len) % udp_ring_slots;
+            self.udp_rx_reserved = true;
             return .{
                 .index = index,
-                .buf = self.udpPacketSlot(index),
+                .buf = self.udpRxPacketSlot(index),
             };
         }
 
         fn releaseUdpPacketReservation(self: *Self) void {
             self.mu.lock();
             defer self.mu.unlock();
-            self.udp_pkg_reserved = false;
+            self.udp_rx_reserved = false;
             self.cond.broadcast();
         }
 
         fn commitUdpPacketSlot(self: *Self, index: usize, len: usize) void {
             self.mu.lock();
             defer self.mu.unlock();
-            self.udp_pkg_reserved = false;
+            self.udp_rx_reserved = false;
             self.stats.read_from_calls +%= 1;
-            const expected = (self.udp_pkg_head + self.udp_pkg_len) % udp_pkg_ring_slots;
-            if (self.closed or index != expected or self.udp_pkg_len >= udp_pkg_ring_slots) {
+            const expected = (self.udp_rx_head + self.udp_rx_len) % udp_ring_slots;
+            if (self.closed or index != expected or self.udp_rx_len >= udp_ring_slots) {
                 self.stats.udp_ring_dropped_packets +%= 1;
                 self.cond.broadcast();
                 return;
             }
-            self.udp_pkg_lens[index] = @min(len, udp_pkg_capacity);
-            self.udp_pkg_len += 1;
+            self.udp_rx_lens[index] = @min(len, udp_packet_capacity);
+            self.udp_rx_len += 1;
             self.cond.broadcast();
         }
 
-        fn udpPacketSlot(self: *Self, index: usize) []u8 {
-            const start = index * udp_pkg_capacity;
-            return self.udp_pkg_buf[start..][0..udp_pkg_capacity];
+        fn udpRxPacketSlot(self: *Self, index: usize) []u8 {
+            const start = index * udp_packet_capacity;
+            return self.udp_rx_buf[start..][0..udp_packet_capacity];
+        }
+
+        fn udpTxPacketSlot(self: *Self, index: usize) []u8 {
+            const start = index * udp_packet_capacity;
+            return self.udp_tx_buf[start..][0..udp_packet_capacity];
         }
 
         fn txContiguousReadSpanLocked(self: *Self, limit: usize) []const u8 {
@@ -586,7 +619,7 @@ pub fn make(comptime grt: type) type {
         fn hasImmediateWork(self: *Self) bool {
             self.mu.lock();
             defer self.mu.unlock();
-            return self.udp_pkg_len > 0 or
+            return self.udp_rx_len > 0 or
                 self.tx_len > 0 or
                 self.canDrainKcpRecvLocked();
         }
@@ -617,6 +650,31 @@ pub fn make(comptime grt: type) type {
             defer self.mu.unlock();
             if (self.closed or self.driver_err != null) return;
             self.cond.timedWait(&self.mu, @intCast(readLoopDuration())) catch {};
+        }
+
+        fn waitAndPopUdpTxPacket(self: *Self, out: *[udp_packet_capacity]u8, stop: *AtomicBool) []const u8 {
+            self.mu.lock();
+            defer self.mu.unlock();
+            while (!stop.load(.acquire)) {
+                if (self.udp_tx_len > 0) {
+                    const index = self.udp_tx_head;
+                    const len = self.udp_tx_lens[index];
+                    @memcpy(out[0..len], self.udpTxPacketSlot(index)[0..len]);
+                    self.udp_tx_head = (self.udp_tx_head + 1) % udp_ring_slots;
+                    self.udp_tx_len -= 1;
+                    self.cond.broadcast();
+                    return out[0..len];
+                }
+                if (self.closed or self.driver_err != null) break;
+                self.cond.wait(&self.mu);
+            }
+            return out[0..0];
+        }
+
+        fn udpTxLen(self: *Self) usize {
+            self.mu.lock();
+            defer self.mu.unlock();
+            return self.udp_tx_len;
         }
 
         fn closeFromReadLoop(self: *Self) void {
@@ -744,19 +802,10 @@ pub fn make(comptime grt: type) type {
 
         fn kcpSendBatchLimit(self: *const Self) usize {
             const mss = @max(@as(usize, @intCast(self.inst.*.mss)), 1);
-            const configured = self.outputPpsFeedLimit(mss) orelse @max(self.config.send_batch_bytes, mss);
+            const configured = @max(self.config.send_batch_bytes, mss);
             const ikcp_limit = ikcp_max_send_segments * mss;
             const room_limit = @max(@as(usize, @intCast(self.sendRoomInner())), 1) * mss;
             return @max(@min(@min(configured, ikcp_limit), room_limit), 1);
-        }
-
-        fn outputPpsFeedLimit(self: *const Self, mss: usize) ?usize {
-            const pps = self.config.output_pps_limit orelse return null;
-            if (pps == 0) return null;
-            const interval_ms: u64 = @intCast(@max(self.config.interval_ms, 1));
-            const packets = @max(@divFloor(@as(u64, pps) * interval_ms, 1000), 1);
-            const capped_packets = @min(packets, ikcp_max_send_segments);
-            return @as(usize, @intCast(capped_packets)) * mss;
         }
 
         fn ackCountInner(self: *const Self) usize {
@@ -819,16 +868,43 @@ pub fn make(comptime grt: type) type {
 
             fn output(buf: [*c]const u8, len: c_int, _: ?*kcp.Kcp, user: ?*anyopaque) callconv(.c) c_int {
                 const self: *@This() = @ptrCast(@alignCast(user orelse return -1));
-                return self.session.writePacket(buf, len);
+                return self.session.enqueueOutputPacket(buf, len);
             }
         };
 
-        fn writePacket(self: *Self, buf: [*c]const u8, len: c_int) c_int {
+        fn enqueueOutputPacket(self: *Self, buf: [*c]const u8, len: c_int) c_int {
             if (len < 0) {
                 self.output_err = error.KcpSessionNegativePacketLength;
                 return -1;
             }
             const frame = buf[0..@intCast(len)];
+            if (frame.len > udp_packet_capacity) {
+                self.output_err = error.KcpSessionUdpPacketTooLarge;
+                return -1;
+            }
+            self.mu.lock();
+            defer self.mu.unlock();
+            while (!self.closed and self.driver_err == null and self.udp_tx_len >= udp_ring_slots) {
+                self.cond.timedWait(&self.mu, 10 * glib.time.duration.MilliSecond) catch {};
+            }
+            if (self.closed) {
+                self.output_err = error.KcpSessionClosed;
+                return -1;
+            }
+            if (self.driver_err) |err| {
+                self.output_err = err;
+                return -1;
+            }
+            const index = (self.udp_tx_head + self.udp_tx_len) % udp_ring_slots;
+            const slot = self.udpTxPacketSlot(index);
+            @memcpy(slot[0..frame.len], frame);
+            self.udp_tx_lens[index] = frame.len;
+            self.udp_tx_len += 1;
+            self.cond.broadcast();
+            return @intCast(frame.len);
+        }
+
+        fn writePacketNow(self: *Self, frame: []const u8) !void {
             const write_start = if (self.config.output_write_timeout != null) grt.time.instant.now() else 0;
             self.stats.write_to_calls +%= 1;
             if (self.config.output_write_timeout) |timeout| {
@@ -844,15 +920,14 @@ pub fn make(comptime grt: type) type {
                         "udp timeout len={d} out={d} in={d} drop={d}",
                         .{ frame.len, self.stats.udp_out_packets, self.stats.udp_in_packets, self.stats.udp_dropped_packets },
                     );
-                    return @intCast(frame.len);
+                    return;
                 },
                 else => {
                     std.log.scoped(.kcp_session).warn(
                         "udp err={s} len={d} out={d} in={d}",
                         .{ @errorName(err), frame.len, self.stats.udp_out_packets, self.stats.udp_in_packets },
                     );
-                    self.output_err = err;
-                    return -1;
+                    return err;
                 },
             };
             if (written != frame.len) {
@@ -860,11 +935,9 @@ pub fn make(comptime grt: type) type {
                     "udp short wr={d} len={d} out={d} in={d}",
                     .{ written, frame.len, self.stats.udp_out_packets, self.stats.udp_in_packets },
                 );
-                self.output_err = error.ShortKcpSessionUdpWrite;
-                return -1;
+                return error.ShortKcpSessionUdpWrite;
             }
             self.recordUdpOut(frame.len);
-            return @intCast(written);
         }
 
         fn recordUdpOut(self: *Self, frame_len: usize) void {
@@ -977,6 +1050,10 @@ fn readLoopDuration() glib.time.duration.Duration {
     return @as(glib.time.duration.Duration, read_loop_poll_ms) * glib.time.duration.MilliSecond;
 }
 
+fn driveBusyWaitDuration() glib.time.duration.Duration {
+    return @as(glib.time.duration.Duration, drive_busy_wait_ms) * glib.time.duration.MilliSecond;
+}
+
 fn ringWrite(ring: []u8, head: *usize, len: *usize, src: []const u8) void {
     if (src.len == 0) return;
     const tail = (head.* + len.*) % ring.len;
@@ -1045,8 +1122,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 .output_ctx = undefined,
                 .config = .{},
                 .start_at = grt.time.instant.now(),
-                .udp_pkg_buf = &.{},
-                .udp_pkg_lens = &.{},
+                .udp_rx_buf = &.{},
+                .udp_rx_lens = &.{},
+                .udp_tx_buf = &.{},
+                .udp_tx_lens = &.{},
                 .tx_buf = &tx_storage,
                 .rx_buf = &rx_storage,
             };
@@ -1064,16 +1143,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try std.testing.expectEqual(@as(usize, 0), session.rx_head);
             try std.testing.expectEqual(@as(usize, rx_storage.len), span.len);
             try std.testing.expectEqual(@intFromPtr(&rx_storage[0]), @intFromPtr(span.ptr));
-
-            session.config.output_pps_limit = 1250;
-            session.config.interval_ms = 10;
-            try std.testing.expectEqual(@as(?usize, 12 * 100), session.outputPpsFeedLimit(100));
-
-            session.config.output_pps_limit = 1;
-            try std.testing.expectEqual(@as(?usize, 100), session.outputPpsFeedLimit(100));
-
-            session.config.output_pps_limit = null;
-            try std.testing.expectEqual(@as(?usize, null), session.outputPpsFeedLimit(100));
         }
     }.run);
 }

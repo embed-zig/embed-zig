@@ -22,7 +22,7 @@ pub const default_poll_interval: glib.time.duration.Duration = 10 * glib.time.du
 
 pub const Config = struct {
     poll_interval: glib.time.duration.Duration = default_poll_interval,
-    spawn_config: glib.std.Thread.SpawnConfig = .{},
+    task_options: glib.task.Options = .{ .min_stack_size = 8 * 1024 },
 };
 
 pub const VTable = struct {

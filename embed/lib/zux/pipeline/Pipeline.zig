@@ -8,9 +8,13 @@ const Node = @import("Node.zig");
 const pipeline_mod = @This();
 
 pub fn Config(comptime grt: type) type {
+    comptime {
+        _ = grt;
+    }
     return struct {
+        capacity: usize = 64,
         tick_interval: glib.time.duration.Duration = 10 * glib.time.duration.MilliSecond,
-        spawn_config: grt.std.Thread.SpawnConfig = .{},
+        task_options: glib.task.Options = .{ .min_stack_size = 16 * 1024 },
     };
 }
 
@@ -22,8 +26,7 @@ pub fn make(comptime grt: type, comptime CustomEventRegistarType: type) type {
         pub const CustomEventRegistar = CustomEventRegistarType;
         pub const MessageChannel = grt.sync.Channel(Message);
         pub const Allocator = glib.std.mem.Allocator;
-        pub const Worker = grt.std.Thread;
-        pub const default_capacity: usize = 64;
+        pub const Worker = grt.task.Handle;
         pub const default_poll_timeout: glib.time.duration.Duration = 10 * glib.time.duration.MilliSecond;
         pub const default_config: Self.Config = .{};
         const BoolAtomic = grt.std.atomic.Value(bool);
@@ -31,7 +34,13 @@ pub fn make(comptime grt: type, comptime CustomEventRegistarType: type) type {
         const ReceiverList = grt.std.ArrayList(ReceiverBinding);
 
         pub const PollWorker = struct {
-            thread: Worker,
+            handle: Worker,
+            ctx: *anyopaque,
+            destroyCtx: *const fn (allocator: Allocator, ctx: *anyopaque) void,
+
+            pub fn deinit(self: @This(), allocator: Allocator) void {
+                self.destroyCtx(allocator, self.ctx);
+            }
         };
 
         pub const ReceiverBinding = struct {
@@ -57,8 +66,8 @@ pub fn make(comptime grt: type, comptime CustomEventRegistarType: type) type {
         custom_event_registar: CustomEventRegistar,
         outbound: ?Emitter = null,
         inbox: MessageChannel,
-        driver_thread: ?Worker = null,
-        tick_thread: ?Worker = null,
+        driver_task: ?Worker = null,
+        tick_task: ?Worker = null,
 
         mu: grt.sync.Mutex = .{},
         pollers: PollerList = .empty,
@@ -70,13 +79,14 @@ pub fn make(comptime grt: type, comptime CustomEventRegistarType: type) type {
 
         pub fn init(allocator: Allocator, config: Self.Config) !Self {
             if (config.tick_interval <= 0) return error.InvalidConfig;
+            if (config.capacity == 0) return error.InvalidConfig;
 
             return .{
                 .allocator = allocator,
                 .config = config,
                 .custom_event_registar = CustomEventRegistar.init(),
                 .outbound = null,
-                .inbox = try MessageChannel.make(allocator, default_capacity),
+                .inbox = try MessageChannel.make(allocator, config.capacity),
                 .tick_interval = config.tick_interval,
             };
         }
@@ -85,19 +95,21 @@ pub fn make(comptime grt: type, comptime CustomEventRegistarType: type) type {
             return self.custom_event_registar;
         }
 
-        pub fn inject(self: *Self, message: Message) !void {
-            const sent = self.inbox.send(message) catch |err| {
+        pub fn inject(self: *Self, message: Message) !bool {
+            const sent = self.inbox.sendTimeout(message, 0) catch |err| {
                 message.deinit();
+                if (err == error.Timeout) return false;
                 return err;
             };
             if (!sent.ok) {
                 message.deinit();
-                return error.PipelineStopped;
+                return false;
             }
+            return true;
         }
 
         pub fn emit(self: *Self, body: Message.Event) !void {
-            return self.inject(.{
+            _ = try self.inject(.{
                 .origin = .manual,
                 .timestamp = grt.time.instant.now(),
                 .body = body,
@@ -106,7 +118,7 @@ pub fn make(comptime grt: type, comptime CustomEventRegistarType: type) type {
 
         pub fn tick(self: *Self) !void {
             self.tick_seq +%= 1;
-            return self.inject(.{
+            _ = try self.inject(.{
                 .origin = .timer,
                 .timestamp = grt.time.instant.now(),
                 .body = .{ .tick = .{ .seq = self.tick_seq } },
@@ -127,14 +139,36 @@ pub fn make(comptime grt: type, comptime CustomEventRegistarType: type) type {
 
             try self.pollers.ensureUnusedCapacity(self.allocator, 1);
 
-            const thread = try Worker.spawn(self.config.spawn_config, struct {
-                fn run(pipeline: *Self, src: *Source) void {
-                    pipeline.pollLoop(Source, src) catch |err| Self.reportAsyncFailure("poll worker failed", err);
+            const WorkerCtx = struct {
+                pipeline: *Self,
+                source: *Source,
+
+                fn run(ctx: *@This()) void {
+                    ctx.pipeline.pollLoop(Source, ctx.source) catch |err| Self.reportAsyncFailure("poll worker failed", err);
                 }
-            }.run, .{ self, source });
+
+                fn destroy(allocator: Allocator, ctx: *anyopaque) void {
+                    const typed: *@This() = @ptrCast(@alignCast(ctx));
+                    allocator.destroy(typed);
+                }
+            };
+            const ctx = try self.allocator.create(WorkerCtx);
+            errdefer self.allocator.destroy(ctx);
+            ctx.* = .{
+                .pipeline = self,
+                .source = source,
+            };
+
+            const handle = try grt.task.go(
+                "zux/pipeline/poll",
+                self.config.task_options,
+                glib.task.Routine.init(ctx, WorkerCtx.run),
+            );
 
             self.pollers.appendAssumeCapacity(.{
-                .thread = thread,
+                .handle = handle,
+                .ctx = ctx,
+                .destroyCtx = WorkerCtx.destroy,
             });
         }
 
@@ -151,7 +185,7 @@ pub fn make(comptime grt: type, comptime CustomEventRegistarType: type) type {
             const hook_fn = struct {
                 fn emitFn(ctx: *anyopaque, body: Message.Event) void {
                     const p: *Self = @ptrCast(@alignCast(ctx));
-                    p.inject(.{
+                    _ = p.inject(.{
                         .origin = .source,
                         .timestamp = grt.time.instant.now(),
                         .body = body,
@@ -175,26 +209,26 @@ pub fn make(comptime grt: type, comptime CustomEventRegistarType: type) type {
         }
 
         pub fn start(self: *Self) !void {
-            if (self.driver_thread != null or self.tick_thread != null) return;
+            if (self.driver_task != null or self.tick_task != null) return;
             if (self.outbound == null) return error.OutputNotBound;
-            self.driver_thread = try Worker.spawn(self.config.spawn_config, struct {
+            self.driver_task = try grt.task.go("zux/pipeline/driver", self.config.task_options, glib.task.Routine.init(self, struct {
                 fn run(pipeline: *Self) void {
-                    pipeline.driveLoop() catch |err| Self.reportAsyncFailure("driver thread failed", err);
+                    pipeline.driveLoop() catch |err| Self.reportAsyncFailure("driver task failed", err);
                 }
-            }.run, .{self});
+            }.run));
             errdefer {
                 self.stop();
-                if (self.driver_thread) |thread| {
-                    thread.join();
-                    self.driver_thread = null;
+                if (self.driver_task) |task| {
+                    task.join();
+                    self.driver_task = null;
                 }
             }
 
-            self.tick_thread = try Worker.spawn(self.config.spawn_config, struct {
+            self.tick_task = try grt.task.go("zux/pipeline/tick", self.config.task_options, glib.task.Routine.init(self, struct {
                 fn run(pipeline: *Self) void {
-                    pipeline.tickLoop() catch |err| Self.reportAsyncFailure("tick thread failed", err);
+                    pipeline.tickLoop() catch |err| Self.reportAsyncFailure("tick task failed", err);
                 }
-            }.run, .{self});
+            }.run));
         }
 
         pub fn stop(self: *Self) void {
@@ -211,27 +245,28 @@ pub fn make(comptime grt: type, comptime CustomEventRegistarType: type) type {
         }
 
         pub fn wait(self: *Self) void {
-            if (self.driver_thread) |thread| {
-                thread.join();
-                self.driver_thread = null;
+            if (self.driver_task) |task_handle| {
+                task_handle.join();
+                self.driver_task = null;
             }
 
-            if (self.tick_thread) |thread| {
-                thread.join();
-                self.tick_thread = null;
+            if (self.tick_task) |task_handle| {
+                task_handle.join();
+                self.tick_task = null;
             }
 
             self.mu.lock();
             defer self.mu.unlock();
             for (self.pollers.items) |worker| {
-                worker.thread.join();
+                worker.handle.join();
+                worker.deinit(self.allocator);
             }
             self.pollers.clearRetainingCapacity();
         }
 
         pub fn deinit(self: *Self) void {
-            grt.std.debug.assert(self.driver_thread == null);
-            grt.std.debug.assert(self.tick_thread == null);
+            grt.std.debug.assert(self.driver_task == null);
+            grt.std.debug.assert(self.tick_task == null);
             grt.std.debug.assert(self.pollers.items.len == 0);
             grt.std.debug.assert(self.receivers.items.len == 0);
             self.pollers.deinit(self.allocator);
@@ -275,7 +310,7 @@ pub fn make(comptime grt: type, comptime CustomEventRegistarType: type) type {
                     error.Timeout => continue,
                     else => return err,
                 };
-                self.inject(.{
+                _ = self.inject(.{
                     .origin = .source,
                     .timestamp = grt.time.instant.now(),
                     .body = body,
@@ -289,10 +324,9 @@ pub fn make(comptime grt: type, comptime CustomEventRegistarType: type) type {
 }
 
 pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
-    const native_std = @import("std");
     const HarnessLib = struct {
         pub const mem = grt.std.mem;
-        pub const Thread = native_std.Thread;
+        pub const sync = grt.sync;
         pub const atomic = grt.std.atomic;
         pub const debug = grt.std.debug;
         pub const log = grt.std.log;
@@ -322,8 +356,8 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             };
 
             const Source = struct {
-                mu: HarnessLib.Thread.Mutex = .{},
-                cv: HarnessLib.Thread.Condition = .{},
+                mu: HarnessLib.sync.Mutex = .{},
+                cv: HarnessLib.sync.Condition = .{},
                 pending: ?Message.Event = null,
 
                 pub fn poll(self: *@This(), timeout: ?glib.time.duration.Duration) !Message.Event {

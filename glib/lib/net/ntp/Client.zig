@@ -1,21 +1,21 @@
 const time_mod = @import("time");
-const context_mod = @import("context");
-const sync = @import("sync");
 
 pub fn Client(comptime std: type, comptime net: type, comptime ntp: type) type {
     const Net = net;
     const Addr = net.netip.AddrPort;
     const IpAddr = net.netip.Addr;
     const Allocator = std.mem.Allocator;
-    const Thread = std.Thread;
+    const Context = @import("context").Context;
+    const Mutex = net.sync.Mutex;
+    const Condition = net.sync.Condition;
+    const Task = net.task;
     const PacketConn = net.PacketConn;
-    const WorkerRacer = sync.Racer(std, net.time, ntp.Response);
 
     return struct {
         allocator: Allocator,
         options: Options,
-        mutex: Thread.Mutex = .{},
-        cond: Thread.Condition = .{},
+        mutex: Mutex = .{},
+        cond: Condition = .{},
         deiniting: bool = false,
         active_races: usize = 0,
 
@@ -42,14 +42,41 @@ pub fn Client(comptime std: type, comptime net: type, comptime ntp: type) type {
         pub const Options = struct {
             servers: []const Server = &.{ Servers.aliyun, Servers.cloudflare, Servers.google },
             timeout: time_mod.duration.Duration = 5 * time_mod.duration.Second,
-            spawn_config: Thread.SpawnConfig = .{},
+            task_options: Task.Options = .{ .min_stack_size = 16 * 1024 },
+        };
+
+        const WorkerState = struct {
+            job: *RaceJob,
+
+            fn done(self: WorkerState) bool {
+                self.job.mutex.lock();
+                defer self.job.mutex.unlock();
+                return self.job.done;
+            }
+
+            fn success(self: WorkerState, result: ntp.Response) bool {
+                self.job.mutex.lock();
+                defer self.job.mutex.unlock();
+
+                if (self.job.done or self.job.has_value) return false;
+                self.job.value = result;
+                self.job.has_value = true;
+                self.job.done = true;
+                self.job.cond.broadcast();
+                return true;
+            }
         };
 
         const RaceJob = struct {
             client: *Self,
-            racer: WorkerRacer,
             origin_time: time_mod.Time,
-            failure_mutex: Thread.Mutex = .{},
+            mutex: Mutex = .{},
+            cond: Condition = .{},
+            done: bool = false,
+            running: usize = 0,
+            has_value: bool = false,
+            value: ntp.Response = undefined,
+            failure_mutex: Mutex = .{},
             saw_kiss_of_death: bool = false,
             saw_origin_mismatch: bool = false,
             saw_source_mismatch: bool = false,
@@ -84,6 +111,74 @@ pub fn Client(comptime std: type, comptime net: type, comptime ntp: type) type {
                 if (self.saw_recv_failed) return error.RecvFailed;
                 return error.Timeout;
             }
+
+            fn state(self: *RaceJob) WorkerState {
+                return .{ .job = self };
+            }
+
+            fn startWorker(self: *RaceJob) void {
+                self.mutex.lock();
+                defer self.mutex.unlock();
+                self.running += 1;
+            }
+
+            fn finishWorker(self: *RaceJob) void {
+                self.mutex.lock();
+                defer self.mutex.unlock();
+                std.debug.assert(self.running > 0);
+                self.running -= 1;
+                if (self.running == 0) self.cond.broadcast();
+            }
+
+            fn cancel(self: *RaceJob) void {
+                self.mutex.lock();
+                defer self.mutex.unlock();
+                if (self.done) return;
+                self.done = true;
+                self.cond.broadcast();
+            }
+
+            fn raceContext(self: *RaceJob, ctx: Context) anyerror!?ntp.Response {
+                if (ctx.err()) |err| return err;
+
+                self.mutex.lock();
+                defer self.mutex.unlock();
+
+                while (!self.has_value and self.running != 0) {
+                    if (ctx.err()) |err| return err;
+
+                    const timed_wait: time_mod.duration.Duration = blk: {
+                        const poll_interval: time_mod.duration.Duration = 10 * time_mod.duration.MilliSecond;
+                        if (ctx.deadline()) |deadline| {
+                            const remaining = time_mod.instant.sub(deadline, net.time.instant.now());
+                            if (remaining <= 0) break :blk 0;
+                            break :blk @min(remaining, poll_interval);
+                        }
+                        break :blk poll_interval;
+                    };
+
+                    if (timed_wait == 0) {
+                        if (ctx.err()) |err| return err;
+                        return error.DeadlineExceeded;
+                    }
+
+                    self.cond.timedWait(&self.mutex, @intCast(timed_wait)) catch {};
+                }
+
+                if (self.has_value) return self.value;
+                if (ctx.err()) |err| return err;
+                return null;
+            }
+        };
+
+        const RaceWorkerContext = struct {
+            job: *RaceJob,
+            server: Server,
+
+            fn run(self: *@This()) void {
+                defer self.job.finishWorker();
+                raceWorker(self.job.state(), self.job, self.server);
+            }
         };
 
         const read_quantum: time_mod.duration.Duration = 50 * time_mod.duration.MilliSecond;
@@ -115,26 +210,24 @@ pub fn Client(comptime std: type, comptime net: type, comptime ntp: type) type {
         }
 
         pub fn query(self: *Self, origin_time: time_mod.Time) anyerror!ntp.Response {
-            const Context = context_mod.make(std, net.time);
-            var context_api = try Context.init(self.allocator);
+            var context_api = try net.Context.init(self.allocator);
             defer context_api.deinit();
             return self.queryContext(context_api.background(), origin_time);
         }
 
-        pub fn queryContext(self: *Self, ctx: context_mod.Context, origin_time: time_mod.Time) anyerror!ntp.Response {
+        pub fn queryContext(self: *Self, ctx: Context, origin_time: time_mod.Time) anyerror!ntp.Response {
             if (self.options.servers.len == 0) return error.NoServerConfigured;
             if (self.options.servers.len > 1) return self.queryRaceContext(ctx, origin_time);
             return self.queryServerContext(ctx, self.options.servers[0], origin_time);
         }
 
         pub fn queryServer(self: *Self, server: Server, origin_time: time_mod.Time) anyerror!ntp.Response {
-            const Context = context_mod.make(std, net.time);
-            var context_api = try Context.init(self.allocator);
+            var context_api = try net.Context.init(self.allocator);
             defer context_api.deinit();
             return self.queryServerContext(context_api.background(), server, origin_time);
         }
 
-        pub fn queryServerContext(self: *Self, ctx: context_mod.Context, server: Server, origin_time: time_mod.Time) anyerror!ntp.Response {
+        pub fn queryServerContext(self: *Self, ctx: Context, server: Server, origin_time: time_mod.Time) anyerror!ntp.Response {
             try ensureContextActive(ctx);
             try self.beginRace();
             defer self.finishRace();
@@ -146,19 +239,18 @@ pub fn Client(comptime std: type, comptime net: type, comptime ntp: type) type {
             return resp.transmit_time;
         }
 
-        pub fn getTimeContext(self: *Self, ctx: context_mod.Context, origin_time: time_mod.Time) anyerror!time_mod.Time {
+        pub fn getTimeContext(self: *Self, ctx: Context, origin_time: time_mod.Time) anyerror!time_mod.Time {
             const resp = try self.queryContext(ctx, origin_time);
             return resp.transmit_time;
         }
 
         pub fn queryRace(self: *Self, origin_time: time_mod.Time) anyerror!ntp.Response {
-            const Context = context_mod.make(std, net.time);
-            var context_api = try Context.init(self.allocator);
+            var context_api = try net.Context.init(self.allocator);
             defer context_api.deinit();
             return self.queryRaceContext(context_api.background(), origin_time);
         }
 
-        pub fn queryRaceContext(self: *Self, ctx: context_mod.Context, origin_time: time_mod.Time) anyerror!ntp.Response {
+        pub fn queryRaceContext(self: *Self, ctx: Context, origin_time: time_mod.Time) anyerror!ntp.Response {
             if (self.options.servers.len == 0) return error.NoServerConfigured;
             try ensureContextActive(ctx);
 
@@ -173,20 +265,32 @@ pub fn Client(comptime std: type, comptime net: type, comptime ntp: type) type {
 
             job.* = .{
                 .client = self,
-                .racer = undefined,
                 .origin_time = normalizedOriginTime(origin_time),
             };
-            job.racer = WorkerRacer.init(self.allocator) catch return error.OutOfMemory;
             destroy_raw_job_on_error = false;
 
             owns_job = true;
             defer if (owns_job) self.destroyRaceJob(job);
             needs_finish_race = false;
 
+            const handles = self.allocator.alloc(?Task.Handle, self.options.servers.len) catch return error.OutOfMemory;
+            defer self.allocator.free(handles);
+            @memset(handles, null);
+
+            const worker_contexts = self.allocator.alloc(RaceWorkerContext, self.options.servers.len) catch return error.OutOfMemory;
+            defer self.allocator.free(worker_contexts);
+
             var spawned: usize = 0;
-            var spawn_err: ?Thread.SpawnError = null;
-            for (self.options.servers) |server| {
-                job.racer.spawn(self.options.spawn_config, raceWorker, .{ job, server }) catch |err| {
+            var spawn_err: ?Task.SpawnError = null;
+            for (self.options.servers, 0..) |server, i| {
+                job.startWorker();
+                worker_contexts[i] = .{ .job = job, .server = server };
+                handles[i] = Task.go(
+                    "net/ntp/race",
+                    self.options.task_options,
+                    Task.Routine.init(&worker_contexts[i], RaceWorkerContext.run),
+                ) catch |err| {
+                    job.finishWorker();
                     if (spawn_err == null) spawn_err = err;
                     continue;
                 };
@@ -195,26 +299,15 @@ pub fn Client(comptime std: type, comptime net: type, comptime ntp: type) type {
 
             if (spawned == 0) return spawn_err orelse error.NoServerConfigured;
 
-            const race_result = job.racer.raceContext(ctx) catch |err| {
-                job.racer.cancel();
-                if (self.beginCleanup(job)) {
-                    owns_job = false;
-                } else {
-                    job.racer.wait();
-                }
+            const race_result = job.raceContext(ctx) catch |err| {
+                job.cancel();
+                joinRaceWorkers(handles);
                 return err;
             };
 
-            const winner = switch (race_result) {
-                .winner => |resp| resp,
-                .exhausted => return job.finalError(),
-            };
-
-            if (self.beginCleanup(job)) {
-                owns_job = false;
-            } else {
-                job.racer.wait();
-            }
+            job.cancel();
+            joinRaceWorkers(handles);
+            const winner = race_result orelse return job.finalError();
             return winner;
         }
 
@@ -223,12 +316,12 @@ pub fn Client(comptime std: type, comptime net: type, comptime ntp: type) type {
             return resp.transmit_time;
         }
 
-        pub fn getTimeRaceContext(self: *Self, ctx: context_mod.Context, origin_time: time_mod.Time) anyerror!time_mod.Time {
+        pub fn getTimeRaceContext(self: *Self, ctx: Context, origin_time: time_mod.Time) anyerror!time_mod.Time {
             const resp = try self.queryRaceContext(ctx, origin_time);
             return resp.transmit_time;
         }
 
-        fn raceWorker(state: WorkerRacer.State, job: *RaceJob, server: Server) void {
+        fn raceWorker(state: WorkerState, job: *RaceJob, server: Server) void {
             const resp = job.client.queryWithWorker(state, server, job.origin_time) catch |err| {
                 if (!state.done()) job.recordFailure(err);
                 return;
@@ -238,7 +331,7 @@ pub fn Client(comptime std: type, comptime net: type, comptime ntp: type) type {
             }
         }
 
-        fn queryWithContext(self: *Self, ctx: context_mod.Context, server: Server, origin_time: time_mod.Time) anyerror!ntp.Response {
+        fn queryWithContext(self: *Self, ctx: Context, server: Server, origin_time: time_mod.Time) anyerror!ntp.Response {
             var pc = try self.openPacketConn(server.addr);
             defer pc.deinit();
 
@@ -280,7 +373,7 @@ pub fn Client(comptime std: type, comptime net: type, comptime ntp: type) type {
             }
         }
 
-        fn queryWithWorker(self: *Self, state: WorkerRacer.State, server: Server, origin_time: time_mod.Time) anyerror!?ntp.Response {
+        fn queryWithWorker(self: *Self, state: WorkerState, server: Server, origin_time: time_mod.Time) anyerror!?ntp.Response {
             if (state.done()) return null;
 
             var pc = try self.openPacketConn(server.addr);
@@ -338,7 +431,7 @@ pub fn Client(comptime std: type, comptime net: type, comptime ntp: type) type {
                 net.netip.Addr.compare(result.addr.addr(), expected.addr()) == .eq;
         }
 
-        fn initialWriteTimeout(ctx: context_mod.Context, timeout: time_mod.duration.Duration) ?time_mod.duration.Duration {
+        fn initialWriteTimeout(ctx: Context, timeout: time_mod.duration.Duration) ?time_mod.duration.Duration {
             if (timeout <= 0) return 1;
             if (ctx.deadline()) |deadline| {
                 const remaining = @max(time_mod.instant.sub(deadline, net.time.instant.now()), 0);
@@ -348,7 +441,7 @@ pub fn Client(comptime std: type, comptime net: type, comptime ntp: type) type {
             return timeout;
         }
 
-        fn nextReadTimeoutContext(ctx: context_mod.Context, started: time_mod.instant.Time, timeout: time_mod.duration.Duration) ?time_mod.duration.Duration {
+        fn nextReadTimeoutContext(ctx: Context, started: time_mod.instant.Time, timeout: time_mod.duration.Duration) ?time_mod.duration.Duration {
             const elapsed = time_mod.instant.sub(net.time.instant.now(), started);
             const remaining_query = timeout - elapsed;
             if (remaining_query <= 0) return null;
@@ -363,7 +456,7 @@ pub fn Client(comptime std: type, comptime net: type, comptime ntp: type) type {
             return @max(@as(time_mod.duration.Duration, 1), @min(remaining, read_quantum));
         }
 
-        fn nextReadTimeoutWorker(state: WorkerRacer.State, started: time_mod.instant.Time, timeout: time_mod.duration.Duration) ?time_mod.duration.Duration {
+        fn nextReadTimeoutWorker(state: WorkerState, started: time_mod.instant.Time, timeout: time_mod.duration.Duration) ?time_mod.duration.Duration {
             if (state.done()) return null;
             const elapsed = time_mod.instant.sub(net.time.instant.now(), started);
             const remaining_query = timeout - elapsed;
@@ -375,7 +468,7 @@ pub fn Client(comptime std: type, comptime net: type, comptime ntp: type) type {
             return time_mod.instant.sub(net.time.instant.now(), started) >= timeout;
         }
 
-        fn timeoutForContext(ctx: context_mod.Context) anyerror {
+        fn timeoutForContext(ctx: Context) anyerror {
             if (ctx.err()) |err| return err;
             if (ctx.deadline()) |deadline| {
                 if (time_mod.instant.sub(deadline, net.time.instant.now()) <= 0) return error.DeadlineExceeded;
@@ -383,7 +476,7 @@ pub fn Client(comptime std: type, comptime net: type, comptime ntp: type) type {
             return error.Timeout;
         }
 
-        fn ensureContextActive(ctx: context_mod.Context) anyerror!void {
+        fn ensureContextActive(ctx: Context) anyerror!void {
             if (ctx.err()) |err| return err;
             if (ctx.deadline()) |deadline| {
                 if (time_mod.instant.sub(deadline, net.time.instant.now()) <= 0) return error.DeadlineExceeded;
@@ -411,28 +504,15 @@ pub fn Client(comptime std: type, comptime net: type, comptime ntp: type) type {
             if (self.active_races == 0) self.cond.broadcast();
         }
 
-        fn beginCleanup(self: *Self, job: *RaceJob) bool {
-            var t = Thread.spawn(self.cleanupSpawnConfig(), cleanupFn, .{job}) catch return false;
-            t.detach();
-            return true;
-        }
-
-        fn cleanupFn(job: *RaceJob) void {
-            job.client.destroyRaceJob(job);
+        fn joinRaceWorkers(handles: []?Task.Handle) void {
+            for (handles) |maybe_handle| {
+                if (maybe_handle) |handle| handle.join();
+            }
         }
 
         fn destroyRaceJob(self: *Self, job: *RaceJob) void {
-            job.racer.deinit();
             self.allocator.destroy(job);
             self.finishRace();
-        }
-
-        fn cleanupSpawnConfig(self: *Self) Thread.SpawnConfig {
-            var config = self.options.spawn_config;
-            if (@hasField(Thread.SpawnConfig, "allocator")) {
-                if (config.allocator == null) config.allocator = self.allocator;
-            }
-            return config;
         }
     };
 }
@@ -493,6 +573,9 @@ pub fn TestRunner(comptime std: type, comptime net: type, comptime ntp: type) @i
 
         const FakeNet = struct {
             pub const time = net.time;
+            pub const sync = net.sync;
+            pub const task = net.task;
+            pub const Context = net.Context;
             pub const PacketConn = PacketConnApi;
             pub const netip = netip_mod;
 

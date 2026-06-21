@@ -80,6 +80,38 @@ pub const StaticStringMapWithEql = collections.StaticStringMapWithEql;
 
 pub const BitStack = collections.BitStack;
 
+fn ThreadNamespace(comptime Impl: type, comptime Heap: type) type {
+    if (@hasDecl(Impl, "Thread")) {
+        return root.Thread.make(Impl.Thread, Heap);
+    }
+    return MissingThreadNamespace;
+}
+
+const MissingThreadNamespace = struct {
+    pub const missing_thread_backend = true;
+    pub const SpawnConfig = MissingThreadMember("SpawnConfig");
+    pub const SpawnError = MissingThreadMember("SpawnError");
+    pub const Mutex = MissingThreadMember("Mutex");
+    pub const Condition = MissingThreadMember("Condition");
+    pub const RwLock = MissingThreadMember("RwLock");
+
+    pub fn spawn(_: anytype, comptime _: anytype, _: anytype) void {
+        @compileError("stdz.Thread is unavailable for this runtime; use grt.task.go");
+    }
+
+    pub fn sleep(_: u64) void {
+        @compileError("stdz.Thread.sleep is unavailable for this runtime; use grt.time.sleep");
+    }
+};
+
+fn MissingThreadMember(comptime name: []const u8) type {
+    return struct {
+        comptime {
+            @compileError("stdz.Thread." ++ name ++ " is unavailable for this runtime; use glib.sync or glib.task");
+        }
+    };
+}
+
 pub fn make(comptime Impl: type) type {
     comptime {
         if (!@hasDecl(Impl, "atomic")) {
@@ -90,7 +122,7 @@ pub fn make(comptime Impl: type) type {
     return struct {
         const Self = @This();
         pub const heap = root.heap.make(Impl.heap);
-        pub const Thread = root.Thread.make(Impl.Thread, Self.heap);
+        pub const Thread = ThreadNamespace(Impl, Self.heap);
         pub const log = root.log.make(Impl.log);
         pub const posix = root.posix.make(Impl.posix);
         pub const ascii = root.ascii;

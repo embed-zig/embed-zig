@@ -153,7 +153,7 @@ pub fn addHeaders(self: *Request, headers: []const Header) stdz.mem.Allocator.Er
     if (old_owned) |owned| self.allocator.free(owned);
 }
 
-pub fn TestRunner(comptime std: type, comptime time: type) testing_api.TestRunner {
+pub fn TestRunner(comptime std: type, comptime net: type) testing_api.TestRunner {
     return testing_api.TestRunner.fromFn(std, 3 * 1024 * 1024, struct {
         fn run(_: *testing_api.T, allocator: std.mem.Allocator) !void {
             const testing = std.testing;
@@ -184,7 +184,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) testing_api.TestRunne
 
             {
                 const req = try Request.init(allocator, "GET", "https://example.com");
-                const ContextApi = @import("context").make(std, time);
+                const ContextApi = net.Context;
                 var context_api = try ContextApi.init(allocator);
                 defer context_api.deinit();
                 const deadline: @import("time").instant.Time = 5000;

@@ -2,9 +2,9 @@ const time_mod = @import("time");
 const NetConn = @import("../Conn.zig");
 const Session = @import("Session.zig");
 
-pub fn make(comptime std: type, comptime time: type) type {
+pub fn make(comptime std: type, comptime time: type, comptime Sync: type, comptime Task: type) type {
     const Allocator = std.mem.Allocator;
-    const SessionType = Session.make(std, time);
+    const SessionType = Session.make(std, time, Sync, Task);
 
     return struct {
         allocator: Allocator,

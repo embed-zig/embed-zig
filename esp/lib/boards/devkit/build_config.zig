@@ -4,6 +4,27 @@ pub const chip = "esp32s3";
 
 pub const partition_table = esp_idf.PartitionTable.default_table;
 
+pub const task_policy = .{
+    .zux = .{
+        .priority = 5,
+    },
+    .audio = .{
+        .priority = 10,
+        .core_id = 1,
+    },
+    .kcp = .{
+        .priority = 10,
+        .core_id = 1,
+    },
+    .netperf = .{
+        .priority = 8,
+        .core_id = 1,
+    },
+    .wifi_led = .{
+        .priority = 5,
+    },
+};
+
 pub const sdk_config = esp_idf.SdkConfig.make(.{
     .ESPTOOLPY_FLASHSIZE = "16MB",
     .ESPTOOLPY_FLASHSIZE_16MB = true,

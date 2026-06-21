@@ -1,4 +1,5 @@
 const glib = @import("glib");
+const Native = @import("task/Native.zig");
 
 pub const impl = struct {
     pub fn make(comptime grt: type) type {
@@ -11,27 +12,27 @@ pub const impl = struct {
 
 pub fn DefaultHandler(comptime grt: type) type {
     return struct {
-        pub const Handle = grt.std.Thread;
-        pub const SpawnError = grt.std.Thread.SpawnError;
+        pub const Handle = Native;
+        pub const SpawnError = Native.SpawnError;
 
         pub fn go(
             name: []const u8,
             options: glib.task.Options,
             routine: glib.task.Routine,
-        ) grt.std.Thread.SpawnError!grt.std.Thread {
-            var name_buf: [grt.std.Thread.max_name_len:0]u8 = undefined;
+        ) SpawnError!Handle {
+            var name_buf: [Native.max_name_len:0]u8 = undefined;
             const task_name = taskName(grt, name, &name_buf);
 
-            return grt.std.Thread.spawn(.{
+            return Native.spawn(.{
                 .name = task_name.ptr,
                 .stack_size = options.min_stack_size,
-            }, runRoutine, .{routine});
+            }, routine);
+        }
+
+        pub fn currentToken() usize {
+            return Native.currentToken();
         }
     };
-}
-
-fn runRoutine(routine: glib.task.Routine) void {
-    routine.run();
 }
 
 const ErrorHandler = struct {
@@ -40,10 +41,11 @@ const ErrorHandler = struct {
     }
 };
 
-fn taskName(comptime grt: type, name: []const u8, buf: *[grt.std.Thread.max_name_len:0]u8) [:0]const u8 {
+fn taskName(comptime grt: type, name: []const u8, buf: *[Native.max_name_len:0]u8) [:0]const u8 {
+    _ = grt;
     const fallback = "task";
     const source = if (name.len == 0) fallback else name;
-    const max_len = grt.std.Thread.max_name_len;
+    const max_len = Native.max_name_len;
     const len = @min(source.len, max_len);
 
     for (source[0..len], 0..) |c, i| {

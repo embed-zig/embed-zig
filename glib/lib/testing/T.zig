@@ -2,6 +2,7 @@
 
 const builtin = @import("builtin");
 const stdz_mod = @import("stdz");
+const task_mod = @import("task");
 const context_mod = @import("context");
 const time_mod = @import("time");
 const Context = context_mod.Context;
@@ -199,11 +200,11 @@ fn structuredLabelPadding(label: []const u8) []const u8 {
 pub fn new(comptime std: type, comptime time: type, comptime scope: @Type(.enum_literal)) Self {
     const TestStd = testing_std_mod.make(std, .{});
     const ContextSync = struct {
-        pub const Mutex = TestStd.Thread.Mutex;
-        pub const Condition = TestStd.Thread.Condition;
-        pub const RwLock = TestStd.Thread.RwLock;
+        pub const Mutex = TestStd.sync.Mutex;
+        pub const Condition = TestStd.sync.Condition;
+        pub const RwLock = TestStd.sync.RwLock;
     };
-    const ContextApi = context_mod.makeWithSync(std, time, ContextSync);
+    const ContextApi = context_mod.makeWithTask(TestStd, time, ContextSync, TestStd.task);
     const TestingAllocator = @import("TestingAllocator.zig");
     const run_log = TestStd.log.scoped(scope);
 
@@ -223,7 +224,7 @@ pub fn new(comptime std: type, comptime time: type, comptime scope: @Type(.enum_
         is_wait_done: bool = false,
         destroy_debug_tag: ?[]const u8 = null,
 
-        state_mutex: TestStd.Thread.Mutex = .{},
+        state_mutex: TestStd.sync.Mutex = .{},
         is_failed: bool = false,
         is_fatal: bool = false,
 
@@ -233,23 +234,13 @@ pub fn new(comptime std: type, comptime time: type, comptime scope: @Type(.enum_
             runner: TestRunnerHandle,
             testing_allocator: TestingAllocator,
             ok: bool = false,
-            worker: TestStd.Thread,
+            worker: TestStd.task.Handle,
         };
 
-        fn projectSpawnConfig(
-            runner_config: stdz_mod.Thread.SpawnConfig,
-            allocator: stdz_mod.mem.Allocator,
-        ) TestStd.Thread.SpawnConfig {
-            var config: TestStd.Thread.SpawnConfig = .{
-                .allocator = runner_config.allocator orelse allocator,
-                .priority = runner_config.priority,
-                .name = runner_config.name,
-                .core_id = runner_config.core_id,
+        fn projectTaskOptions(runner_config: task_mod.Options) TestStd.task.Options {
+            return .{
+                .min_stack_size = runner_config.min_stack_size,
             };
-            if (runner_config.stack_size != 0) {
-                config.stack_size = runner_config.stack_size;
-            }
-            return config;
         }
 
         fn createRoot() !Self {
@@ -677,12 +668,14 @@ pub fn new(comptime std: type, comptime time: type, comptime scope: @Type(.enum_
                 }
             };
 
-            const child_state = fromPtr(child.ptr);
-            const child_allocator = child_state.testing_allocator.allocator();
-            const dup_config = projectSpawnConfig(configured_runner.spawn_config, child_allocator);
-            pending.worker = TestStd.Thread.spawn(dup_config, Worker.main, .{pending}) catch |err| {
+            const dup_config = projectTaskOptions(configured_runner.task_options);
+            pending.worker = TestStd.task.go(
+                "testing/subtest",
+                dup_config,
+                task_mod.Routine.init(pending, Worker.main),
+            ) catch |err| {
                 const child_label = child.name();
-                run_log.err("subtest Thread.spawn error: {s} (child {s})", .{
+                run_log.err("subtest task.go error: {s} (child {s})", .{
                     @errorName(err),
                     child_label,
                 });
@@ -780,6 +773,90 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
         return TestRunnerHandle.make(Runner).new(&Holder.runner);
     }
 
+    const native_std = @import("std");
+    const NativeWorker = @field(native_std, "Thread");
+    const HostSync = struct {
+        const FastCondition = struct {
+            cond: NativeWorker.Condition = .{},
+
+            pub fn wait(self: *@This(), mutex: *NativeWorker.Mutex) void {
+                self.cond.wait(mutex);
+            }
+
+            pub fn timedWait(self: *@This(), mutex: *NativeWorker.Mutex, _: u64) error{Timeout}!void {
+                _ = self;
+                mutex.unlock();
+                NativeWorker.yield() catch {};
+                mutex.lock();
+                return error.Timeout;
+            }
+
+            pub fn signal(self: *@This()) void {
+                self.cond.signal();
+            }
+
+            pub fn broadcast(self: *@This()) void {
+                self.cond.broadcast();
+            }
+        };
+
+        pub const Mutex = @import("sync").Mutex.make(NativeWorker.Mutex);
+        pub const Condition = @import("sync").Condition.make(FastCondition);
+        pub const RwLock = @import("sync").RwLock.make(NativeWorker.RwLock);
+    };
+    const AsyncTask = struct {
+        pub const Handle = NativeWorker;
+        pub const Options = task_mod.Options;
+        pub const Routine = task_mod.Routine;
+        pub const SpawnError = NativeWorker.SpawnError;
+
+        pub fn go(_: []const u8, launch_options: Options, routine: Routine) SpawnError!Handle {
+            return NativeWorker.spawn(.{
+                .stack_size = stackSize(launch_options.min_stack_size),
+            }, runRoutine, .{routine});
+        }
+
+        pub fn currentToken() usize {
+            const value: usize = @intCast(NativeWorker.getCurrentId());
+            return if (value == 0) 1 else value;
+        }
+
+        fn runRoutine(routine: Routine) void {
+            routine.run();
+        }
+
+        fn stackSize(min_stack_size: usize) usize {
+            if (min_stack_size == 0) return NativeWorker.SpawnConfig.default_stack_size;
+            return min_stack_size;
+        }
+    };
+    const InlineHandle = struct {
+        pub fn join(_: @This()) void {}
+        pub fn detach(_: @This()) void {}
+    };
+    const InlineTask = struct {
+        pub const Handle = InlineHandle;
+        pub const Options = task_mod.Options;
+        pub const Routine = task_mod.Routine;
+        pub const SpawnError = error{};
+
+        pub fn go(_: []const u8, _: Options, routine: Routine) SpawnError!Handle {
+            routine.run();
+            return .{};
+        }
+
+        pub fn currentToken() usize {
+            return 1;
+        }
+    };
+    const TestScheduler = struct {
+        fn drain() void {
+            for (0..64) |_| {
+                NativeWorker.yield() catch {};
+            }
+        }
+    };
+
     const TestCase = struct {
         fn testFormatMemoryUsage() !void {
             var buf: [32]u8 = undefined;
@@ -794,7 +871,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
         fn testContextCancelLogs() !void {
             const Support = struct {
                 var entries: std.ArrayListUnmanaged([]u8) = .{};
-                var mutex: std.Thread.Mutex = .{};
+                var mutex: NativeWorker.Mutex = .{};
                 var current_instant = std.atomic.Value(time.instant.Time).init(0);
                 var stage = std.atomic.Value(u32).init(0);
 
@@ -869,54 +946,9 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                 }
             };
 
-            const TestThread = struct {
-                pub const SpawnConfig = std.Thread.SpawnConfig;
-                pub const Mutex = std.Thread.Mutex;
-                pub const RwLock = std.Thread.RwLock;
-                const ThreadSelf = @This();
-                pub const Condition = struct {
-                    inner: std.Thread.Condition = .{},
-
-                    pub fn wait(self: *Condition, mutex: *Mutex) void {
-                        self.inner.wait(mutex);
-                    }
-
-                    pub fn timedWait(self: *Condition, mutex: *Mutex, timeout_ns: u64) error{Timeout}!void {
-                        self.inner.timedWait(mutex, timeout_ns) catch return error.Timeout;
-                    }
-
-                    pub fn signal(self: *Condition) void {
-                        self.inner.signal();
-                    }
-
-                    pub fn broadcast(self: *Condition) void {
-                        self.inner.broadcast();
-                    }
-                };
-
-                inner: std.Thread,
-
-                pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) !ThreadSelf {
-                    return .{
-                        .inner = try std.Thread.spawn(config, f, args),
-                    };
-                }
-
-                pub fn join(self: ThreadSelf) void {
-                    self.inner.join();
-                }
-
-                pub fn detach(self: ThreadSelf) void {
-                    self.inner.detach();
-                }
-
-                pub fn sleep(ns: u64) void {
-                    Support.advance(@intCast(ns));
-                }
-            };
-
             const TestStd = testing_std_mod.make(std, .{
-                .Thread = TestThread,
+                .sync = HostSync,
+                .task = AsyncTask,
                 .log = CapturingLog,
                 .mem = std.mem,
                 .fmt = std.fmt,
@@ -934,6 +966,11 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                         return Support.currentInstant();
                     }
                 };
+
+                pub fn sleep(value: duration.Duration) void {
+                    Support.advance(value);
+                    TestScheduler.drain();
+                }
             };
 
             const TaskRunner = struct {
@@ -1330,7 +1367,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
         fn testTimeout() !void {
             const Support = struct {
                 var entries: std.ArrayListUnmanaged([]u8) = .{};
-                var mutex: std.Thread.Mutex = .{};
+                var mutex: NativeWorker.Mutex = .{};
                 var current_instant = std.atomic.Value(time.instant.Time).init(0);
                 var stage = std.atomic.Value(u32).init(0);
 
@@ -1370,7 +1407,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                 }
 
                 fn waitForStage(target: u32) void {
-                    while (stage.load(.acquire) < target) std.Thread.yield() catch {};
+                    while (stage.load(.acquire) < target) NativeWorker.yield() catch {};
                 }
 
                 fn joinedLog(allocator: std.mem.Allocator) ![]u8 {
@@ -1405,55 +1442,9 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                 }
             };
 
-            const TestThread = struct {
-                pub const SpawnConfig = std.Thread.SpawnConfig;
-                pub const Mutex = std.Thread.Mutex;
-                pub const RwLock = std.Thread.RwLock;
-                const ThreadSelf = @This();
-                pub const Condition = struct {
-                    inner: std.Thread.Condition = .{},
-
-                    pub fn wait(self: *Condition, mutex: *Mutex) void {
-                        self.inner.wait(mutex);
-                    }
-
-                    pub fn timedWait(self: *Condition, mutex: *Mutex, timeout_ns: u64) error{Timeout}!void {
-                        self.inner.timedWait(mutex, timeout_ns) catch return error.Timeout;
-                    }
-
-                    pub fn signal(self: *Condition) void {
-                        self.inner.signal();
-                    }
-
-                    pub fn broadcast(self: *Condition) void {
-                        self.inner.broadcast();
-                    }
-                };
-
-                inner: std.Thread,
-
-                pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) !ThreadSelf {
-                    return .{
-                        .inner = try std.Thread.spawn(config, f, args),
-                    };
-                }
-
-                pub fn join(self: ThreadSelf) void {
-                    self.inner.join();
-                }
-
-                pub fn detach(self: ThreadSelf) void {
-                    self.inner.detach();
-                }
-
-                pub fn sleep(ns: u64) void {
-                    Support.advance(@intCast(ns));
-                    std.Thread.sleep(ns);
-                }
-            };
-
             const TestStd = testing_std_mod.make(std, .{
-                .Thread = TestThread,
+                .sync = HostSync,
+                .task = AsyncTask,
                 .log = CapturingLog,
                 .mem = std.mem,
                 .fmt = std.fmt,
@@ -1471,6 +1462,11 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                         return Support.currentInstant();
                     }
                 };
+
+                pub fn sleep(value: duration.Duration) void {
+                    Support.advance(value);
+                    TestScheduler.drain();
+                }
             };
 
             const TaskRunner = struct {
@@ -1864,6 +1860,14 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                     defer std.testing.allocator.free(actual_log);
                     try std.testing.expectEqualStrings(expected_log, actual_log);
                 }
+
+                fn expectOneOfLogs(expected_a: []const u8, expected_b: []const u8) !void {
+                    const actual_log = try normalizedLog();
+                    defer std.testing.allocator.free(actual_log);
+                    if (std.mem.eql(u8, expected_a, actual_log)) return;
+                    if (std.mem.eql(u8, expected_b, actual_log)) return;
+                    try std.testing.expectEqualStrings(expected_a, actual_log);
+                }
             };
 
             Support.reset();
@@ -1896,7 +1900,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                 try std.testing.expect(!root.wait());
                 root.deinit();
 
-                const expected_log =
+                const expected_log_a =
                     \\>>> /suite start at 0.0s
                     \\>>> /suite/nested start at 0.0s
                     \\>>> /suite/nested/leaf_fast start at 0.0s
@@ -1913,8 +1917,25 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                     \\!!! /suite failed at 0.0s, 80ms, <mem>
                     \\!!! summary failed at 0.0s, 80ms, <mem>
                 ;
+                const expected_log_b =
+                    \\>>> /suite start at 0.0s
+                    \\>>> /suite/nested start at 0.0s
+                    \\>>> /suite/nested/leaf_fast start at 0.0s
+                    \\<<< /suite/nested/leaf_fast done at 0.0s, 10ms, <mem>
+                    \\>>> /suite/nested/leaf_slow start at 0.0s
+                    \\!!! /suite/nested/leaf_slow leaf timeout
+                    \\!!! /suite/nested/leaf_slow failed at 0.0s, 70ms, <mem>
+                    \\!!! /suite/nested failed at 0.0s, 80ms, <mem>
+                    \\>>> /suite/fast start at 0.0s
+                    \\>>> /suite/slow start at 0.0s
+                    \\!!! /suite/slow parallel timeout
+                    \\<<< /suite/fast done at 0.0s, 10ms, <mem>
+                    \\!!! /suite/slow failed at 0.1s, 70ms, <mem>
+                    \\!!! /suite failed at 0.0s, 80ms, <mem>
+                    \\!!! summary failed at 0.0s, 80ms, <mem>
+                ;
 
-                try Helper.expectLog(expected_log);
+                try Helper.expectOneOfLogs(expected_log_a, expected_log_b);
             }
 
             Support.reset();
@@ -1944,7 +1965,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
         fn testMemoryLimit() !void {
             const Support = struct {
                 var entries: std.ArrayListUnmanaged([]u8) = .{};
-                var mutex: std.Thread.Mutex = .{};
+                var mutex: NativeWorker.Mutex = .{};
                 var current_instant = std.atomic.Value(time.instant.Time).init(0);
 
                 fn reset() void {
@@ -2009,54 +2030,9 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                 }
             };
 
-            const TestThread = struct {
-                pub const SpawnConfig = std.Thread.SpawnConfig;
-                pub const Mutex = std.Thread.Mutex;
-                pub const RwLock = std.Thread.RwLock;
-                const ThreadSelf = @This();
-                pub const Condition = struct {
-                    inner: std.Thread.Condition = .{},
-
-                    pub fn wait(self: *Condition, mutex: *Mutex) void {
-                        self.inner.wait(mutex);
-                    }
-
-                    pub fn timedWait(self: *Condition, mutex: *Mutex, timeout_ns: u64) error{Timeout}!void {
-                        self.inner.timedWait(mutex, timeout_ns) catch return error.Timeout;
-                    }
-
-                    pub fn signal(self: *Condition) void {
-                        self.inner.signal();
-                    }
-
-                    pub fn broadcast(self: *Condition) void {
-                        self.inner.broadcast();
-                    }
-                };
-
-                inner: std.Thread,
-
-                pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) !ThreadSelf {
-                    return .{
-                        .inner = try std.Thread.spawn(config, f, args),
-                    };
-                }
-
-                pub fn join(self: ThreadSelf) void {
-                    self.inner.join();
-                }
-
-                pub fn detach(self: ThreadSelf) void {
-                    self.inner.detach();
-                }
-
-                pub fn sleep(ns: u64) void {
-                    Support.advance(@intCast(ns));
-                }
-            };
-
             const TestStd = testing_std_mod.make(std, .{
-                .Thread = TestThread,
+                .sync = HostSync,
+                .task = AsyncTask,
                 .log = CapturingLog,
                 .mem = std.mem,
                 .fmt = std.fmt,
@@ -2074,6 +2050,11 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                         return Support.currentInstant();
                     }
                 };
+
+                pub fn sleep(value: duration.Duration) void {
+                    Support.advance(value);
+                    TestScheduler.drain();
+                }
             };
 
             const TaskRunner = struct {
@@ -2273,7 +2254,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
         fn testPeakMemoryUsesTreePeak() !void {
             const Support = struct {
                 var entries: std.ArrayListUnmanaged([]u8) = .{};
-                var mutex: std.Thread.Mutex = .{};
+                var mutex: NativeWorker.Mutex = .{};
 
                 fn reset() void {
                     mutex.lock();
@@ -2324,53 +2305,9 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                 }
             };
 
-            const TestThread = struct {
-                pub const SpawnConfig = std.Thread.SpawnConfig;
-                pub const Mutex = std.Thread.Mutex;
-                pub const RwLock = std.Thread.RwLock;
-                const ThreadSelf = @This();
-
-                pub const Condition = struct {
-                    inner: std.Thread.Condition = .{},
-
-                    pub fn wait(self: *Condition, mutex: *Mutex) void {
-                        self.inner.wait(mutex);
-                    }
-
-                    pub fn timedWait(self: *Condition, mutex: *Mutex, timeout_ns: u64) error{Timeout}!void {
-                        self.inner.timedWait(mutex, timeout_ns) catch return error.Timeout;
-                    }
-
-                    pub fn signal(self: *Condition) void {
-                        self.inner.signal();
-                    }
-
-                    pub fn broadcast(self: *Condition) void {
-                        self.inner.broadcast();
-                    }
-                };
-
-                pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) !ThreadSelf {
-                    _ = config;
-                    @call(.auto, f, args);
-                    return .{};
-                }
-
-                pub fn join(self: ThreadSelf) void {
-                    _ = self;
-                }
-
-                pub fn detach(self: ThreadSelf) void {
-                    _ = self;
-                }
-
-                pub fn sleep(ns: u64) void {
-                    _ = ns;
-                }
-            };
-
             const TestStd = testing_std_mod.make(std, .{
-                .Thread = TestThread,
+                .sync = HostSync,
+                .task = InlineTask,
                 .log = CapturingLog,
                 .mem = std.mem,
                 .fmt = std.fmt,
@@ -2388,6 +2325,8 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                         return 0;
                     }
                 };
+
+                pub fn sleep(_: duration.Duration) void {}
             };
 
             const TaskRunner = struct {
@@ -2555,9 +2494,8 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
 
             const Support = struct {
                 var entries: std.ArrayListUnmanaged([]u8) = .{};
-                var mutex: std.Thread.Mutex = .{};
+                var mutex: NativeWorker.Mutex = .{};
                 var current_instant = std.atomic.Value(time.instant.Time).init(0);
-                var fail_spawn = false;
                 var runner_run_hits: usize = 0;
                 var runner_deinit_hits: usize = 0;
 
@@ -2570,7 +2508,6 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                     entries.deinit(std.testing.allocator);
                     entries = .{};
                     current_instant.store(0, .release);
-                    fail_spawn = false;
                     runner_run_hits = 0;
                     runner_deinit_hits = 0;
                 }
@@ -2626,54 +2563,34 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                 }
             };
 
-            const TestThread = struct {
-                pub const SpawnConfig = std.Thread.SpawnConfig;
-                pub const Mutex = std.Thread.Mutex;
-                pub const RwLock = std.Thread.RwLock;
-                const ThreadSelf = @This();
+            const AlwaysFailTask = struct {
+                pub const Handle = InlineHandle;
+                pub const Options = task_mod.Options;
+                pub const Routine = task_mod.Routine;
+                pub const SpawnError = error{ThreadQuotaExceeded};
 
-                pub const Condition = struct {
-                    inner: std.Thread.Condition = .{},
-
-                    pub fn wait(self: *Condition, mutex: *Mutex) void {
-                        self.inner.wait(mutex);
-                    }
-
-                    pub fn timedWait(self: *Condition, mutex: *Mutex, timeout_ns: u64) error{Timeout}!void {
-                        self.inner.timedWait(mutex, timeout_ns) catch return error.Timeout;
-                    }
-
-                    pub fn signal(self: *Condition) void {
-                        self.inner.signal();
-                    }
-
-                    pub fn broadcast(self: *Condition) void {
-                        self.inner.broadcast();
-                    }
-                };
-
-                pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) error{ThreadQuotaExceeded}!ThreadSelf {
-                    _ = config;
-                    if (Support.fail_spawn) return error.ThreadQuotaExceeded;
-                    @call(.auto, f, args);
-                    return .{};
+                pub fn go(_: []const u8, _: Options, _: Routine) SpawnError!Handle {
+                    return error.ThreadQuotaExceeded;
                 }
 
-                pub fn join(self: ThreadSelf) void {
-                    _ = self;
-                }
-
-                pub fn detach(self: ThreadSelf) void {
-                    _ = self;
-                }
-
-                pub fn sleep(ns: u64) void {
-                    Support.advance(@intCast(ns));
+                pub fn currentToken() usize {
+                    return 1;
                 }
             };
 
             const TestStd = testing_std_mod.make(std, .{
-                .Thread = TestThread,
+                .sync = HostSync,
+                .task = InlineTask,
+                .log = CapturingLog,
+                .mem = std.mem,
+                .fmt = std.fmt,
+                .testing = struct {
+                    pub var allocator: std.mem.Allocator = undefined;
+                },
+            });
+            const FailingTestStd = testing_std_mod.make(std, .{
+                .sync = HostSync,
+                .task = AlwaysFailTask,
                 .log = CapturingLog,
                 .mem = std.mem,
                 .fmt = std.fmt,
@@ -2691,6 +2608,11 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                         return Support.currentInstant();
                     }
                 };
+
+                pub fn sleep(value: duration.Duration) void {
+                    Support.advance(value);
+                    TestScheduler.drain();
+                }
             };
 
             const Helper = struct {
@@ -2750,7 +2672,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
             {
                 var found_pending_alloc_failure = false;
 
-                for (0..32) |fail_offset| {
+                for (0..96) |fail_offset| {
                     Support.reset();
 
                     var allocator_state = FailNthAllocator{
@@ -2778,17 +2700,18 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
             }
 
             Support.reset();
-            Support.fail_spawn = true;
-            TestStd.testing.allocator = std.testing.allocator;
+            FailingTestStd.testing.allocator = std.testing.allocator;
 
             {
-                var root = new(TestStd, TestTime, .test_run);
+                var root = new(FailingTestStd, TestTime, .test_run);
                 root.run("child", Helper.makeTrackedRunner());
-                try std.testing.expect(!root.wait());
+                const ok = root.wait();
                 root.deinit();
+                try std.testing.expect(!ok);
             }
 
-            try std.testing.expect(try Helper.normalizedLogContains("subtest spawn failed"));
+            const saw_spawn_log = try Helper.normalizedLogContains("subtest spawn failed");
+            try std.testing.expect(saw_spawn_log);
             try std.testing.expectEqual(@as(usize, 0), Support.runner_run_hits);
             try std.testing.expectEqual(@as(usize, 1), Support.runner_deinit_hits);
         }

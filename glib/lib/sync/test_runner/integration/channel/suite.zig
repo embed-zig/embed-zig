@@ -5,7 +5,53 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
     const native_std = @import("std");
     const BoundChannel = Channel.make(ChannelFactory(std));
     const Ch = BoundChannel(u32);
-    const Thread = std.Thread;
+    const channel_task_options: std.task.Options = .{ .min_stack_size = 96 * 1024 };
+    const TaskHandle = struct {
+        handle: std.task.Handle,
+
+        fn spawn(_: anytype, comptime f: anytype, args: anytype) std.task.SpawnError!@This() {
+            const TaskContext = struct {
+                args: @TypeOf(args),
+
+                fn run(ctx: *@This()) void {
+                    const task_args = ctx.args;
+                    std.testing.allocator.destroy(ctx);
+                    call(task_args);
+                }
+
+                fn call(task_args: @TypeOf(args)) void {
+                    const Return = @typeInfo(@TypeOf(f)).@"fn".return_type orelse
+                        @compileError("channel task must have an explicit return type");
+
+                    switch (@typeInfo(Return)) {
+                        .void => @call(.auto, f, task_args),
+                        .error_union => |eu| {
+                            if (eu.payload != void)
+                                @compileError("channel task must return void or !void");
+                            _ = @call(.auto, f, task_args) catch {};
+                        },
+                        else => @compileError("channel task must return void or !void"),
+                    }
+                }
+            };
+
+            const ctx = std.testing.allocator.create(TaskContext) catch return error.OutOfMemory;
+            errdefer std.testing.allocator.destroy(ctx);
+            ctx.* = .{ .args = args };
+
+            return .{
+                .handle = try std.task.go(
+                    "testing/sync/channel",
+                    channel_task_options,
+                    std.task.Routine.init(ctx, TaskContext.run),
+                ),
+            };
+        }
+
+        fn join(self: @This()) void {
+            self.handle.join();
+        }
+    };
     const Allocator = std.mem.Allocator;
     const Atomic = std.atomic.Value;
     const testing = std.testing;
@@ -192,7 +238,7 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
 
             var entered = Atomic(bool).init(false);
             var finished = Atomic(bool).init(false);
-            const t = try Thread.spawn(.{}, struct {
+            const t = try TaskHandle.spawn(.{}, struct {
                 fn run(c: *Ch, ent: *Atomic(bool), fin: *Atomic(bool)) void {
                     ent.store(true, .release);
                     _ = c.send(0xFF) catch {};
@@ -218,7 +264,7 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
 
             var entered = Atomic(bool).init(false);
             var send_ok = Atomic(bool).init(false);
-            const t = try Thread.spawn(.{}, struct {
+            const t = try TaskHandle.spawn(.{}, struct {
                 fn run(c: *Ch, ent: *Atomic(bool), flag: *Atomic(bool)) void {
                     ent.store(true, .release);
                     const s = c.send(3) catch return;
@@ -250,7 +296,7 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
 
             var entered = Atomic(bool).init(false);
             var finished = Atomic(bool).init(false);
-            const t = try Thread.spawn(.{}, struct {
+            const t = try TaskHandle.spawn(.{}, struct {
                 fn run(c: *Ch, ent: *Atomic(bool), fin: *Atomic(bool)) void {
                     ent.store(true, .release);
                     _ = c.recv() catch {};
@@ -273,7 +319,7 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
             var entered = Atomic(bool).init(false);
             var recv_ok = Atomic(bool).init(false);
             var recv_val = Atomic(Event).init(0);
-            const t = try Thread.spawn(.{}, struct {
+            const t = try TaskHandle.spawn(.{}, struct {
                 fn run(c: *Ch, ent: *Atomic(bool), ok_flag: *Atomic(bool), val_flag: *Atomic(Event)) void {
                     ent.store(true, .release);
                     const r = c.recv() catch return;
@@ -465,7 +511,7 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
             var entered = Atomic(bool).init(false);
             var recv_ok = Atomic(bool).init(false);
             var recv_val = Atomic(Event).init(0);
-            const t = try Thread.spawn(.{}, struct {
+            const t = try TaskHandle.spawn(.{}, struct {
                 fn run(c: *Ch, ent: *Atomic(bool), ok_flag: *Atomic(bool), val_flag: *Atomic(Event)) void {
                     ent.store(true, .release);
                     const r = c.recv() catch return;
@@ -493,7 +539,7 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
 
             var entered = Atomic(bool).init(false);
             var send_ok = Atomic(bool).init(false);
-            const t = try Thread.spawn(.{}, struct {
+            const t = try TaskHandle.spawn(.{}, struct {
                 fn run(c: *Ch, ent: *Atomic(bool), flag: *Atomic(bool)) void {
                     ent.store(true, .release);
                     const s = c.send(3) catch return;
@@ -518,7 +564,7 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
 
                 var recv_ok = Atomic(bool).init(false);
                 var recv_val = Atomic(Event).init(0);
-                const receiver = try Thread.spawn(.{}, struct {
+                const receiver = try TaskHandle.spawn(.{}, struct {
                     fn run(c: *Ch, ok: *Atomic(bool), value: *Atomic(Event)) void {
                         time.sleep(time.duration.MilliSecond);
                         const r = c.recv() catch return;
@@ -547,7 +593,7 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
 
                 var recv_ok = Atomic(bool).init(false);
                 var recv_val = Atomic(Event).init(0);
-                const receiver = try Thread.spawn(.{}, struct {
+                const receiver = try TaskHandle.spawn(.{}, struct {
                     fn run(c: *Ch, ok: *Atomic(bool), value: *Atomic(Event)) void {
                         time.sleep(time.duration.MilliSecond);
                         const r = c.recv() catch return;
@@ -581,7 +627,7 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
 
                 try testing.expectError(error.Timeout, ch.recvTimeout(5 * time.duration.MilliSecond));
 
-                const sender = try Thread.spawn(.{}, struct {
+                const sender = try TaskHandle.spawn(.{}, struct {
                     fn run(c: *Ch) void {
                         time.sleep(time.duration.MilliSecond);
                         _ = c.send(0xD00D) catch {};
@@ -605,7 +651,7 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
 
             var entered = Atomic(bool).init(false);
             var recv_ok = Atomic(bool).init(true);
-            const t = try Thread.spawn(.{}, struct {
+            const t = try TaskHandle.spawn(.{}, struct {
                 fn run(c: *Ch, ent: *Atomic(bool), flag: *Atomic(bool)) void {
                     ent.store(true, .release);
                     const r = c.recv() catch {
@@ -632,7 +678,7 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
 
             var entered = Atomic(bool).init(false);
             var send_ok = Atomic(bool).init(true);
-            const t = try Thread.spawn(.{}, struct {
+            const t = try TaskHandle.spawn(.{}, struct {
                 fn run(c: *Ch, ent: *Atomic(bool), flag: *Atomic(bool)) void {
                     ent.store(true, .release);
                     const s = c.send(99) catch {
@@ -657,10 +703,10 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
             const N = 4;
             var started = Atomic(u32).init(0);
             var done_count = Atomic(u32).init(0);
-            var threads: [N]Thread = undefined;
+            var threads: [N]TaskHandle = undefined;
 
             for (0..N) |i| {
-                threads[i] = try Thread.spawn(.{}, struct {
+                threads[i] = try TaskHandle.spawn(.{}, struct {
                     fn run(c: *Ch, started_count: *Atomic(u32), cnt: *Atomic(u32)) void {
                         _ = started_count.fetchAdd(1, .acq_rel);
                         const r = c.recv() catch {
@@ -694,10 +740,10 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
             const N = 4;
             var started = Atomic(u32).init(0);
             var done_count = Atomic(u32).init(0);
-            var threads: [N]Thread = undefined;
+            var threads: [N]TaskHandle = undefined;
 
             for (0..N) |i| {
-                threads[i] = try Thread.spawn(.{}, struct {
+                threads[i] = try TaskHandle.spawn(.{}, struct {
                     fn run(c: *Ch, started_count: *Atomic(u32), cnt: *Atomic(u32)) void {
                         _ = started_count.fetchAdd(1, .acq_rel);
                         const s = c.send(99) catch {
@@ -727,7 +773,7 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
 
             const COUNT = 10_000;
 
-            const sender = try Thread.spawn(.{}, struct {
+            const sender = try TaskHandle.spawn(.{}, struct {
                 fn run(c: *Ch) void {
                     for (0..COUNT) |i| {
                         _ = c.send(@intCast(i)) catch return;
@@ -755,7 +801,7 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
 
             const N = 1000;
 
-            const sender = try Thread.spawn(.{}, struct {
+            const sender = try TaskHandle.spawn(.{}, struct {
                 fn run(c: *Ch) void {
                     for (0..N) |i| {
                         _ = c.send(@intCast(i)) catch return;
@@ -783,9 +829,9 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
             const PER_PRODUCER = 250;
             const TOTAL = PRODUCERS * PER_PRODUCER;
 
-            var threads: [PRODUCERS]Thread = undefined;
+            var threads: [PRODUCERS]TaskHandle = undefined;
             for (0..PRODUCERS) |p| {
-                threads[p] = try Thread.spawn(.{}, struct {
+                threads[p] = try TaskHandle.spawn(.{}, struct {
                     fn run(c: *Ch, base: u32) void {
                         for (0..PER_PRODUCER) |i| {
                             _ = c.send(@intCast(base + @as(u32, @intCast(i)))) catch return;
@@ -847,7 +893,7 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
             };
 
             var sender_failed = Atomic(bool).init(false);
-            const sender = try Thread.spawn(.{}, struct {
+            const sender = try TaskHandle.spawn(.{}, struct {
                 fn run(c: *Ch, failed: *Atomic(bool)) void {
                     for (0..TOTAL) |i| {
                         const s = c.send(@intCast(i)) catch {
@@ -864,9 +910,9 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
             }.run, .{ &ch, &sender_failed });
 
             var observed = Observed{};
-            var consumers: [CONSUMERS]Thread = undefined;
+            var consumers: [CONSUMERS]TaskHandle = undefined;
             for (0..CONSUMERS) |c| {
-                consumers[c] = try Thread.spawn(.{}, struct {
+                consumers[c] = try TaskHandle.spawn(.{}, struct {
                     fn run(channel: *Ch, obs: *Observed) void {
                         while (true) {
                             const r = channel.recv() catch return;
@@ -927,9 +973,9 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
             var producer_failed = Atomic(bool).init(false);
             var observed = Observed{};
 
-            var cons_threads: [CONSUMERS]Thread = undefined;
+            var cons_threads: [CONSUMERS]TaskHandle = undefined;
             for (0..CONSUMERS) |c| {
-                cons_threads[c] = try Thread.spawn(.{}, struct {
+                cons_threads[c] = try TaskHandle.spawn(.{}, struct {
                     fn run(channel: *Ch, obs: *Observed) void {
                         while (true) {
                             const r = channel.recv() catch return;
@@ -940,9 +986,9 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
                 }.run, .{ &ch, &observed });
             }
 
-            var prod_threads: [PRODUCERS]Thread = undefined;
+            var prod_threads: [PRODUCERS]TaskHandle = undefined;
             for (0..PRODUCERS) |p| {
-                prod_threads[p] = try Thread.spawn(.{}, struct {
+                prod_threads[p] = try TaskHandle.spawn(.{}, struct {
                     fn run(c: *Ch, base: u32, failed: *Atomic(bool)) void {
                         for (0..PER_PRODUCER) |i| {
                             const s = c.send(@intCast(base + @as(u32, @intCast(i)))) catch {
@@ -988,10 +1034,10 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
             var started = Atomic(u32).init(0);
             var recv_count = Atomic(u32).init(0);
             const N = 4;
-            var threads: [N]Thread = undefined;
+            var threads: [N]TaskHandle = undefined;
 
             for (0..N) |i| {
-                threads[i] = try Thread.spawn(.{}, struct {
+                threads[i] = try TaskHandle.spawn(.{}, struct {
                     fn run(c: *Ch, started_count: *Atomic(u32), cnt: *Atomic(u32)) void {
                         _ = started_count.fetchAdd(1, .acq_rel);
                         while (true) {
@@ -1026,10 +1072,10 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
             }
             var send_ok_count = Atomic(u32).init(0);
             var send_fail_count = Atomic(u32).init(0);
-            var threads: [N]Thread = undefined;
+            var threads: [N]TaskHandle = undefined;
 
             for (0..N) |i| {
-                threads[i] = try Thread.spawn(.{}, struct {
+                threads[i] = try TaskHandle.spawn(.{}, struct {
                     fn run(c: *Ch, started_count: *Atomic(u32), value: Event, success_flag: *Atomic(bool), ok_cnt: *Atomic(u32), fail_cnt: *Atomic(u32)) void {
                         _ = started_count.fetchAdd(1, .acq_rel);
                         const s = c.send(value) catch {
@@ -1147,10 +1193,10 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
             var started = Atomic(u32).init(0);
             var ok_count = Atomic(u32).init(0);
             var fail_count = Atomic(u32).init(0);
-            var threads: [RECEIVERS]Thread = undefined;
+            var threads: [RECEIVERS]TaskHandle = undefined;
 
             for (0..RECEIVERS) |i| {
-                threads[i] = try Thread.spawn(.{}, struct {
+                threads[i] = try TaskHandle.spawn(.{}, struct {
                     fn run(c: *Ch, started_count: *Atomic(u32), ok_cnt: *Atomic(u32), fail_cnt: *Atomic(u32)) void {
                         _ = started_count.fetchAdd(1, .acq_rel);
                         const r = c.recv() catch {
@@ -1195,7 +1241,7 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
             var entered = Atomic(bool).init(false);
             var recv_val = Atomic(Event).init(0);
             var recv_ok = Atomic(bool).init(false);
-            const t = try Thread.spawn(.{}, struct {
+            const t = try TaskHandle.spawn(.{}, struct {
                 fn run(c: *Ch, ent: *Atomic(bool), val: *Atomic(Event), ok: *Atomic(bool)) void {
                     ent.store(true, .release);
                     const r = c.recv() catch return;
@@ -1221,7 +1267,7 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
 
             var entered = Atomic(bool).init(false);
             var finished = Atomic(bool).init(false);
-            const t = try Thread.spawn(.{}, struct {
+            const t = try TaskHandle.spawn(.{}, struct {
                 fn run(c: *Ch, ent: *Atomic(bool), fin: *Atomic(bool)) void {
                     ent.store(true, .release);
                     _ = c.send(1) catch {};
@@ -1243,7 +1289,7 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
 
             var entered = Atomic(bool).init(false);
             var finished = Atomic(bool).init(false);
-            const t = try Thread.spawn(.{}, struct {
+            const t = try TaskHandle.spawn(.{}, struct {
                 fn run(c: *Ch, ent: *Atomic(bool), fin: *Atomic(bool)) void {
                     ent.store(true, .release);
                     _ = c.recv() catch {};
@@ -1264,7 +1310,7 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
             defer ch.deinit();
 
             const N = 100;
-            const receiver = try Thread.spawn(.{}, struct {
+            const receiver = try TaskHandle.spawn(.{}, struct {
                 fn run(c: *Ch) !void {
                     for (0..N) |i| {
                         const r = try c.recv();
@@ -1287,7 +1333,7 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
 
             var entered = Atomic(bool).init(false);
             var recv_ok = Atomic(bool).init(true);
-            const t = try Thread.spawn(.{}, struct {
+            const t = try TaskHandle.spawn(.{}, struct {
                 fn run(c: *Ch, ent: *Atomic(bool), flag: *Atomic(bool)) void {
                     ent.store(true, .release);
                     const r = c.recv() catch {
@@ -1311,7 +1357,7 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
 
             var entered = Atomic(bool).init(false);
             var send_ok = Atomic(bool).init(true);
-            const t = try Thread.spawn(.{}, struct {
+            const t = try TaskHandle.spawn(.{}, struct {
                 fn run(c: *Ch, ent: *Atomic(bool), flag: *Atomic(bool)) void {
                     ent.store(true, .release);
                     const s = c.send(99) catch {
@@ -1352,7 +1398,7 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
             defer ch.deinit();
 
             const N = 500;
-            const sender = try Thread.spawn(.{}, struct {
+            const sender = try TaskHandle.spawn(.{}, struct {
                 fn run(c: *Ch) void {
                     for (0..N) |i| {
                         _ = c.send(@intCast(i)) catch return;
@@ -1379,9 +1425,9 @@ pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: C
             const PER_PRODUCER = 100;
             const TOTAL = PRODUCERS * PER_PRODUCER;
 
-            var threads: [PRODUCERS]Thread = undefined;
+            var threads: [PRODUCERS]TaskHandle = undefined;
             for (0..PRODUCERS) |p| {
-                threads[p] = try Thread.spawn(.{}, struct {
+                threads[p] = try TaskHandle.spawn(.{}, struct {
                     fn run(c: *Ch, base: u32) void {
                         for (0..PER_PRODUCER) |i| {
                             _ = c.send(@intCast(base + @as(u32, @intCast(i)))) catch return;

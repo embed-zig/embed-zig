@@ -46,6 +46,8 @@ pub fn build(b: *std.Build) void {
     });
     lib_testing.link(testing_mod, .{
         .context = context_mod,
+        .sync = sync_mod,
+        .task = task_mod,
         .stdz = stdz_mod,
         .time = time_mod,
     });
@@ -61,6 +63,7 @@ pub fn build(b: *std.Build) void {
     lib_sync.link(sync_mod, .{
         .context = context_mod,
         .stdz = stdz_mod,
+        .task = task_mod,
         .testing = testing_mod,
         .time = time_mod,
     });
@@ -79,6 +82,7 @@ pub fn build(b: *std.Build) void {
     lib_net.link(net_mod, .{
         .stdz = stdz_mod,
         .time = time_mod,
+        .task = task_mod,
         .sync = sync_mod,
         .context = context_mod,
         .io = io_mod,

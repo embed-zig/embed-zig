@@ -15,7 +15,6 @@
 //!   7. Detached cleanup waits for lagging workers and frees lookup state
 //!   8. deinit() waits for all outstanding lookups to finish cleanup
 
-const context_mod = @import("context");
 const sync = @import("sync");
 const time = @import("time");
 const Conn = @import("Conn.zig");
@@ -28,19 +27,23 @@ const tls_mod = @import("tls.zig");
 pub fn Resolver(comptime std: type, comptime net: type) type {
     const Addr = netip.Addr;
     const AddrPort = netip.AddrPort;
-    const ContextApi = context_mod.make(std, net.time);
+    const Context = @import("context").Context;
+    const ContextApi = net.Context;
     const Dialer = dialer.Dialer(std, net);
     const Http = http_mod.make(std, net);
     const Tls = tls_mod.make(std, net);
     const Atomic = std.atomic.Value;
     const mem = std.mem;
     const Allocator = mem.Allocator;
-    const Thread = std.Thread;
+    const Mutex = net.sync.Mutex;
+    const Condition = net.sync.Condition;
+    const Task = net.task;
+    const LegacySpawnConfig = @import("LegacySpawnConfig.zig");
     return struct {
         allocator: Allocator,
         options: Options,
-        mutex: Thread.Mutex = .{},
-        cond: Thread.Condition = .{},
+        mutex: Mutex = .{},
+        cond: Condition = .{},
         deiniting: bool = false,
         active_lookups: usize = 0,
 
@@ -161,7 +164,8 @@ pub fn Resolver(comptime std: type, comptime net: type) type {
             timeout: time.duration.Duration = time.duration.Second,
             attempts: u32 = 2,
             mode: QueryMode = .ipv4_only,
-            spawn_config: Thread.SpawnConfig = .{},
+            spawn_config: ?LegacySpawnConfig = null,
+            task_options: Task.Options = .{ .min_stack_size = 24 * 1024 },
         };
 
         pub const QueryMode = enum {
@@ -181,12 +185,16 @@ pub fn Resolver(comptime std: type, comptime net: type) type {
             Closed,
             OutOfMemory,
         } || runtime_mod.SocketError || runtime_mod.SetSockOptError ||
-            Thread.SpawnError;
+            Task.SpawnError;
 
         pub fn init(allocator: Allocator, options: Options) Allocator.Error!Self {
             const servers = try allocator.dupe(Server, options.servers);
             var owned_options = options;
             owned_options.servers = servers;
+            if (options.spawn_config) |spawn_config| {
+                owned_options.task_options.min_stack_size = spawn_config.stack_size;
+                owned_options.spawn_config = null;
+            }
             return .{
                 .allocator = allocator,
                 .options = owned_options,
@@ -223,7 +231,7 @@ pub fn Resolver(comptime std: type, comptime net: type) type {
             has_result: bool = false,
         };
 
-        const WorkerRacer = sync.Racer(std, net.time, WorkerResult);
+        const WorkerRacer = sync.RacerWithTask(std, net.time, net.sync, net.task, WorkerResult);
         const worker_io_quantum: time.duration.Duration = 50 * time.duration.MilliSecond;
         const worker_attempt_cancel_poll: time.duration.Duration = net.time.duration.MilliSecond;
 
@@ -232,7 +240,7 @@ pub fn Resolver(comptime std: type, comptime net: type) type {
             racer: WorkerRacer,
             query_pkts: [2]QueryPkt,
             query_count: usize,
-            failure_mutex: Thread.Mutex = .{},
+            failure_mutex: Mutex = .{},
             saw_name_not_found: bool = false,
             saw_no_data: bool = false,
             saw_refused: bool = false,
@@ -281,10 +289,10 @@ pub fn Resolver(comptime std: type, comptime net: type) type {
         const WorkerAttemptScope = struct {
             state: WorkerRacer.State,
             context_api: ContextApi,
-            deadline_ctx: context_mod.Context,
-            ctx: context_mod.Context,
+            deadline_ctx: Context,
+            ctx: Context,
             stop_requested: Atomic(bool) = Atomic(bool).init(false),
-            watcher: ?Thread = null,
+            watcher: ?Task.Handle = null,
 
             fn init(allocator: Allocator, state: WorkerRacer.State, timeout: time.duration.Duration) Allocator.Error!@This() {
                 var context_api = try ContextApi.init(allocator);
@@ -307,8 +315,12 @@ pub fn Resolver(comptime std: type, comptime net: type) type {
                 };
             }
 
-            fn start(self: *@This(), spawn_config: Thread.SpawnConfig) Thread.SpawnError!void {
-                self.watcher = try Thread.spawn(spawn_config, watchRacerDone, .{self});
+            fn start(self: *@This(), task_options: Task.Options) Task.SpawnError!void {
+                self.watcher = try Task.go(
+                    "net/resolver/attempt_watch",
+                    task_options,
+                    Task.Routine.init(self, watchRacerDone),
+                );
             }
 
             fn deinit(self: *@This()) void {
@@ -320,7 +332,7 @@ pub fn Resolver(comptime std: type, comptime net: type) type {
                 self.* = undefined;
             }
 
-            fn context(self: *@This()) context_mod.Context {
+            fn context(self: *@This()) Context {
                 return self.ctx;
             }
 
@@ -339,13 +351,12 @@ pub fn Resolver(comptime std: type, comptime net: type) type {
         /// Public resolver calls return `anyerror` so they can transparently
         /// propagate arbitrary causes injected via `context.cancelWithCause(...)`.
         pub fn lookupHost(self: *Self, name: []const u8, buf: []Addr) anyerror!usize {
-            const Context = context_mod.make(std, net.time);
-            var context_api = try Context.init(self.allocator);
+            var context_api = try ContextApi.init(self.allocator);
             defer context_api.deinit();
             return self.lookupHostContext(context_api.background(), name, buf);
         }
 
-        pub fn lookupHostContext(self: *Self, ctx: context_mod.Context, name: []const u8, buf: []Addr) anyerror!usize {
+        pub fn lookupHostContext(self: *Self, ctx: Context, name: []const u8, buf: []Addr) anyerror!usize {
             try self.beginLookup();
             var needs_finish_lookup = true;
             errdefer if (needs_finish_lookup) self.finishLookup();
@@ -394,11 +405,11 @@ pub fn Resolver(comptime std: type, comptime net: type) type {
             needs_finish_lookup = false;
 
             var spawned: usize = 0;
-            var spawn_err: ?Thread.SpawnError = null;
+            var spawn_err: ?(Allocator.Error || Task.SpawnError) = null;
             // TODO: Partial spawn failure currently degrades to a best-effort
             // query using only the server tasks that started successfully.
             for (self.options.servers) |server| {
-                job.racer.spawn(self.options.spawn_config, serverTask, .{ job, server }) catch |err| {
+                job.racer.spawn(self.options.task_options, "net/resolver/server", serverTask, .{ job, server }) catch |err| {
                     if (spawn_err == null) spawn_err = err;
                     continue;
                 };
@@ -556,7 +567,7 @@ pub fn Resolver(comptime std: type, comptime net: type) type {
                 return WorkerResult{ .has_result = true, .err = err };
             };
             defer attempt_ctx.deinit();
-            attempt_ctx.start(job.resolver.options.spawn_config) catch |err| {
+            attempt_ctx.start(job.resolver.options.task_options) catch |err| {
                 return WorkerResult{ .has_result = true, .err = err };
             };
             var c = d.dialContext(attempt_ctx.context(), .tcp, server.addr) catch return null;
@@ -585,7 +596,7 @@ pub fn Resolver(comptime std: type, comptime net: type) type {
                 return WorkerResult{ .has_result = true, .err = err };
             };
             defer attempt_ctx.deinit();
-            attempt_ctx.start(job.resolver.options.spawn_config) catch |err| {
+            attempt_ctx.start(job.resolver.options.task_options) catch |err| {
                 return WorkerResult{ .has_result = true, .err = err };
             };
             var c = tls_dialer.dialContext(attempt_ctx.context(), .tcp, server.addr) catch return null;
@@ -630,7 +641,7 @@ pub fn Resolver(comptime std: type, comptime net: type) type {
                     server,
                     qpkt,
                     job.resolver.allocator,
-                    job.resolver.options.spawn_config,
+                    job.resolver.options.task_options,
                     timeout,
                     &recv_buf,
                 ) catch |err| return WorkerResult{ .has_result = true, .err = err }) orelse return null;
@@ -674,20 +685,20 @@ pub fn Resolver(comptime std: type, comptime net: type) type {
             server: Server,
             qpkt: QueryPkt,
             allocator: Allocator,
-            spawn_config: Thread.SpawnConfig,
+            task_options: Task.Options,
             timeout: time.duration.Duration,
             out: []u8,
         ) LookupError!?usize {
             const tls_config = server.tls_config orelse return null;
             var attempt_ctx = try WorkerAttemptScope.init(allocator, ctx, timeout);
             defer attempt_ctx.deinit();
-            try attempt_ctx.start(spawn_config);
+            try attempt_ctx.start(task_options);
             // DoH here is an internal one-shot DNS wire exchange, so keep it on a
             // short-lived Transport rather than layering in Client redirect/policy
             // behavior or extra shared client state.
             var transport = Http.Transport.init(allocator, .{
                 .resolver = .{ .servers = &.{} },
-                .spawn_config = spawn_config,
+                .task_options = task_options,
                 .tls_client_config = tls_config,
                 .disable_keep_alives = true,
                 .max_idle_conns = 0,
@@ -935,7 +946,11 @@ pub fn Resolver(comptime std: type, comptime net: type) type {
         }
 
         fn beginCleanup(self: *Self, job: *LookupJob) bool {
-            var t = Thread.spawn(self.cleanupSpawnConfig(), cleanupFn, .{job}) catch return false;
+            var t = Task.go(
+                "net/resolver/cleanup",
+                self.options.task_options,
+                Task.Routine.init(job, cleanupFn),
+            ) catch return false;
             t.detach();
             return true;
         }
@@ -948,16 +963,6 @@ pub fn Resolver(comptime std: type, comptime net: type) type {
             job.racer.deinit();
             self.allocator.destroy(job);
             self.finishLookup();
-        }
-
-        fn cleanupSpawnConfig(self: *Self) Thread.SpawnConfig {
-            var config = self.options.spawn_config;
-            if (@hasField(Thread.SpawnConfig, "allocator")) {
-                if (config.allocator == null) {
-                    config.allocator = self.allocator;
-                }
-            }
-            return config;
         }
 
         // --- DNS wire format ---

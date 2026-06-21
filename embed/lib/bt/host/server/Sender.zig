@@ -23,6 +23,7 @@ pub fn make(comptime grt: type, comptime ServerType: type) type {
         const Self = @This();
         const Inbox = ServerType.ChannelFactory([]u8);
         const Subscription = ServerType.Subscription;
+        const sender_task_options: glib.task.Options = .{ .min_stack_size = 8 * 1024 };
 
         pub const HandlerFn = *const fn (?*anyopaque, glib.std.mem.Allocator, *const Request) anyerror![]u8;
 
@@ -31,7 +32,7 @@ pub fn make(comptime grt: type, comptime ServerType: type) type {
             subscription: Subscription,
             conn_handle: u16,
             inbox: Inbox,
-            thread: ?grt.std.Thread = null,
+            task_handle: ?grt.task.Handle = null,
             mutex: grt.sync.Mutex = .{},
             closed: bool = false,
             ref_count: usize = 1,
@@ -50,7 +51,11 @@ pub fn make(comptime grt: type, comptime ServerType: type) type {
                 errdefer session.subscription.deinit();
 
                 retain(session);
-                session.thread = try grt.std.Thread.spawn(.{}, task, .{session});
+                session.task_handle = try grt.task.go(
+                    "bt/server/sender",
+                    sender_task_options,
+                    glib.task.Routine.init(session, task),
+                );
                 return session;
             }
 
@@ -78,7 +83,7 @@ pub fn make(comptime grt: type, comptime ServerType: type) type {
 
             fn release(self: *Session, from_worker: bool) void {
                 var should_join = false;
-                const thread: ?grt.std.Thread = blk: {
+                const task_to_join: ?grt.task.Handle = blk: {
                     self.mutex.lock();
                     if (self.ref_count == 0) unreachable;
                     self.ref_count -= 1;
@@ -88,16 +93,16 @@ pub fn make(comptime grt: type, comptime ServerType: type) type {
                     }
                     self.closed = true;
                     self.inbox.close();
-                    const join_thread = self.thread;
-                    self.thread = null;
+                    const join_task = self.task_handle;
+                    self.task_handle = null;
                     should_join = !from_worker;
                     self.mutex.unlock();
-                    break :blk join_thread;
+                    break :blk join_task;
                 };
 
-                if (thread) |t| {
+                if (task_to_join) |task_handle| {
                     if (should_join) {
-                        t.join();
+                        task_handle.join();
                     }
                 }
 

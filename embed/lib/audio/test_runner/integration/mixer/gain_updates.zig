@@ -6,8 +6,6 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
 
     const TestCase = struct {
         fn run(allocator: glib.std.mem.Allocator) !void {
-            const Thread = grt.std.Thread;
-
             const total_samples = 256;
             const out_chunk = 4;
 
@@ -45,7 +43,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                 .mixer = mixer,
             };
 
-            const reader = try Thread.spawn(.{}, struct {
+            const reader = try grt.task.go("testing/audio/gain_reader", .{ .min_stack_size = 8 * 1024 }, glib.task.Routine.init(&state, struct {
                 fn run(s: *State) void {
                     var out: [out_chunk]i16 = undefined;
                     s.mutex.lock();
@@ -62,7 +60,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
 
                         if (s.mixer.read(&out)) |n| {
                             if (n == 0) {
-                                Thread.yield() catch {};
+                                grt.time.sleep(0);
                                 continue;
                             }
                             s.mutex.lock();
@@ -93,7 +91,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                         break;
                     }
                 }
-            }.run, .{&state});
+            }.run));
 
             state.mutex.lock();
             while (!state.started) state.cond.wait(&state.mutex);

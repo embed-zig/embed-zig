@@ -26,6 +26,7 @@ pub fn make(comptime grt: type, comptime ServerType: type) type {
         const Self = @This();
         const Inbox = ServerType.ChannelFactory([]u8);
         const Subscription = ServerType.Subscription;
+        const receiver_task_options: glib.task.Options = .{ .min_stack_size = 8 * 1024 };
 
         const Session = struct {
             mux: *Self,
@@ -35,7 +36,7 @@ pub fn make(comptime grt: type, comptime ServerType: type) type {
             closed: bool = false,
             ref_count: usize = 1,
             inbox: Inbox,
-            thread: ?grt.std.Thread = null,
+            task_handle: ?grt.task.Handle = null,
 
             const Transport = struct {
                 session: *Session,
@@ -82,7 +83,11 @@ pub fn make(comptime grt: type, comptime ServerType: type) type {
                 errdefer self.subscription.deinit();
 
                 self.retain();
-                self.thread = try grt.std.Thread.spawn(.{}, task, .{self});
+                self.task_handle = try grt.task.go(
+                    "bt/server/receiver",
+                    receiver_task_options,
+                    glib.task.Routine.init(self, task),
+                );
                 return self;
             }
 
@@ -163,7 +168,7 @@ pub fn make(comptime grt: type, comptime ServerType: type) type {
 
             fn release(self: *@This(), allocator: glib.std.mem.Allocator, from_worker: bool) void {
                 var should_join = false;
-                const thread: ?grt.std.Thread = blk: {
+                const task_to_join: ?grt.task.Handle = blk: {
                     self.mutex.lock();
                     if (self.ref_count == 0) unreachable;
                     self.ref_count -= 1;
@@ -172,17 +177,17 @@ pub fn make(comptime grt: type, comptime ServerType: type) type {
                         return;
                     }
                     self.closed = true;
-                    const join_thread = self.thread;
-                    self.thread = null;
+                    const join_task = self.task_handle;
+                    self.task_handle = null;
                     should_join = !from_worker;
                     self.mutex.unlock();
-                    break :blk join_thread;
+                    break :blk join_task;
                 };
 
                 self.inbox.close();
-                if (thread) |t| {
+                if (task_to_join) |task_handle| {
                     if (should_join) {
-                        t.join();
+                        task_handle.join();
                     }
                 }
                 while (true) {

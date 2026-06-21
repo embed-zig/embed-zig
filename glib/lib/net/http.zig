@@ -33,7 +33,7 @@ pub fn make(comptime std: type, comptime net: type) type {
             return static_serve_mux_mod.StaticServeMux(std, spec);
         }
         pub const Server = server_mod.Server(std, net);
-        pub const Client = client_mod.Client(std);
+        pub const Client = client_mod.Client(std, net.sync);
         pub const Transport = transport_mod.Transport(std, net);
     };
 }
@@ -53,14 +53,14 @@ pub fn TestRunner(comptime std: type, comptime net: type) @import("testing").Tes
 
             t.run("Header", Header.TestRunner(std));
             t.run("ReadCloser", ReadCloser.TestRunner(std));
-            t.run("Request", Request.TestRunner(std, net.time));
+            t.run("Request", Request.TestRunner(std, net));
             t.run("Response", Response.TestRunner(std));
             t.run("Handler", handler_mod.TestRunner(std));
             t.run("ServeMux", serve_mux_mod.TestRunner(std));
             t.run("StaticServeMux", static_serve_mux_mod.TestRunner(std));
             t.run("ResponseWriter", response_writer_mod.TestRunner(std));
             t.run("Server", server_mod.TestRunner(std, net));
-            t.run("Client", client_mod.TestRunner(std));
+            t.run("Client", client_mod.TestRunner(std, net.sync, net.task));
             t.run("Transport", transport_mod.TestRunner(std, net));
             t.run("status", status.TestRunner(std));
             return t.wait();

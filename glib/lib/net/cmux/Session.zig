@@ -4,20 +4,19 @@ const NetListener = @import("../Listener.zig");
 const control = @import("control.zig");
 const frame = @import("frame.zig");
 
-pub fn make(comptime std: type, comptime time: type) type {
+pub fn make(comptime std: type, comptime time: type, comptime Sync: type, comptime Task: type) type {
     const Allocator = std.mem.Allocator;
-    const Thread = std.Thread;
     const cmux_log = std.log.scoped(.net_cmux);
 
     return struct {
         allocator: Allocator,
         bearer: NetConn,
         options: Options,
-        mutex: Thread.Mutex = .{},
-        accept_cond: Thread.Condition = .{},
-        session_cond: Thread.Condition = .{},
-        send_mutex: Thread.Mutex = .{},
-        worker: ?Thread = null,
+        mutex: Sync.Mutex = .{},
+        accept_cond: Sync.Condition = .{},
+        session_cond: Sync.Condition = .{},
+        send_mutex: Sync.Mutex = .{},
+        worker: ?Task.Handle = null,
         closed: bool = false,
         session_ready: bool = false,
         startup_sent: bool = false,
@@ -64,8 +63,8 @@ pub fn make(comptime std: type, comptime time: type) type {
         pub const ChannelState = struct {
             allocator: Allocator,
             dlci: u8,
-            mutex: Thread.Mutex = .{},
-            cond: Thread.Condition = .{},
+            mutex: Sync.Mutex = .{},
+            cond: Sync.Condition = .{},
             rx: std.ArrayList(u8) = .{},
             refs: usize = 1,
             registered: bool = true,
@@ -102,7 +101,11 @@ pub fn make(comptime std: type, comptime time: type) type {
                 allocator.free(self.send_storage);
             }
 
-            const worker = Thread.spawn(.{}, workerMain, .{self}) catch return error.Unexpected;
+            const worker = Task.go(
+                "net/cmux/session",
+                .{},
+                @import("task").Routine.init(self, workerMain),
+            ) catch return error.Unexpected;
             self.worker = worker;
 
             if (options.role == .initiator) try self.startSessionHandshake();
@@ -196,8 +199,10 @@ pub fn make(comptime std: type, comptime time: type) type {
             defer self.releaseChannel(channel);
             errdefer self.closeChannel(channel);
 
+            cmux_log.warn("dial channel begin dlci={d}", .{dlci});
             try self.sendControl(@intCast(dlci), .sabm);
             try self.waitForOpen(channel);
+            cmux_log.warn("dial channel open dlci={d}", .{dlci});
             return channel;
         }
 
@@ -261,7 +266,13 @@ pub fn make(comptime std: type, comptime time: type) type {
                 }
             }
 
-            if (availableRx(channel) == 0 and channel.phase != .open) return error.EndOfStream;
+            if (availableRx(channel) == 0 and channel.phase != .open) {
+                cmux_log.warn(
+                    "read channel end-of-stream dlci={d} phase={s} registered={} refs={d}",
+                    .{ channel.dlci, @tagName(channel.phase), channel.registered, channel.refs },
+                );
+                return error.EndOfStream;
+            }
 
             const rx = channel.rx.items[0..availableRx(channel)];
             const n = @min(buf.len, rx.len);
@@ -377,6 +388,7 @@ pub fn make(comptime std: type, comptime time: type) type {
             self.mutex.unlock();
 
             if (!should_send) return;
+            cmux_log.warn("send SABM dlci=0", .{});
             try self.sendControl(0, .sabm);
         }
 
@@ -501,12 +513,17 @@ pub fn make(comptime std: type, comptime time: type) type {
                     self.session_ready = true;
                     self.session_cond.broadcast();
                     self.mutex.unlock();
+                    cmux_log.warn("session UA dlci=0", .{});
                 },
                 .disc => {
+                    cmux_log.warn("session DISC dlci=0", .{});
                     try self.sendControl(0, .ua);
                     if (self.beginClose()) self.bearer.close();
                 },
-                .dm => self.failSession(),
+                .dm => {
+                    cmux_log.warn("session DM dlci=0", .{});
+                    self.failSession();
+                },
                 .uih => self.handleSessionControl(incoming.info),
             }
         }
@@ -519,7 +536,7 @@ pub fn make(comptime std: type, comptime time: type) type {
             }
 
             const command = info[0];
-            cmux_log.err(
+            cmux_log.warn(
                 "ignored unsupported control-channel command {s} raw=0x{x:0>2} len={d}",
                 .{ controlCommandName(command), command, info.len },
             );
@@ -588,8 +605,12 @@ pub fn make(comptime std: type, comptime time: type) type {
             var should_unregister = false;
             channel.mutex.lock();
             switch (channel.phase) {
-                .opening => channel.phase = .open,
+                .opening => {
+                    cmux_log.warn("channel UA open dlci={d}", .{dlci});
+                    channel.phase = .open;
+                },
                 .closing_local => {
+                    cmux_log.warn("channel UA close dlci={d}", .{dlci});
                     channel.phase = .closed;
                     should_unregister = true;
                 },
@@ -601,6 +622,7 @@ pub fn make(comptime std: type, comptime time: type) type {
         }
 
         fn handleDisc(self: *Self, dlci: u8) !void {
+            cmux_log.warn("channel DISC dlci={d}", .{dlci});
             const channel = self.lookupChannel(dlci) orelse {
                 try self.sendControl(dlci, .dm);
                 return;
@@ -616,6 +638,7 @@ pub fn make(comptime std: type, comptime time: type) type {
         }
 
         fn handleReject(self: *Self, dlci: u8) void {
+            cmux_log.warn("channel DM reject dlci={d}", .{dlci});
             const channel = self.lookupChannel(dlci) orelse return;
             channel.mutex.lock();
             channel.phase = .rejected;

@@ -85,9 +85,9 @@ pub fn Builder(comptime grt: type) type {
                 pub const frame_samples_per_channel: usize = samples_per_channel;
 
                 pub const Config = struct {
-                    read_task: glib.task.Options = .{},
-                    processor_task: glib.task.Options = .{},
-                    write_task: glib.task.Options = .{},
+                    read_task: glib.task.Options = .{ .min_stack_size = 16 * 1024 },
+                    processor_task: glib.task.Options = .{ .min_stack_size = 24 * 1024 },
+                    write_task: glib.task.Options = .{ .min_stack_size = 8 * 1024 },
                     soft_ref_delay_samples: usize = 0,
                 };
 
@@ -168,9 +168,9 @@ pub fn Builder(comptime grt: type) type {
                 read_task: ?grt.task.Handle = null,
                 processor_task: ?grt.task.Handle = null,
                 write_task: ?grt.task.Handle = null,
-                read_task_options: glib.task.Options = .{},
-                processor_task_options: glib.task.Options = .{},
-                write_task_options: glib.task.Options = .{},
+                read_task_options: glib.task.Options = .{ .min_stack_size = 16 * 1024 },
+                processor_task_options: glib.task.Options = .{ .min_stack_size = 24 * 1024 },
+                write_task_options: glib.task.Options = .{ .min_stack_size = 8 * 1024 },
                 soft_ref_delay_samples: usize = 0,
 
                 pub fn init(allocator: glib.std.mem.Allocator, config: Config) !AudioSystem {

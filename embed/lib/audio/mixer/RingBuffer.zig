@@ -228,7 +228,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         }
 
         fn closeWithErrorUnblocksBlockedWriter() !void {
-            const Thread = grt.std.Thread;
             var buffer = try Buffer.init(grt.std.testing.allocator, 2);
             defer buffer.deinit();
 
@@ -240,14 +239,14 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             };
 
             var state = State{ .buffer = &buffer };
-            const worker = try Thread.spawn(.{}, struct {
-                fn run(s: *State) void {
-                    s.buffer.write(&.{ 3, 4 }) catch |err| {
-                        s.result = err;
+            const worker = try grt.task.go("testing/audio/ring_buffer_writer", .{ .min_stack_size = 8 * 1024 }, glib.task.Routine.init(&state, struct {
+                fn run(worker_state: *State) void {
+                    worker_state.buffer.write(&.{ 3, 4 }) catch |err| {
+                        worker_state.result = err;
                         return;
                     };
                 }
-            }.run, .{&state});
+            }.run));
 
             grt.time.sleep(10 * grt.time.duration.MilliSecond);
             buffer.closeWithError();

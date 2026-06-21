@@ -7,6 +7,7 @@ const Poller = @import("../../pipeline/Poller.zig");
 pub fn make(comptime grt: type) type {
     return struct {
         const Self = @This();
+        const log = grt.std.log.scoped(.button_poller);
 
         pub const Error = error{
             InvalidState,
@@ -20,14 +21,14 @@ pub fn make(comptime grt: type) type {
         button: drivers.button.Grouped,
         source_id: u32,
         poll_interval: glib.time.duration.Duration = Poller.default_poll_interval,
-        spawn_config: grt.std.Thread.SpawnConfig = .{},
+        task_options: glib.task.Options = .{ .min_stack_size = 8 * 1024 },
         out: ?Emitter = null,
         state_mu: grt.sync.Mutex = .{},
         running: bool = false,
         async_failed: bool = false,
         has_last_button_id: bool = false,
         last_button_id: ?u32 = null,
-        thread: ?grt.std.Thread = null,
+        task: ?grt.task.Handle = null,
 
         pub fn init(self: *Self, button: drivers.button.Grouped, config: Config) Poller {
             self.* = .{
@@ -45,19 +46,23 @@ pub fn make(comptime grt: type) type {
 
         pub fn start(self: *Self, config: Poller.Config) Error!void {
             self.state_mu.lock();
-            if (self.running or self.thread != null or self.out == null) {
+            if (self.running or self.task != null or self.out == null) {
                 self.state_mu.unlock();
                 return error.InvalidState;
             }
             self.poll_interval = config.poll_interval;
-            self.spawn_config = adaptSpawnConfig(config.spawn_config);
+            self.task_options = config.task_options;
             self.running = true;
             self.async_failed = false;
             self.has_last_button_id = false;
             self.last_button_id = null;
             self.state_mu.unlock();
 
-            const thread = grt.std.Thread.spawn(self.spawn_config, Self.run, .{self}) catch {
+            const task = grt.task.go(
+                "zux/button/grouped",
+                self.task_options,
+                glib.task.Routine.init(self, Self.run),
+            ) catch {
                 self.state_mu.lock();
                 self.running = false;
                 self.state_mu.unlock();
@@ -65,18 +70,18 @@ pub fn make(comptime grt: type) type {
             };
 
             self.state_mu.lock();
-            self.thread = thread;
+            self.task = task;
             self.state_mu.unlock();
         }
 
         pub fn stop(self: *Self) void {
             self.state_mu.lock();
             self.running = false;
-            const thread = self.thread;
-            self.thread = null;
+            const task = self.task;
+            self.task = null;
             self.state_mu.unlock();
 
-            if (thread) |t| {
+            if (task) |t| {
                 t.join();
             }
         }
@@ -140,66 +145,39 @@ pub fn make(comptime grt: type) type {
 
             if (!had_last_button_id) {
                 if (button_id == null) return;
-                try out.emit(.{
-                    .origin = .source,
-                    .timestamp = grt.time.instant.now(),
-                    .body = .{
-                        .raw_grouped_button = .{
-                            .source_id = source_id,
-                            .button_id = button_id,
-                            .pressed = true,
-                        },
-                    },
-                });
+                try emitRawGroupedButton(out, source_id, button_id, true);
                 return;
             }
 
             if (last_button_id) |previous_button_id| {
-                try out.emit(.{
-                    .origin = .source,
-                    .timestamp = grt.time.instant.now(),
-                    .body = .{
-                        .raw_grouped_button = .{
-                            .source_id = source_id,
-                            .button_id = previous_button_id,
-                            .pressed = false,
-                        },
-                    },
-                });
+                try emitRawGroupedButton(out, source_id, previous_button_id, false);
             }
 
             if (button_id) |next_button_id| {
-                try out.emit(.{
-                    .origin = .source,
-                    .timestamp = grt.time.instant.now(),
-                    .body = .{
-                        .raw_grouped_button = .{
-                            .source_id = source_id,
-                            .button_id = next_button_id,
-                            .pressed = true,
-                        },
-                    },
-                });
+                try emitRawGroupedButton(out, source_id, next_button_id, true);
             }
+        }
+
+        fn emitRawGroupedButton(out: Emitter, source_id: u32, button_id: ?u32, pressed: bool) !void {
+            const now = grt.time.instant.now();
+            log.info("raw grouped button source_id={} button_id={?} pressed={} timestamp={}", .{ source_id, button_id, pressed, now });
+            try out.emit(.{
+                .origin = .source,
+                .timestamp = now,
+                .body = .{
+                    .raw_grouped_button = .{
+                        .source_id = source_id,
+                        .button_id = button_id,
+                        .pressed = pressed,
+                    },
+                },
+            });
         }
 
         fn failAsync(self: *Self) void {
             self.state_mu.lock();
             defer self.state_mu.unlock();
             self.async_failed = true;
-        }
-
-        fn adaptSpawnConfig(source: @FieldType(Poller.Config, "spawn_config")) grt.std.Thread.SpawnConfig {
-            var out: grt.std.Thread.SpawnConfig = .{};
-            const Source = @TypeOf(source);
-
-            inline for (@typeInfo(grt.std.Thread.SpawnConfig).@"struct".fields) |field| {
-                if (@hasField(Source, field.name)) {
-                    @field(out, field.name) = @field(source, field.name);
-                }
-            }
-
-            return out;
         }
     };
 }

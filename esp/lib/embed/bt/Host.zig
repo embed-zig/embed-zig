@@ -1,8 +1,6 @@
 const embed = @import("embed_core");
 const esp = @import("esp");
 
-const thread_allocator = esp.heap.Allocator(.{ .caps = .internal_8bit, .alignment = .align_u32 });
-
 pub fn make(comptime Hci: type) type {
     return struct {
         const Self = @This();
@@ -26,10 +24,8 @@ pub fn make(comptime Hci: type) type {
             const EmbedHost = embed.bt.Host.makeHciTransport(esp.grt);
             const host = try EmbedHost.init(config.allocator, transport.handle(), .{
                 .hci = .{
-                    .spawn_config = .{
-                        .name = "bt_hci",
-                        .stack_size = 8 * 1024,
-                        .allocator = thread_allocator,
+                    .task_options = .{
+                        .min_stack_size = 8 * 1024,
                     },
                 },
                 .source_id = config.source_id,

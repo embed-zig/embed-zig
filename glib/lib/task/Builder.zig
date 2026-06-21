@@ -1,8 +1,8 @@
 pub const default_max_handlers: usize = 64;
 pub const default_max_segments: usize = 16;
 
-const Options = @import("Options.zig");
-const Routine = @import("Routine.zig");
+const TaskOptions = @import("Options.zig");
+const TaskRoutine = @import("Routine.zig");
 
 const handler_index_field = "__task_handler_index";
 const none: usize = ~@as(usize, 0);
@@ -62,8 +62,12 @@ pub fn BuilderWithOptions(comptime options: BuilderOptions) type {
             if (!@hasDecl(Handler, "go")) {
                 @compileError("task.Builder.handle Handler must expose go(name, options, routine)");
             }
+            if (!@hasDecl(Handler, "currentToken")) {
+                @compileError("task.Builder.handle Handler must expose currentToken() usize");
+            }
             _ = handlerHandle(Handler);
             _ = handlerSpawnError(Handler);
+            _ = @as(*const fn () usize, &Handler.currentToken);
 
             self.bindings[self.binding_count] = .{
                 .path = normalized,
@@ -89,12 +93,18 @@ pub fn BuilderWithOptions(comptime options: BuilderOptions) type {
 
             return struct {
                 pub const Handle = GeneratedHandle;
+                pub const Options = TaskOptions;
+                pub const Routine = TaskRoutine;
                 pub const SpawnError = GeneratedSpawnError;
                 pub const on_error = ErrorHandler;
                 pub const handler_count = self.binding_count;
                 pub const tree = Tree;
 
-                pub fn go(name: []const u8, launch_options: Options, routine: Routine) SpawnError!Handle {
+                pub fn currentToken() usize {
+                    return self.bindings[0].Handler.currentToken();
+                }
+
+                pub fn go(name: []const u8, launch_options: TaskOptions, routine: TaskRoutine) SpawnError!Handle {
                     const idx = route(Tree, name) orelse return error.UnknownTask;
                     inline for (0..self.binding_count) |i| {
                         if (idx == i) {
@@ -393,7 +403,6 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
         };
 
         fn Handler(comptime id: []const u8) type {
-            const handler_id = id;
             const TestHandle = Handle;
             const TestSpawnError = SpawnError;
 
@@ -401,13 +410,17 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
                 pub const Handle = TestHandle;
                 pub const SpawnError = TestSpawnError;
 
-                pub fn go(name: []const u8, launch_options: Options, routine: Routine) TestSpawnError!TestHandle {
+                pub fn go(name: []const u8, launch_options: TaskOptions, routine: TaskRoutine) TestSpawnError!TestHandle {
                     const state: *State = @ptrCast(@alignCast(routine.ptr));
-                    state.handler = handler_id;
+                    state.handler = id;
                     state.name = name;
                     state.min_stack_size = launch_options.min_stack_size;
                     routine.run();
                     return .{ .state = state };
+                }
+
+                pub fn currentToken() usize {
+                    return 42;
                 }
             };
         }
@@ -436,7 +449,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
         fn longestPrefixWins() !void {
             const Task = makeTask();
             var state: State = .{};
-            const routine = Routine.init(&state, taskRun);
+            const routine = TaskRoutine.init(&state, taskRun);
 
             const handle = try Task.go("ui/app/render", .{}, routine);
             handle.join();
@@ -450,7 +463,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
         fn parentPrefixMatchesDescendant() !void {
             const Task = makeTask();
             var state: State = .{};
-            const routine = Routine.init(&state, taskRun);
+            const routine = TaskRoutine.init(&state, taskRun);
 
             const handle = try Task.go("ui/button", .{ .min_stack_size = 4096 }, routine);
             try lib.testing.expectEqualStrings("ui", state.handler);
@@ -464,7 +477,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
         fn defaultHandlerMatchesUnknownName() !void {
             const Task = makeTask();
             var state: State = .{};
-            const routine = Routine.init(&state, taskRun);
+            const routine = TaskRoutine.init(&state, taskRun);
 
             const handle = try Task.go("wifi/main", .{}, routine);
             handle.join();
@@ -481,9 +494,14 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
                 break :blk builder.make();
             };
             var state: State = .{};
-            const routine = Routine.init(&state, taskRun);
+            const routine = TaskRoutine.init(&state, taskRun);
 
             try lib.testing.expectError(error.UnknownTask, Task.go("wifi/main", .{}, routine));
+        }
+
+        fn exposesCurrentToken() !void {
+            const Task = makeTask();
+            try lib.testing.expectEqual(@as(usize, 42), Task.currentToken());
         }
     };
 
@@ -511,6 +529,10 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             };
             TestCase.unknownWithoutDefaultReturnsError() catch |err| {
                 t.logErrorf("task.Builder unknown task failed: {}", .{err});
+                return false;
+            };
+            TestCase.exposesCurrentToken() catch |err| {
+                t.logErrorf("task.Builder current token failed: {}", .{err});
                 return false;
             };
             return true;

@@ -94,6 +94,11 @@ pub fn make(comptime std: type) type {
                 try self.addExtension(.supported_versions, &payload);
             }
 
+            pub fn addRenegotiationInfo(self: *ExtensionBuilder) ExtensionError!void {
+                const payload = [_]u8{0};
+                try self.addExtension(.renegotiation_info, &payload);
+            }
+
             pub fn addEcPointFormats(self: *ExtensionBuilder) ExtensionError!void {
                 const needed = 4 + 2;
                 if (self.pos + needed > self.buffer.len) return error.BufferTooSmall;
@@ -380,6 +385,18 @@ pub fn TestRunner(comptime std: type) testing_api.TestRunner {
 
                 const ext = extensions.findExtension(exts, .supported_versions) orelse return error.TestUnexpectedResult;
                 try testing.expectEqual(common.ProtocolVersion.tls_1_3, try extensions.parseSupportedVersion(ext.data));
+            }
+
+            {
+                var buf: [16]u8 = undefined;
+                var builder = extensions.ExtensionBuilder.init(&buf);
+                try builder.addRenegotiationInfo();
+
+                const exts = try extensions.parseExtensions(builder.getData(), allocator);
+                defer allocator.free(exts);
+
+                const ext = extensions.findExtension(exts, .renegotiation_info) orelse return error.TestUnexpectedResult;
+                try testing.expectEqualSlices(u8, &.{0}, ext.data);
             }
 
             {

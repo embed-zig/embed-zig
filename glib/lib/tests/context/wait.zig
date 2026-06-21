@@ -1,9 +1,12 @@
 const stdz = @import("stdz");
 const testing_mod = @import("testing");
 const context_root = @import("context");
+const task_mod = @import("task");
 const time_mod = @import("time");
 
 const Context = context_root.Context;
+const cancel_wake_task_options: task_mod.Options = .{ .min_stack_size = 4 * 1024 };
+const value_waiter_task_options: task_mod.Options = .{ .min_stack_size = 4 * 1024 };
 
 pub fn make(comptime std: type, comptime time: type) testing_mod.TestRunner {
     const Runner = struct {
@@ -213,13 +216,16 @@ fn waitSpuriousWakeStillWaitsFullTimeoutCase(comptime std: type, comptime time: 
     const cancel_impl = try ctx.as(@TypeOf(ctx_api).CancelContext);
 
     const started = time.instant.now();
-    const t = try std.Thread.spawn(.{}, struct {
-        fn wake(cancel_ctx: *@TypeOf(ctx_api).CancelContext, l: type) void {
-            _ = l;
+    const Worker = struct {
+        cancel_ctx: *@TypeOf(ctx_api).CancelContext,
+
+        fn run(self: *@This()) void {
             time.sleep(5 * time_mod.duration.MilliSecond);
-            cancel_ctx.cond.signal();
+            self.cancel_ctx.cond.signal();
         }
-    }.wake, .{ cancel_impl, std });
+    };
+    var worker: Worker = .{ .cancel_ctx = cancel_impl };
+    const t = try std.task.go("testing/context/cancel_wake", cancel_wake_task_options, task_mod.Routine.init(&worker, Worker.run));
     defer t.join();
 
     if (ctx.wait(40 * time_mod.duration.MilliSecond) != null) return error.WaitSpuriousWakeShouldReturnNull;
@@ -252,13 +258,17 @@ fn waitValueContextWakesOnParentCancelCase(comptime std: type, comptime time: ty
     var ctx = try ctx_api.withValue(u64, cc, &key, 42);
     defer ctx.deinit();
 
-    const t = try std.Thread.spawn(.{}, struct {
-        fn work(c: *Context) void {
-            const cause = c.wait(null);
+    const Worker = struct {
+        ctx: *Context,
+
+        fn run(self: *@This()) void {
+            const cause = self.ctx.wait(null);
             std.debug.assert(cause != null);
             std.debug.assert(cause.? == error.Canceled);
         }
-    }.work, .{&ctx});
+    };
+    var worker: Worker = .{ .ctx = &ctx };
+    const t = try std.task.go("testing/context/value_waiter", value_waiter_task_options, task_mod.Routine.init(&worker, Worker.run));
 
     time.sleep(5 * time_mod.duration.MilliSecond);
     cc.cancel();

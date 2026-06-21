@@ -121,38 +121,41 @@ pub fn make(comptime std: type) type {
                 const Self = @This();
 
                 pub fn init(conn: ConnType, config: Config) HandshakeError!Self {
+                    var self: Self = undefined;
+                    try self.initInPlace(conn, config);
+                    return self;
+                }
+
+                pub fn initInPlace(self: *Self, conn: ConnType, config: Config) HandshakeError!void {
                     try validateConfig(config);
 
-                    var self: Self = .{
-                        .state = .wait_client_hello,
-                        .config = config,
-                        .version = .tls_1_3,
-                        .cipher_suite = .TLS_AES_128_GCM_SHA256,
-                        .selected_signature_scheme = .ecdsa_secp256r1_sha256,
-                        .selected_group = .x25519,
-                        .selected_alpn_protocol = null,
-                        .client_random = [_]u8{0} ** 32,
-                        .server_random = undefined,
-                        .legacy_session_id = [_]u8{0} ** 32,
-                        .legacy_session_id_len = 0,
-                        .key_exchange = try X25519KeyExchange.generate(),
-                        .tls12_client_cipher = .none,
-                        .tls12_server_cipher = .none,
-                        .tls12_client_ccs_received = false,
-                        .tls12_master_secret = [_]u8{0} ** 48,
-                        .tls12_expected_client_verify_data = [_]u8{0} ** 12,
-                        .transcript_hash = kdf.TranscriptPair.init(),
-                        .handshake_secret = [_]u8{0} ** kdf.MAX_TLS13_SECRET_LEN,
-                        .master_secret = [_]u8{0} ** kdf.MAX_TLS13_SECRET_LEN,
-                        .client_handshake_traffic_secret = [_]u8{0} ** kdf.MAX_TLS13_SECRET_LEN,
-                        .server_handshake_traffic_secret = [_]u8{0} ** kdf.MAX_TLS13_SECRET_LEN,
-                        .client_application_traffic_secret = [_]u8{0} ** kdf.MAX_TLS13_SECRET_LEN,
-                        .server_application_traffic_secret = [_]u8{0} ** kdf.MAX_TLS13_SECRET_LEN,
-                        .records = record.RecordLayer(ConnType).init(conn),
-                    };
+                    self.* = undefined;
+                    self.state = .wait_client_hello;
+                    self.config = config;
+                    self.version = .tls_1_3;
+                    self.cipher_suite = .TLS_AES_128_GCM_SHA256;
+                    self.selected_signature_scheme = .ecdsa_secp256r1_sha256;
+                    self.selected_group = .x25519;
+                    self.selected_alpn_protocol = null;
+                    self.client_random = [_]u8{0} ** 32;
+                    self.legacy_session_id = [_]u8{0} ** 32;
+                    self.legacy_session_id_len = 0;
+                    self.key_exchange = try X25519KeyExchange.generate();
+                    self.tls12_client_cipher = .none;
+                    self.tls12_server_cipher = .none;
+                    self.tls12_client_ccs_received = false;
+                    self.tls12_master_secret = [_]u8{0} ** 48;
+                    self.tls12_expected_client_verify_data = [_]u8{0} ** 12;
+                    self.transcript_hash = kdf.TranscriptPair.init();
+                    self.handshake_secret = [_]u8{0} ** kdf.MAX_TLS13_SECRET_LEN;
+                    self.master_secret = [_]u8{0} ** kdf.MAX_TLS13_SECRET_LEN;
+                    self.client_handshake_traffic_secret = [_]u8{0} ** kdf.MAX_TLS13_SECRET_LEN;
+                    self.server_handshake_traffic_secret = [_]u8{0} ** kdf.MAX_TLS13_SECRET_LEN;
+                    self.client_application_traffic_secret = [_]u8{0} ** kdf.MAX_TLS13_SECRET_LEN;
+                    self.server_application_traffic_secret = [_]u8{0} ** kdf.MAX_TLS13_SECRET_LEN;
+                    self.records = record.RecordLayer(ConnType).init(conn);
                     crypto.random.bytes(&self.server_random);
                     self.records.setVersion(.tls_1_2);
-                    return self;
                 }
 
                 pub fn processHandshake(self: *Self, data: []const u8) HandshakeError!void {
@@ -444,8 +447,11 @@ pub fn make(comptime std: type) type {
                         mem.writeInt(u16, out[pos..][0..2], @intCast(ext_data.len), .big);
                         pos += 2 + ext_data.len;
                     } else {
-                        mem.writeInt(u16, out[pos..][0..2], 0, .big);
-                        pos += 2;
+                        var ext_builder = @import("extensions.zig").make(std).ExtensionBuilder.init(out[pos + 2 ..]);
+                        ext_builder.addRenegotiationInfo() catch return error.BufferTooSmall;
+                        const ext_data = ext_builder.getData();
+                        mem.writeInt(u16, out[pos..][0..2], @intCast(ext_data.len), .big);
+                        pos += 2 + ext_data.len;
                     }
 
                     const header: common.HandshakeHeader = .{
@@ -1066,6 +1072,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) testing_api.TestRunne
             const fixtures = @import("test_fixtures.zig");
             const tls_server = make(std);
             const tls_common = @import("common.zig").make(std);
+            const tls_ext = @import("extensions.zig").make(std);
 
             const MockConn = struct {
                 pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
@@ -1281,6 +1288,19 @@ pub fn TestRunner(comptime std: type, comptime time: type) testing_api.TestRunne
                 try testing.expectEqual(tls_common.ProtocolVersion.tls_1_2, sh.version);
                 try testing.expectEqual(tls_common.CipherSuite.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256, sh.cipher_suite);
                 try testing.expectEqualSlices(u8, "DOWNGRD\x01", sh.server_random[24..32]);
+
+                var server_hello: [512]u8 = undefined;
+                const server_hello_len = try sh.encodeServerHello(&server_hello);
+                var pos: usize = tls_common.HandshakeHeader.SIZE + 2 + 32;
+                const session_id_len = server_hello[pos];
+                pos += 1 + session_id_len + 2 + 1;
+                const ext_len = std.mem.readInt(u16, server_hello[pos..][0..2], .big);
+                pos += 2;
+                const exts = try tls_ext.parseExtensions(server_hello[pos..][0..ext_len], allocator);
+                defer allocator.free(exts);
+                const renegotiation_info = tls_ext.findExtension(exts, .renegotiation_info) orelse return error.TestUnexpectedResult;
+                try testing.expectEqualSlices(u8, &.{0}, renegotiation_info.data);
+                try testing.expectEqual(server_hello_len, pos + ext_len);
             }
         }
     }.run);

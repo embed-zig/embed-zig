@@ -1,5 +1,6 @@
 const builtin = @import("builtin");
 const testing_mod = @import("testing");
+const context_std = @import("context/std.zig");
 
 pub const background = @import("context/background.zig");
 pub const bind_fd = @import("context/bind_fd.zig");
@@ -13,7 +14,7 @@ pub const value = @import("context/value.zig");
 pub const wait = @import("context/wait.zig");
 
 pub fn make(comptime std: type, comptime time: type) testing_mod.TestRunner {
-    const TestStd = testing_mod.std.make(std, .{ .isolate_thread = false });
+    const TestStd = context_std.make(testing_mod.std.make(std, .{ .isolate_thread = false }), .{});
 
     const Runner = struct {
         pub fn init(self: *@This(), allocator: TestStd.mem.Allocator) !void {

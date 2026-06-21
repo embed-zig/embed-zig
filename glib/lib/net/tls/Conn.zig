@@ -10,7 +10,7 @@ pub fn Conn(comptime std: type, comptime net: type) type {
     const record = @import("record.zig").make(std);
     const client_handshake = @import("client_handshake.zig").make(std, net.time);
     const Allocator = std.mem.Allocator;
-    const Mutex = std.Thread.Mutex;
+    const Mutex = net.sync.Mutex;
     const TcpConn = @import("../TcpConn.zig").TcpConn(std, net);
     const BundleRescanReturn = @typeInfo(@TypeOf(std.crypto.Certificate.Bundle.rescan)).@"fn".return_type.?;
     const BundleRescanError = @typeInfo(BundleRescanReturn).error_union.error_set;
@@ -526,16 +526,24 @@ pub fn Conn(comptime std: type, comptime net: type) type {
 
             const self = try allocator.create(Self);
             errdefer allocator.destroy(self);
-            self.* = .{
-                .allocator = allocator,
-                .inner = inner,
-                .handshake_state = undefined,
-            };
+            self.* = undefined;
+            self.allocator = allocator;
+            self.inner = inner;
+            self.handshake_state = undefined;
+            self.owned_root_cas = null;
+            self.handshake_complete = false;
+            self.closed = false;
+            self.handshake_mu = .{};
+            self.read_mu = .{};
+            self.write_mu = .{};
+            self.pending_start = 0;
+            self.pending_end = 0;
+            self.handshake_msg_len = 0;
 
             errdefer if (self.owned_root_cas) |*bundle| bundle.deinit(allocator);
 
             const verification = try self.resolveVerificationMode(config);
-            self.handshake_state = try client_handshake.ClientHandshake(NetConn).initWithOptions(inner, .{
+            try self.handshake_state.initWithOptionsInPlace(inner, .{
                 .hostname = config.server_name,
                 .allocator = allocator,
                 .verification = verification,

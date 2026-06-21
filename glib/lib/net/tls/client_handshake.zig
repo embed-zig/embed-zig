@@ -141,8 +141,8 @@ pub fn make(comptime std: type, comptime time: type) type {
                 legacy_session_id: [32]u8,
                 server_random: [32]u8,
                 key_exchange: KeyExchange,
-                tls12_secp256r1_keypair: crypto.sign.ecdsa.EcdsaP256Sha256.KeyPair,
-                tls12_secp384r1_keypair: crypto.sign.ecdsa.EcdsaP384Sha384.KeyPair,
+                tls12_secp256r1_keypair: ?crypto.sign.ecdsa.EcdsaP256Sha256.KeyPair,
+                tls12_secp384r1_keypair: ?crypto.sign.ecdsa.EcdsaP384Sha384.KeyPair,
                 tls12_negotiated_group: ?common.NamedGroup,
                 tls12_shared_secret: [48]u8,
                 tls12_shared_secret_len: usize,
@@ -185,58 +185,62 @@ pub fn make(comptime std: type, comptime time: type) type {
                     conn: ConnType,
                     options: InitOptions,
                 ) HandshakeError!Self {
+                    var self: Self = undefined;
+                    try self.initWithOptionsInPlace(conn, options);
+                    return self;
+                }
+
+                pub fn initWithOptionsInPlace(
+                    self: *Self,
+                    conn: ConnType,
+                    options: InitOptions,
+                ) HandshakeError!void {
                     try validateVersionRange(options.min_version, options.max_version);
                     if (!common.validateTls12CipherSuites(options.tls12_cipher_suites)) return error.UnsupportedCipherSuite;
                     if (!common.validateTls13CipherSuites(options.tls13_cipher_suites)) return error.UnsupportedCipherSuite;
 
-                    var self: Self = .{
-                        .state = .initial,
-                        .version = .tls_1_3,
-                        .cipher_suite = if (options.max_version == .tls_1_2)
-                            options.tls12_cipher_suites[0]
-                        else
-                            options.tls13_cipher_suites[0],
-                        .hostname = options.hostname,
-                        .allocator = options.allocator,
-                        .verification = options.verification,
-                        .min_version = options.min_version,
-                        .max_version = options.max_version,
-                        .tls12_cipher_suites = options.tls12_cipher_suites,
-                        .tls13_cipher_suites = options.tls13_cipher_suites,
-                        .alpn_protocols = options.alpn_protocols,
-                        .client_random = undefined,
-                        .legacy_session_id = undefined,
-                        .server_random = [_]u8{0} ** 32,
-                        .key_exchange = try KeyExchange.generate(.x25519),
-                        .tls12_secp256r1_keypair = try generateP256KeyPair(),
-                        .tls12_secp384r1_keypair = try generateP384KeyPair(),
-                        .tls12_negotiated_group = null,
-                        .tls12_shared_secret = [_]u8{0} ** 48,
-                        .tls12_shared_secret_len = 0,
-                        .tls12_master_secret = [_]u8{0} ** 48,
-                        .tls12_client_cipher = .none,
-                        .tls12_server_cipher = .none,
-                        .tls12_expected_server_verify_data = [_]u8{0} ** 12,
-                        .tls12_client_flight_sent = false,
-                        .tls12_server_ccs_received = false,
-                        .transcript_hash = kdf.TranscriptPair.init(),
-                        .handshake_secret = [_]u8{0} ** kdf.MAX_TLS13_SECRET_LEN,
-                        .master_secret = [_]u8{0} ** kdf.MAX_TLS13_SECRET_LEN,
-                        .client_handshake_traffic_secret = [_]u8{0} ** kdf.MAX_TLS13_SECRET_LEN,
-                        .server_handshake_traffic_secret = [_]u8{0} ** kdf.MAX_TLS13_SECRET_LEN,
-                        .client_application_traffic_secret = [_]u8{0} ** kdf.MAX_TLS13_SECRET_LEN,
-                        .server_application_traffic_secret = [_]u8{0} ** kdf.MAX_TLS13_SECRET_LEN,
-                        .server_finished_received = false,
-                        .server_cert_der = undefined,
-                        .server_cert_der_len = 0,
-                        .negotiated_alpn = undefined,
-                        .negotiated_alpn_len = 0,
-                        .records = record.RecordLayer(ConnType).init(conn),
-                    };
+                    self.* = undefined;
+                    self.state = .initial;
+                    self.version = .tls_1_3;
+                    self.cipher_suite = if (options.max_version == .tls_1_2)
+                        options.tls12_cipher_suites[0]
+                    else
+                        options.tls13_cipher_suites[0];
+                    self.hostname = options.hostname;
+                    self.allocator = options.allocator;
+                    self.verification = options.verification;
+                    self.min_version = options.min_version;
+                    self.max_version = options.max_version;
+                    self.tls12_cipher_suites = options.tls12_cipher_suites;
+                    self.tls13_cipher_suites = options.tls13_cipher_suites;
+                    self.alpn_protocols = options.alpn_protocols;
+                    self.server_random = [_]u8{0} ** 32;
+                    self.key_exchange = try KeyExchange.generate(.x25519);
+                    self.tls12_secp256r1_keypair = null;
+                    self.tls12_secp384r1_keypair = null;
+                    self.tls12_negotiated_group = null;
+                    self.tls12_shared_secret = [_]u8{0} ** 48;
+                    self.tls12_shared_secret_len = 0;
+                    self.tls12_master_secret = [_]u8{0} ** 48;
+                    self.tls12_client_cipher = .none;
+                    self.tls12_server_cipher = .none;
+                    self.tls12_expected_server_verify_data = [_]u8{0} ** 12;
+                    self.tls12_client_flight_sent = false;
+                    self.tls12_server_ccs_received = false;
+                    self.transcript_hash = kdf.TranscriptPair.init();
+                    self.handshake_secret = [_]u8{0} ** kdf.MAX_TLS13_SECRET_LEN;
+                    self.master_secret = [_]u8{0} ** kdf.MAX_TLS13_SECRET_LEN;
+                    self.client_handshake_traffic_secret = [_]u8{0} ** kdf.MAX_TLS13_SECRET_LEN;
+                    self.server_handshake_traffic_secret = [_]u8{0} ** kdf.MAX_TLS13_SECRET_LEN;
+                    self.client_application_traffic_secret = [_]u8{0} ** kdf.MAX_TLS13_SECRET_LEN;
+                    self.server_application_traffic_secret = [_]u8{0} ** kdf.MAX_TLS13_SECRET_LEN;
+                    self.server_finished_received = false;
+                    self.server_cert_der_len = 0;
+                    self.negotiated_alpn_len = 0;
+                    self.records = record.RecordLayer(ConnType).init(conn);
                     crypto.random.bytes(&self.client_random);
                     crypto.random.bytes(&self.legacy_session_id);
                     self.records.setVersion(.tls_1_0);
-                    return self;
                 }
 
                 fn validateVersionRange(
@@ -658,7 +662,9 @@ pub fn make(comptime std: type, comptime time: type) type {
                     switch (self.verification) {
                         .self_signed => {
                             const root_cert = prev_cert orelse return error.InvalidHandshake;
-                            root_cert.verify(root_cert, now_sec) catch |err| return mapCertificateError(err);
+                            root_cert.verify(root_cert, now_sec) catch |err| {
+                                return mapCertificateError(err);
+                            };
                         },
                         .bundle => if (!chain_established) return error.UnknownCa,
                         else => {},
@@ -696,8 +702,6 @@ pub fn make(comptime std: type, comptime time: type) type {
                     pos += 2;
                     if (pos + sig_len != data.len) return error.InvalidHandshake;
                     const signature = data[pos..][0..sig_len];
-                    const cert = certificateFromBytes(self.server_cert_der[0..self.server_cert_der_len], 0);
-                    const parsed = crypto.Certificate.parse(cert) catch return error.InvalidHandshake;
 
                     var signed_message: [32 + 32 + 1 + 2 + 1 + 256]u8 = undefined;
                     const needed = self.client_random.len + self.server_random.len + params.len;
@@ -710,7 +714,11 @@ pub fn make(comptime std: type, comptime time: type) type {
                     @memcpy(signed_message[msg_pos..][0..params.len], params);
                     msg_pos += params.len;
 
-                    try verifyServerSignature(sig_scheme, signed_message[0..msg_pos], signature, parsed.pubKey());
+                    if (self.verification != .no_verification) {
+                        const cert = certificateFromBytes(self.server_cert_der[0..self.server_cert_der_len], 0);
+                        const parsed = crypto.Certificate.parse(cert) catch return error.InvalidHandshake;
+                        try verifyServerSignature(sig_scheme, signed_message[0..msg_pos], signature, parsed.pubKey());
+                    }
                     try self.computeTls12SharedSecret(named_group, server_pub_key);
                     self.tls12_negotiated_group = named_group;
                     self.state = .wait_server_hello_done;
@@ -726,6 +734,10 @@ pub fn make(comptime std: type, comptime time: type) type {
                 fn processCertificateVerify(self: *Self, data: []const u8) HandshakeError!void {
                     if (self.version != .tls_1_3) return error.UnexpectedMessage;
                     if (self.state != .wait_certificate_verify) return error.UnexpectedMessage;
+                    if (self.verification == .no_verification) {
+                        self.state = .wait_finished;
+                        return;
+                    }
                     if (data.len < 4 or self.server_cert_der_len == 0) return error.InvalidHandshake;
 
                     const sig_scheme: common.SignatureScheme = @enumFromInt(mem.readInt(u16, data[0..2], .big));
@@ -946,12 +958,14 @@ pub fn make(comptime std: type, comptime time: type) type {
                 fn tls12ClientPublicKey(self: *const Self, out: *[97]u8) ?[]const u8 {
                     return switch (self.tls12_negotiated_group orelse return null) {
                         .secp256r1 => blk: {
-                            const bytes = self.tls12_secp256r1_keypair.public_key.toUncompressedSec1();
+                            const keypair = self.tls12_secp256r1_keypair orelse return null;
+                            const bytes = keypair.public_key.toUncompressedSec1();
                             @memcpy(out[0..bytes.len], &bytes);
                             break :blk out[0..bytes.len];
                         },
                         .secp384r1 => blk: {
-                            const bytes = self.tls12_secp384r1_keypair.public_key.toUncompressedSec1();
+                            const keypair = self.tls12_secp384r1_keypair orelse return null;
+                            const bytes = keypair.public_key.toUncompressedSec1();
                             @memcpy(out[0..bytes.len], &bytes);
                             break :blk out[0..bytes.len];
                         },
@@ -967,9 +981,13 @@ pub fn make(comptime std: type, comptime time: type) type {
                 ) HandshakeError!void {
                     switch (named_group) {
                         .secp256r1 => {
+                            if (self.tls12_secp256r1_keypair == null) {
+                                self.tls12_secp256r1_keypair = try generateP256KeyPair();
+                            }
+                            const keypair = self.tls12_secp256r1_keypair.?;
                             const PublicKey = crypto.sign.ecdsa.EcdsaP256Sha256.PublicKey;
                             const pk = PublicKey.fromSec1(server_pub_key) catch return error.InvalidPublicKey;
-                            const mul = pk.p.mulPublic(self.tls12_secp256r1_keypair.secret_key.bytes, .big) catch {
+                            const mul = pk.p.mulPublic(keypair.secret_key.bytes, .big) catch {
                                 return error.KeyExchangeFailed;
                             };
                             const sk = mul.affineCoordinates().x.toBytes(.big);
@@ -977,9 +995,13 @@ pub fn make(comptime std: type, comptime time: type) type {
                             self.tls12_shared_secret_len = sk.len;
                         },
                         .secp384r1 => {
+                            if (self.tls12_secp384r1_keypair == null) {
+                                self.tls12_secp384r1_keypair = try generateP384KeyPair();
+                            }
+                            const keypair = self.tls12_secp384r1_keypair.?;
                             const PublicKey = crypto.sign.ecdsa.EcdsaP384Sha384.PublicKey;
                             const pk = PublicKey.fromSec1(server_pub_key) catch return error.InvalidPublicKey;
-                            const mul = pk.p.mulPublic(self.tls12_secp384r1_keypair.secret_key.bytes, .big) catch {
+                            const mul = pk.p.mulPublic(keypair.secret_key.bytes, .big) catch {
                                 return error.KeyExchangeFailed;
                             };
                             const sk = mul.affineCoordinates().x.toBytes(.big);

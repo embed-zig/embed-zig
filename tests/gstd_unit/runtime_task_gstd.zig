@@ -12,6 +12,9 @@ fn sourceFile() []const u8 {
 const glib = @import("glib");
 const gstd = @import("gstd");
 
+const main_task_options: glib.task.Options = .{ .min_stack_size = 4 * 1024 };
+const batch_task_options: glib.task.Options = .{ .min_stack_size = 4 * 1024 };
+
 test "gstd/runtime/task" {
     const std = @import("std");
 
@@ -21,7 +24,7 @@ test "gstd/runtime/task" {
             value.* += 1;
         }
     }.run);
-    const handle = try gstd.runtime.task.go("test/main", .{}, routine);
+    const handle = try gstd.runtime.task.go("testing/gstd/main", main_task_options, routine);
     handle.join();
 
     try std.testing.expectEqual(@as(usize, 1), state);
@@ -39,7 +42,7 @@ test "gstd/runtime/task joins multiple pooled jobs" {
                 slot.* += 1;
             }
         }.run);
-        handle.* = try gstd.runtime.task.go("test/batch", .{}, routine);
+        handle.* = try gstd.runtime.task.go("testing/gstd/batch", batch_task_options, routine);
     }
 
     for (handles) |handle| {

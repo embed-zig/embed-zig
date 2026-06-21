@@ -38,21 +38,34 @@ const udp_conn = @import("net/UdpConn.zig");
 const resolver_mod = @import("net/Resolver.zig");
 
 pub fn make(comptime std: type, comptime time: type, comptime impl: type) type {
-    const sync = struct {
-        pub const Mutex = std.Thread.Mutex;
-        pub const Condition = std.Thread.Condition;
-        pub const RwLock = std.Thread.RwLock;
-    };
-    return makeWithSync(std, time, sync, impl);
+    if (!@hasDecl(std, "sync") or !@hasDecl(std, "task")) {
+        @compileError("net.make requires std.sync and std.task; use net.makeWithTask for explicit runtime wiring");
+    }
+    return makeWithTask(std, time, std.sync, std.task, impl);
 }
 
 pub fn makeWithSync(comptime std: type, comptime Time: type, comptime Sync: type, comptime impl: type) type {
+    _ = std;
+    _ = Time;
+    _ = Sync;
+    _ = impl;
+    @compileError("net.makeWithSync is removed; use net.makeWithTask with runtime task");
+}
+
+pub fn makeWithTask(comptime std: type, comptime Time: type, comptime Sync: type, comptime Task: type, comptime impl: type) type {
+    const Context = @import("context").makeWithTask(std, Time, Sync, Task);
+    return makeNet(std, Time, Sync, Task, Context, impl);
+}
+
+fn makeNet(comptime std: type, comptime Time: type, comptime Sync: type, comptime Task: type, comptime ContextApi: type, comptime impl: type) type {
     const Allocator = std.mem.Allocator;
     const Addr = netip.AddrPort;
     const IpAddr = netip.Addr;
     const RuntimeNs = runtime.make(impl);
 
     return struct {
+        pub const task = Task;
+        pub const Context = ContextApi;
         pub const Conn = @import("net/Conn.zig");
         pub const Listener = @import("net/Listener.zig");
         pub const PacketConn = @import("net/PacketConn.zig");
@@ -69,7 +82,7 @@ pub fn makeWithSync(comptime std: type, comptime Time: type, comptime Sync: type
         pub const Resolver = resolver_mod.Resolver(std, @This());
         pub const http = @import("net/http.zig").make(std, @This());
         pub const textproto = @import("net/textproto.zig").make(std);
-        pub const Cmux = @import("net/Cmux.zig").Cmux(std, Time);
+        pub const Cmux = @import("net/Cmux.zig").Cmux(std, Time, Sync, Task);
         pub const ntp = @import("net/ntp.zig").make(std, @This());
         pub const tls = @import("net/tls.zig").make(std, @This());
         pub const ListenOptions = TcpListener.Options;

@@ -5,20 +5,38 @@ const read_mod = @import("../../../host/xfer/read.zig");
 const send_mod = @import("../../../host/xfer/send.zig");
 
 pub fn make(comptime grt: type) glib.testing.TestRunner {
-    // Harness + 2 helper threads; worker thread is thin glue (xfer protocol stacks live on spawns).
-    return glib.testing.TestRunner.fromFn(grt.std, 96 * 1024, struct {
-        fn run(t: *glib.testing.T, allocator: glib.std.mem.Allocator) !void {
-            _ = t;
-            try runCase(grt, allocator);
+    const Runner = struct {
+        task_options: glib.task.Options = .{ .min_stack_size = 96 * 1024 },
+        xfer_task_options: glib.task.Options = .{ .min_stack_size = 64 * 1024 },
+
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
         }
-    }.run);
+
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
+            _ = t;
+            runCase(grt, allocator, self.xfer_task_options) catch return false;
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }
 
 pub fn run(comptime grt: type, allocator: glib.std.mem.Allocator) !void {
-    try runCase(grt, allocator);
+    try runCase(grt, allocator, .{ .min_stack_size = 64 * 1024 });
 }
 
-fn runCase(comptime grt: type, allocator: glib.std.mem.Allocator) !void {
+fn runCase(comptime grt: type, allocator: glib.std.mem.Allocator, task_options: glib.task.Options) !void {
     const Harness = harness_mod.make(grt);
 
     var harness = try Harness.init(allocator);
@@ -88,10 +106,10 @@ fn runCase(comptime grt: type, allocator: glib.std.mem.Allocator) !void {
         .transport = harness.right(),
     };
 
-    const read_thread = try grt.std.Thread.spawn(.{}, ReadTask.run, .{&read_task});
-    const send_thread = try grt.std.Thread.spawn(.{}, SendTask.run, .{&send_task});
-    read_thread.join();
-    send_thread.join();
+    const read_task_handle = try grt.task.go("testing/bt/xfer/read", task_options, glib.task.Routine.init(&read_task, ReadTask.run));
+    const send_task_handle = try grt.task.go("testing/bt/xfer/send", task_options, glib.task.Routine.init(&send_task, SendTask.run));
+    read_task_handle.join();
+    send_task_handle.join();
 
     try grt.std.testing.expect(read_task.err == null);
     try grt.std.testing.expect(send_task.err == null);

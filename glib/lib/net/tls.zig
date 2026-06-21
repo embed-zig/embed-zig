@@ -201,7 +201,7 @@ pub fn TestRunner(comptime std: type, comptime net: type) @import("testing").Tes
             t.run("make2_conn_context", testing_api.TestRunner.fromFn(std, 2 * 1024 * 1024, struct {
                 fn run(_: *testing_api.T, case_allocator: std.mem.Allocator) !void {
                     const net_root = @import("../net.zig");
-                    const ContextApi = @import("context").make(std, net.time);
+                    const ContextApi = net.Context;
                     const runtime_mod = net_root.runtime;
                     const FakeRuntimeImpl = struct {
                         pub const Tcp = struct {
@@ -374,7 +374,7 @@ pub fn TestRunner(comptime std: type, comptime net: type) @import("testing").Tes
                             return .{};
                         }
                     };
-                    const FakeNet = net_root.make(std, net.time, FakeRuntimeImpl);
+                    const FakeNet = net_root.makeWithTask(std, net.time, net.sync, net.task, FakeRuntimeImpl);
 
                     var ctx_api = try ContextApi.init(case_allocator);
                     defer ctx_api.deinit();

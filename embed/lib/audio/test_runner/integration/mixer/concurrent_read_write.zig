@@ -8,7 +8,6 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run(allocator: glib.std.mem.Allocator) !void {
             const Atomic = grt.std.atomic.Value;
-            const Thread = grt.std.Thread;
 
             const total_samples = 32;
             const chunk_len = 8;
@@ -38,7 +37,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                 sample.* = @intCast(idx + 1);
             }
 
-            const writer = try Thread.spawn(.{}, struct {
+            const writer = try grt.task.go("testing/audio/concurrent_writer", .{ .min_stack_size = 8 * 1024 }, glib.task.Routine.init(&state, struct {
                 fn run(s: *State) void {
                     var i: usize = 0;
                     while (i < s.samples.len) : (i += chunk_len) {
@@ -47,11 +46,11 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                             s.result = err;
                             break;
                         };
-                        Thread.yield() catch {};
+                        grt.time.sleep(0);
                     }
                     s.done.store(true, .release);
                 }
-            }.run, .{&state});
+            }.run));
 
             var collected: [total_samples]i16 = undefined;
             var collected_len: usize = 0;
@@ -66,7 +65,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
 
                 if (mixer.read(&out)) |n| {
                     if (n == 0) {
-                        Thread.yield() catch {};
+                        grt.time.sleep(0);
                         continue;
                     }
                     @memcpy(collected[collected_len .. collected_len + n], out[0..n]);

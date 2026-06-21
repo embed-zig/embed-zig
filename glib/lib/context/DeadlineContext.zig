@@ -7,7 +7,10 @@ const Allocator = stdz.mem.Allocator;
 const Context = @import("Context.zig");
 const internal = @import("internal.zig");
 
-pub fn make(comptime std: type, comptime time: type, comptime sync: type) type {
+pub fn make(comptime std: type, comptime time: type, comptime sync: type, comptime task: type) type {
+    comptime {
+        _ = std;
+    }
     const Mutex = sync.Mutex;
     const Condition = sync.Condition;
     const RwLock = sync.RwLock;
@@ -24,7 +27,7 @@ pub fn make(comptime std: type, comptime time: type, comptime sync: type) type {
         timer_cond: Condition = .{},
         timer_generation: usize = 0,
         timer_canceled: bool = false,
-        timer_thread: ?std.Thread = null,
+        timer_task: ?task.Handle = null,
         timer_started: bool = false,
 
         const Self = @This();
@@ -75,11 +78,13 @@ pub fn make(comptime std: type, comptime time: type, comptime sync: type) type {
             return self_mut.effectiveDeadlineNoLock();
         }
 
+        const timer_task_options: task.Options = .{ .min_stack_size = 4 * 1024 };
+
         fn ensureTimer(self: *Self) void {
             if (self.timer_started) return;
             if (self.cause != null) return;
             self.timer_started = true;
-            self.timer_thread = std.Thread.spawn(.{}, timerFn, .{self}) catch |err| {
+            self.timer_task = task.go("context/deadline", timer_task_options, task.Routine.init(self, timerFn)) catch |err| {
                 self.markCanceled(err);
                 return;
             };
@@ -132,9 +137,9 @@ pub fn make(comptime std: type, comptime time: type, comptime sync: type) type {
         }
 
         fn joinTimer(self: *Self) void {
-            if (self.timer_thread) |t| {
+            if (self.timer_task) |t| {
                 t.join();
-                self.timer_thread = null;
+                self.timer_task = null;
             }
         }
 
@@ -191,6 +196,12 @@ pub fn make(comptime std: type, comptime time: type, comptime sync: type) type {
         }
 
         fn errImpl(ptr: *anyopaque) ?anyerror {
+            const self: *Self = @ptrCast(@alignCast(ptr));
+            if (errNoLockImpl(ptr)) |cause| return cause;
+            if (time_mod.instant.sub(self.effectiveDeadline(), time.instant.now()) <= 0) {
+                self.markCanceled(Context.DeadlineExceeded);
+                return Context.DeadlineExceeded;
+            }
             return errNoLockImpl(ptr);
         }
 

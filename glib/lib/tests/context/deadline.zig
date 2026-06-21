@@ -1,9 +1,12 @@
 const stdz = @import("stdz");
 const testing_mod = @import("testing");
 const context_root = @import("context");
+const task_mod = @import("task");
 const time_mod = @import("time");
 
 const Context = context_root.Context;
+const deadline_wake_task_options: task_mod.Options = .{ .min_stack_size = 4 * 1024 };
+const deinit_parent_task_options: task_mod.Options = .{ .min_stack_size = 4 * 1024 };
 
 const context_std = @import("std.zig");
 const test_utils = @import("test_utils.zig");
@@ -227,13 +230,16 @@ fn deadlineSpuriousTimerWakeStillWaitsForDeadlineCase(comptime std: type, compti
     const deadline_impl = try dc.as(@TypeOf(ctx_api).DeadlineContext);
 
     const started = time.instant.now();
-    const t = try std.Thread.spawn(.{}, struct {
-        fn wake(deadline_ctx: *@TypeOf(ctx_api).DeadlineContext, l: type) void {
-            _ = l;
+    const Worker = struct {
+        deadline_ctx: *@TypeOf(ctx_api).DeadlineContext,
+
+        fn run(self: *@This()) void {
             time.sleep(5 * time_mod.duration.MilliSecond);
-            deadline_ctx.timer_cond.signal();
+            self.deadline_ctx.timer_cond.signal();
         }
-    }.wake, .{ deadline_impl, std });
+    };
+    var worker: Worker = .{ .deadline_ctx = deadline_impl };
+    const t = try std.task.go("testing/context/deadline_wake", deadline_wake_task_options, task_mod.Routine.init(&worker, Worker.run));
     defer t.join();
 
     const cause = dc.wait(null) orelse return error.DeadlineSpuriousWakeMissing;
@@ -268,7 +274,7 @@ fn deadlineDeinitJoinsTimerThreadCase(comptime std: type, comptime time: type, a
     const bg = fake_ctx_api.background();
     var dc = try fake_ctx_api.withTimeout(bg, 1000 * time_mod.duration.MilliSecond);
     const impl = try dc.as(@TypeOf(fake_ctx_api).DeadlineContext);
-    if (impl.timer_thread == null) return error.DeadlineTimerShouldStart;
+    if (impl.timer_task == null) return error.DeadlineTimerShouldStart;
     dc.deinit();
     if (CountingThread.join_calls == 0) return error.DeadlineDeinitShouldJoinTimerThread;
 }
@@ -295,11 +301,15 @@ fn deadlineReparentedChildKeepsOwnDeadlineCase(comptime std: type, comptime time
 
     ReparentThread.Condition.waitForTimedWaitHook();
 
-    const reparent_thread = try ReparentThread.spawn(.{}, struct {
-        fn deinitParent(ctx: *Context) void {
-            ctx.deinit();
+    const Worker = struct {
+        ctx: *Context,
+
+        fn run(self: *@This()) void {
+            self.ctx.deinit();
         }
-    }.deinitParent, .{&parent});
+    };
+    var worker: Worker = .{ .ctx = &parent };
+    const reparent_thread = try FakeLib.task.go("testing/context/deinit_parent", deinit_parent_task_options, task_mod.Routine.init(&worker, Worker.run));
 
     time.sleep(2 * time_mod.duration.MilliSecond);
     ReparentThread.Condition.releaseTimedWaitHook();

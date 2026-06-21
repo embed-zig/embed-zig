@@ -1,10 +1,11 @@
 //! Timer coordination primitive — resettable deadline callback worker.
 //!
 //! `Timer.init(&impl)` erases a concrete timer implementation behind a small
-//! vtable. `Timer.make(std, time)` builds a default thread-backed implementation that
-//! waits for an absolute monotonic deadline and invokes a callback once.
+//! vtable. `Timer.make(std, time)` builds a default task-backed implementation
+//! that waits for an absolute monotonic deadline and invokes a callback once.
 
 const stdz = @import("stdz");
+const task_mod = @import("task");
 const time_mod = @import("time");
 const testing_api = @import("testing");
 
@@ -60,26 +61,36 @@ pub fn init(pointer: anytype) Timer {
 }
 
 pub fn make(comptime std: type, comptime time: type) type {
-    const sync = struct {
-        pub const Mutex = @import("Mutex.zig").make(std.Thread.Mutex);
-        pub const Condition = @import("Condition.zig").make(std.Thread.Condition);
-    };
-    return makeWithSync(std, time, sync);
+    if (!@hasDecl(std, "sync")) {
+        @compileError("Timer.make requires std.sync; pass glib.make/gstd runtime or use Timer.makeWithTask");
+    }
+    if (!@hasDecl(std, "task")) {
+        @compileError("Timer.make requires std.task; pass glib.make/gstd runtime or use Timer.makeWithTask");
+    }
+    return makeWithTask(std, time, std.sync, std.task);
 }
 
 pub fn makeWithSync(comptime std: type, comptime time: type, comptime sync: type) type {
+    _ = std;
+    _ = time;
+    _ = sync;
+    @compileError("Timer.makeWithSync is removed; use Timer.makeWithTask");
+}
+
+pub fn makeWithTask(comptime std: type, comptime time: type, comptime sync: type, comptime task: type) type {
+    _ = std;
     return struct {
-        pub const SpawnConfig = std.Thread.SpawnConfig;
+        pub const Options = task.Options;
 
         allocator: stdz.mem.Allocator,
         callback: Timer.Callback,
         callback_ctx: *anyopaque,
-        spawn_config: SpawnConfig,
+        task_options: Options,
         mutex: sync.Mutex = .{},
         cond: sync.Condition = .{},
         deadline: ?time.instant.Time = null,
         shutting_down: bool = false,
-        thread: ?std.Thread = null,
+        worker: ?task.Handle = null,
 
         const Self = @This();
 
@@ -87,8 +98,8 @@ pub fn makeWithSync(comptime std: type, comptime time: type, comptime sync: type
             allocator: stdz.mem.Allocator,
             callback: Timer.Callback,
             callback_ctx: *anyopaque,
-            spawn_config: SpawnConfig,
-        ) !*Self {
+            task_options: Options,
+        ) (stdz.mem.Allocator.Error || task.SpawnError)!*Self {
             const self = try allocator.create(Self);
             errdefer allocator.destroy(self);
 
@@ -96,14 +107,10 @@ pub fn makeWithSync(comptime std: type, comptime time: type, comptime sync: type
                 .allocator = allocator,
                 .callback = callback,
                 .callback_ctx = callback_ctx,
-                .spawn_config = spawn_config,
+                .task_options = task_options,
             };
 
-            self.thread = try std.Thread.spawn(self.spawn_config, struct {
-                fn run(timer: *Self) void {
-                    timer.threadMain();
-                }
-            }.run, .{self});
+            self.worker = try task.go("sync/timer", self.task_options, task.Routine.init(self, runTask));
 
             return self;
         }
@@ -123,15 +130,15 @@ pub fn makeWithSync(comptime std: type, comptime time: type, comptime sync: type
             self.cond.broadcast();
             self.mutex.unlock();
 
-            if (self.thread) |thread| {
-                thread.join();
-                self.thread = null;
+            if (self.worker) |worker| {
+                worker.join();
+                self.worker = null;
             }
 
             self.allocator.destroy(self);
         }
 
-        fn threadMain(self: *Self) void {
+        fn runTask(self: *Self) void {
             while (self.waitForFire()) {
                 self.callback(self.callback_ctx);
             }
@@ -166,8 +173,38 @@ pub fn makeWithSync(comptime std: type, comptime time: type, comptime sync: type
 pub fn TestRunner(comptime std: type, comptime time: type) testing_api.TestRunner {
     const native_std = @import("std");
     const sync = struct {
-        pub const Mutex = @import("Mutex.zig").make(native_std.Thread.Mutex);
-        pub const Condition = @import("Condition.zig").make(native_std.Thread.Condition);
+        const NativeWorker = @field(native_std, "Thread");
+
+        pub const Mutex = @import("Mutex.zig").make(NativeWorker.Mutex);
+        pub const Condition = @import("Condition.zig").make(NativeWorker.Condition);
+    };
+    const task = struct {
+        const NativeWorker = @field(native_std, "Thread");
+
+        pub const Handle = NativeWorker;
+        pub const Options = task_mod.Options;
+        pub const Routine = task_mod.Routine;
+        pub const SpawnError = NativeWorker.SpawnError;
+
+        pub fn go(_: []const u8, options: Options, routine: Routine) SpawnError!Handle {
+            return NativeWorker.spawn(.{
+                .stack_size = stackSize(options.min_stack_size),
+            }, runRoutine, .{routine});
+        }
+
+        pub fn currentToken() usize {
+            const value: usize = @intCast(NativeWorker.getCurrentId());
+            return if (value == 0) 1 else value;
+        }
+
+        fn runRoutine(routine: Routine) void {
+            routine.run();
+        }
+
+        fn stackSize(min_stack_size: usize) usize {
+            if (min_stack_size == 0) return NativeWorker.SpawnConfig.default_stack_size;
+            return min_stack_size;
+        }
     };
 
     const Runner = struct {
@@ -184,23 +221,23 @@ pub fn TestRunner(comptime std: type, comptime time: type) testing_api.TestRunne
                 t.logErrorf("sync.Timer erased wrapper failed: {}", .{err});
                 return false;
             };
-            resetNullCase(std, time, sync) catch |err| {
+            resetNullCase(std, time, sync, task) catch |err| {
                 t.logErrorf("sync.Timer reset(null) failed: {}", .{err});
                 return false;
             };
-            earlierResetCase(std, time, sync) catch |err| {
+            earlierResetCase(std, time, sync, task) catch |err| {
                 t.logErrorf("sync.Timer earlier reset failed: {}", .{err});
                 return false;
             };
-            laterResetCase(std, time, sync) catch |err| {
+            laterResetCase(std, time, sync, task) catch |err| {
                 t.logErrorf("sync.Timer later reset failed: {}", .{err});
                 return false;
             };
-            rearmCase(std, time, sync) catch |err| {
+            rearmCase(std, time, sync, task) catch |err| {
                 t.logErrorf("sync.Timer rearm failed: {}", .{err});
                 return false;
             };
-            immediateFireCase(std, time, sync) catch |err| {
+            immediateFireCase(std, time, sync, task) catch |err| {
                 t.logErrorf("sync.Timer immediate fire failed: {}", .{err});
                 return false;
             };
@@ -243,8 +280,8 @@ fn erasedWrapperCase(comptime std: type) !void {
     try std.testing.expect(mock.deinit_called);
 }
 
-fn resetNullCase(comptime std: type, comptime time: type, comptime sync: type) !void {
-    const TimerImpl = makeWithSync(std, time, sync);
+fn resetNullCase(comptime std: type, comptime time: type, comptime sync: type, comptime task: type) !void {
+    const TimerImpl = makeWithTask(std, time, sync, task);
     var callback_state = CallbackState(time, sync){};
     const timer = try TimerImpl.init(std.testing.allocator, CallbackState(time, sync).fire, &callback_state, .{});
     defer timer.deinit();
@@ -256,8 +293,8 @@ fn resetNullCase(comptime std: type, comptime time: type, comptime sync: type) !
     try callback_state.expectStable(0, 100 * time.duration.MilliSecond);
 }
 
-fn earlierResetCase(comptime std: type, comptime time: type, comptime sync: type) !void {
-    const TimerImpl = makeWithSync(std, time, sync);
+fn earlierResetCase(comptime std: type, comptime time: type, comptime sync: type, comptime task: type) !void {
+    const TimerImpl = makeWithTask(std, time, sync, task);
     var callback_state = CallbackState(time, sync){};
     const timer = try TimerImpl.init(std.testing.allocator, CallbackState(time, sync).fire, &callback_state, .{});
     defer timer.deinit();
@@ -269,8 +306,8 @@ fn earlierResetCase(comptime std: type, comptime time: type, comptime sync: type
     _ = try callback_state.waitForCount(1, 100 * time.duration.MilliSecond);
 }
 
-fn laterResetCase(comptime std: type, comptime time: type, comptime sync: type) !void {
-    const TimerImpl = makeWithSync(std, time, sync);
+fn laterResetCase(comptime std: type, comptime time: type, comptime sync: type, comptime task: type) !void {
+    const TimerImpl = makeWithTask(std, time, sync, task);
     var callback_state = CallbackState(time, sync){};
     const timer = try TimerImpl.init(std.testing.allocator, CallbackState(time, sync).fire, &callback_state, .{});
     defer timer.deinit();
@@ -283,8 +320,8 @@ fn laterResetCase(comptime std: type, comptime time: type, comptime sync: type) 
     _ = try callback_state.waitForCount(1, 100 * time.duration.MilliSecond);
 }
 
-fn rearmCase(comptime std: type, comptime time: type, comptime sync: type) !void {
-    const TimerImpl = makeWithSync(std, time, sync);
+fn rearmCase(comptime std: type, comptime time: type, comptime sync: type, comptime task: type) !void {
+    const TimerImpl = makeWithTask(std, time, sync, task);
     var callback_state = CallbackState(time, sync){};
     const timer = try TimerImpl.init(std.testing.allocator, CallbackState(time, sync).fire, &callback_state, .{});
     defer timer.deinit();
@@ -296,8 +333,8 @@ fn rearmCase(comptime std: type, comptime time: type, comptime sync: type) !void
     _ = try callback_state.waitForCount(2, 80 * time.duration.MilliSecond);
 }
 
-fn immediateFireCase(comptime std: type, comptime time: type, comptime sync: type) !void {
-    const TimerImpl = makeWithSync(std, time, sync);
+fn immediateFireCase(comptime std: type, comptime time: type, comptime sync: type, comptime task: type) !void {
+    const TimerImpl = makeWithTask(std, time, sync, task);
     var callback_state = CallbackState(time, sync){};
     const timer = try TimerImpl.init(std.testing.allocator, CallbackState(time, sync).fire, &callback_state, .{});
     defer timer.deinit();

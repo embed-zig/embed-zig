@@ -100,7 +100,12 @@ pub fn make(comptime std: type, comptime time: type, comptime sync: type) type {
         }
 
         fn errImpl(ptr: *anyopaque) ?anyerror {
-            return errNoLockImpl(ptr);
+            const self: *Self = @ptrCast(@alignCast(ptr));
+            if (errNoLockImpl(ptr)) |cause| return cause;
+            const parent = self.tree.parent orelse return null;
+            const cause = parent.err() orelse return null;
+            self.markCanceled(cause);
+            return cause;
         }
 
         fn deadlineNoLockImpl(ptr: *anyopaque) ?time_mod.instant.Time {

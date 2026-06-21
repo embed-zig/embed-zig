@@ -1,8 +1,10 @@
 const glib = @import("glib");
+const build_config = @import("build_config");
 
 pub const std = @import("grt/std.zig");
 pub const sync = @import("grt/sync.zig");
 pub const task = @import("grt/task.zig");
+const task_policy = @import("grt/task_policy.zig");
 pub const time = @import("grt/time.zig");
 pub const system = @import("grt/system.zig");
 pub const net = @import("grt/net.zig");
@@ -11,7 +13,6 @@ pub const compress = @import("grt/compress.zig");
 
 const stdz_impl = struct {
     pub const heap = std.heap;
-    pub const Thread = std.Thread;
     pub const log = std.log;
     pub const crypto = std.crypto;
     pub const posix = std.posix;
@@ -27,6 +28,9 @@ pub const runtime: glib.runtime.Options = .{
     .channel_factory = sync.ChannelFactory,
     .net_impl = net.Runtime,
     .fs_impl = fs.impl,
+    .task_impl = if (@hasDecl(build_config, "task_policy"))
+        task_policy.Impl(build_config.task_policy)
+    else
+        task.impl,
     .compress_impl = compress.impl,
-    .task_impl = task.impl,
 };

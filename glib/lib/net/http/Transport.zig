@@ -39,7 +39,9 @@ pub fn Transport(comptime std: type, comptime net: type) type {
     const Resolver = resolver_mod.Resolver(std, net);
     const TcpConn = tcp_conn_mod.TcpConn(std, net);
     const Tls = tls_mod.make(std, net);
-    const Thread = std.Thread;
+    const Mutex = net.sync.Mutex;
+    const Condition = net.sync.Condition;
+    const Task = net.task;
     const default_user_agent = "stdz-zig-http-client/1.0";
     const default_max_header_bytes = 32 * 1024;
     const unlimited_body_bytes = stdz.math.maxInt(usize);
@@ -51,7 +53,7 @@ pub fn Transport(comptime std: type, comptime net: type) type {
         allocator: Allocator,
         options: Options,
         resolver: Resolver,
-        idle_mu: Thread.Mutex = .{},
+        idle_mu: Mutex = .{},
         idle_conns: stdz.ArrayList(IdleConn),
         host_states: stdz.ArrayList(HostState),
         idle_generation: usize = 0,
@@ -119,7 +121,7 @@ pub fn Transport(comptime std: type, comptime net: type) type {
         pub const Options = struct {
             dialer: Dialer.Options = .{},
             resolver: Resolver.Options = .{},
-            spawn_config: Thread.SpawnConfig = .{},
+            task_options: Task.Options = .{ .min_stack_size = 24 * 1024 },
             tls_client_config: ?Tls.Config = null,
             https_proxy: ?ProxyConfig = null,
             force_attempt_http2: bool = false,
@@ -154,7 +156,7 @@ pub fn Transport(comptime std: type, comptime net: type) type {
             key: []u8,
             live_conns: usize = 0,
             waiters: usize = 0,
-            cond: Thread.Condition = .{},
+            cond: Condition = .{},
         };
 
         const RouteInfo = struct {
@@ -457,9 +459,9 @@ pub fn Transport(comptime std: type, comptime net: type) type {
             io_buf: []u8 = &.{},
             send_chunked: bool,
             content_length: usize,
-            mu: Thread.Mutex = .{},
-            continue_cond: Thread.Condition = .{},
-            thread: ?Thread = null,
+            mu: Mutex = .{},
+            continue_cond: Condition = .{},
+            thread: ?Task.Handle = null,
             body_closed: bool = false,
             abort_requested: bool = false,
             result: ?anyerror = null,
@@ -507,7 +509,11 @@ pub fn Transport(comptime std: type, comptime net: type) type {
                     .write_context_active = write_context_active,
                 };
                 state.buffered.wr = &state.conn;
-                state.thread = Thread.spawn(transport.options.spawn_config, run, .{state}) catch {
+                state.thread = Task.go(
+                    "net/http/request_body",
+                    transport.options.task_options,
+                    Task.Routine.init(state, run),
+                ) catch {
                     state.closeBody();
                     state.freeIoBuf();
                     return error.Unexpected;
@@ -572,7 +578,7 @@ pub fn Transport(comptime std: type, comptime net: type) type {
                 } else |_| {}
             }
 
-            fn takeThread(self: *RequestBodyState) ?Thread {
+            fn takeThread(self: *RequestBodyState) ?Task.Handle {
                 self.mu.lock();
                 defer self.mu.unlock();
                 const thread = self.thread;
@@ -2397,6 +2403,10 @@ fn responseMustBeBodyless(req: *const Request, status_code: u16) bool {
 
 pub fn TestRunner(comptime std: type, comptime net: type) @import("testing").TestRunner {
     const testing_api = @import("testing");
+    const Mutex = net.sync.Mutex;
+    const Condition = net.sync.Condition;
+    const Task = net.task;
+
     return testing_api.TestRunner.fromFn(std, 3 * 1024 * 1024, struct {
         fn run(_: *testing_api.T, allocator: std.mem.Allocator) !void {
             const testing = std.testing;
@@ -2827,8 +2837,8 @@ pub fn TestRunner(comptime std: type, comptime net: type) @import("testing").Tes
 
             {
                 const MockConn = struct {
-                    mu: std.Thread.Mutex = .{},
-                    cond: std.Thread.Condition = .{},
+                    mu: Mutex = .{},
+                    cond: Condition = .{},
                     write_started: bool = false,
                     allow_write_return: bool = false,
                     write_finished: bool = false,
@@ -2868,8 +2878,8 @@ pub fn TestRunner(comptime std: type, comptime net: type) @import("testing").Tes
                 };
 
                 const BodySource = struct {
-                    mu: std.Thread.Mutex = .{},
-                    cond: std.Thread.Condition = .{},
+                    mu: Mutex = .{},
+                    cond: Condition = .{},
                     payload: []const u8,
                     offset: usize = 0,
                     closed: bool = false,
@@ -2941,7 +2951,11 @@ pub fn TestRunner(comptime std: type, comptime net: type) @import("testing").Tes
                     }
                 };
 
-                var closer_thread = try std.Thread.spawn(.{}, Closer.run, .{&body_state});
+                var closer_thread = try Task.go(
+                    "net/http/test/body_close",
+                    .{},
+                    Task.Routine.init(&body_state, Closer.run),
+                );
                 source.mu.lock();
                 while (!source.closed) source.cond.wait(&source.mu);
                 source.mu.unlock();
@@ -3238,7 +3252,7 @@ pub fn TestRunner(comptime std: type, comptime net: type) @import("testing").Tes
                 );
                 defer writer.destroy();
 
-                std.Thread.sleep(@intCast(10 * net.time.duration.MilliSecond));
+                net.time.sleep(10 * net.time.duration.MilliSecond);
                 try testing.expectEqual(@as(usize, 0), mock_conn.writes.items.len);
 
                 writer.allowBodySend();

@@ -1,6 +1,5 @@
 const testing_api = @import("../TestRunner.zig");
 
-const IsolationThreadMod = @import("../IsolationThread.zig");
 const TMod = @import("../T.zig");
 const TestingAllocatorMod = @import("../TestingAllocator.zig");
 const TestRunnerMod = @import("../TestRunner.zig");
@@ -18,7 +17,6 @@ pub fn make(comptime std: type, comptime time: type) testing_api {
 
             t.parallel();
             t.run("T", TMod.TestRunner(std, time));
-            t.run("IsolationThread", IsolationThreadMod.TestRunner(std));
             t.run("TestingAllocator", TestingAllocatorMod.TestRunner(std));
             t.run("TestRunner", TestRunnerMod.TestRunner(std, time));
             return t.wait();

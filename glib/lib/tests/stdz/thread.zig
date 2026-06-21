@@ -26,14 +26,14 @@ pub fn make(comptime std: type) testing_mod.TestRunner {
                     try conditionMakeCase(std);
                 }
             }.run));
-            t.run("thread_api", testing_mod.TestRunner.fromFn(std, 32 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
-                    _ = tt;
-                    _ = sub_allocator;
-                    try threadTests(std);
-                }
-            }.run));
             if (comptime !isRuntimeThreadGuarded(std)) {
+                t.run("thread_api", testing_mod.TestRunner.fromFn(std, 32 * 1024, struct {
+                    fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
+                        _ = tt;
+                        _ = sub_allocator;
+                        try threadTests(std);
+                    }
+                }.run));
                 t.run("mutex", testing_mod.TestRunner.fromFn(std, 32 * 1024, struct {
                     fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                         _ = tt;
@@ -71,7 +71,7 @@ pub fn make(comptime std: type) testing_mod.TestRunner {
 }
 
 fn isRuntimeThreadGuarded(comptime std: type) bool {
-    return @hasDecl(std.Thread, "runtime_thread_guardrail");
+    return @hasDecl(std.Thread, "removed_thread_guardrail") or @hasDecl(std.Thread, "runtime_thread_guardrail");
 }
 
 fn conditionMakeCase(comptime std: type) !void {

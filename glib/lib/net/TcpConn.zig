@@ -4,14 +4,13 @@
 //! freed on deinit().
 
 const time_mod = @import("time");
-const context_mod = @import("context");
 const Conn = @import("Conn.zig");
 const runtime_mod = @import("runtime.zig");
 
 pub fn TcpConn(comptime std: type, comptime net: type) type {
     const Allocator = std.mem.Allocator;
-    const Context = context_mod.Context;
-    const ContextApi = context_mod.makeWithSync(std, net.time, net.sync);
+    const Context = @import("context").Context;
+    const ContextApi = net.Context;
     const Mutex = net.sync.Mutex;
     const Runtime = net.Runtime;
     const TcpSocket = Runtime.Tcp;
@@ -170,7 +169,7 @@ pub fn TcpConn(comptime std: type, comptime net: type) type {
             try self.socket.setOpt(.{ .socket = .{ .send_buffer_size = size } });
         }
 
-        pub fn setReadContext(self: *Self, ctx: ?context_mod.Context) Allocator.Error!void {
+        pub fn setReadContext(self: *Self, ctx: ?Context) Allocator.Error!void {
             if (self.isClosed()) return;
             const new_ctx = if (ctx) |parent|
                 try SideContext.init(self.allocator, parent)
@@ -192,7 +191,7 @@ pub fn TcpConn(comptime std: type, comptime net: type) type {
             if (should_signal) self.socket.signal(.read_interrupt);
         }
 
-        pub fn setWriteContext(self: *Self, ctx: ?context_mod.Context) Allocator.Error!void {
+        pub fn setWriteContext(self: *Self, ctx: ?Context) Allocator.Error!void {
             if (self.isClosed()) return;
             const new_ctx = if (ctx) |parent|
                 try SideContext.init(self.allocator, parent)
@@ -379,7 +378,7 @@ pub fn TcpConn(comptime std: type, comptime net: type) type {
             return @atomicRmw(u8, &self.closed, .Xchg, 1, .acq_rel) != 0;
         }
 
-        fn pollTimeout(ctx: ?context_mod.Context, deadline: ?time_mod.instant.Time) ?time_mod.duration.Duration {
+        fn pollTimeout(ctx: ?Context, deadline: ?time_mod.instant.Time) ?time_mod.duration.Duration {
             var remaining: ?time_mod.duration.Duration = if (deadline) |value|
                 @max(time_mod.instant.sub(value, net.time.instant.now()), 0)
             else

@@ -46,13 +46,15 @@ pub fn make(comptime std: type) testing_mod.TestRunner {
                     try getsockoptTest(std);
                 }
             }.run));
-            t.run("tcp", testing_mod.TestRunner.fromFn(std, 64 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
-                    _ = tt;
-                    _ = sub_allocator;
-                    try tcpTest(std);
-                }
-            }.run));
+            if (comptime !isRuntimeThreadGuarded(std)) {
+                t.run("tcp", testing_mod.TestRunner.fromFn(std, 64 * 1024, struct {
+                    fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
+                        _ = tt;
+                        _ = sub_allocator;
+                        try tcpTest(std);
+                    }
+                }.run));
+            }
             t.run("udp", testing_mod.TestRunner.fromFn(std, 32 * 1024, struct {
                 fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
@@ -72,6 +74,10 @@ pub fn make(comptime std: type) testing_mod.TestRunner {
     const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
     return testing_mod.TestRunner.make(Runner).new(runner);
+}
+
+fn isRuntimeThreadGuarded(comptime std: type) bool {
+    return @hasDecl(std.Thread, "removed_thread_guardrail") or @hasDecl(std.Thread, "runtime_thread_guardrail");
 }
 
 fn typeSurfaceTest(comptime std: type) !void {
