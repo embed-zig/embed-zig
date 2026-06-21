@@ -19,6 +19,7 @@ pub const Config = struct {
     stream: bool = true,
     ack_flush_min_count: usize = 4,
     send_batch_bytes: usize = 8192,
+    output_pps_limit: ?u32 = null,
     write_timeout: ?glib.time.duration.Duration = null,
     read_timeout: ?glib.time.duration.Duration = null,
     output_write_timeout: ?glib.time.duration.Duration = null,
@@ -724,10 +725,19 @@ pub fn make(comptime grt: type) type {
 
         fn kcpSendBatchLimit(self: *const Self) usize {
             const mss = @max(@as(usize, @intCast(self.inst.*.mss)), 1);
-            const configured = @max(self.config.send_batch_bytes, mss);
+            const configured = self.outputPpsFeedLimit(mss) orelse @max(self.config.send_batch_bytes, mss);
             const ikcp_limit = ikcp_max_send_segments * mss;
             const room_limit = @max(@as(usize, @intCast(self.sendRoomInner())), 1) * mss;
             return @max(@min(@min(configured, ikcp_limit), room_limit), 1);
+        }
+
+        fn outputPpsFeedLimit(self: *const Self, mss: usize) ?usize {
+            const pps = self.config.output_pps_limit orelse return null;
+            if (pps == 0) return null;
+            const interval_ms: u64 = @intCast(@max(self.config.interval_ms, 1));
+            const packets = @max(@divFloor(@as(u64, pps) * interval_ms, 1000), 1);
+            const capped_packets = @min(packets, ikcp_max_send_segments);
+            return @as(usize, @intCast(capped_packets)) * mss;
         }
 
         fn ackCountInner(self: *const Self) usize {
@@ -1035,6 +1045,16 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try std.testing.expectEqual(@as(usize, 0), session.rx_head);
             try std.testing.expectEqual(@as(usize, rx_storage.len), span.len);
             try std.testing.expectEqual(@intFromPtr(&rx_storage[0]), @intFromPtr(span.ptr));
+
+            session.config.output_pps_limit = 1250;
+            session.config.interval_ms = 10;
+            try std.testing.expectEqual(@as(?usize, 12 * 100), session.outputPpsFeedLimit(100));
+
+            session.config.output_pps_limit = 1;
+            try std.testing.expectEqual(@as(?usize, 100), session.outputPpsFeedLimit(100));
+
+            session.config.output_pps_limit = null;
+            try std.testing.expectEqual(@as(?usize, null), session.outputPpsFeedLimit(100));
         }
     }.run);
 }

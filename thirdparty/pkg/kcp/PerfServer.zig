@@ -360,6 +360,7 @@ pub fn make(comptime grt: type) type {
                 .no_congestion_control = request.kcp.no_congestion_control,
                 .stream = request.kcp.stream,
                 .send_batch_bytes = 8192,
+                .output_pps_limit = request.udp_pps,
                 .write_timeout = kcp_write_timeout,
                 .output_write_timeout = kcp_write_timeout,
             };
