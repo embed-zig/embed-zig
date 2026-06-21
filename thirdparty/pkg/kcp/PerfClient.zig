@@ -312,7 +312,6 @@ pub fn make(comptime grt: type) type {
                 .resend = request.kcp.resend,
                 .no_congestion_control = request.kcp.no_congestion_control,
                 .stream = request.kcp.stream,
-                .max_pending_segments = 32,
                 .send_batch_bytes = 8192,
                 .write_timeout = kcp_write_timeout,
                 .output_write_timeout = kcp_write_timeout,

@@ -19,7 +19,6 @@ pub const Config = struct {
     stream: bool = true,
     ack_flush_min_count: usize = 4,
     send_batch_bytes: usize = 8192,
-    max_pending_segments: ?u32 = null,
     write_timeout: ?glib.time.duration.Duration = null,
     read_timeout: ?glib.time.duration.Duration = null,
     output_write_timeout: ?glib.time.duration.Duration = null,
@@ -707,8 +706,7 @@ pub fn make(comptime grt: type) type {
         }
 
         fn pendingLimit(self: *const Self) u32 {
-            const configured = self.config.max_pending_segments orelse self.inst.*.snd_wnd;
-            return @max(@min(configured, self.inst.*.snd_wnd), 1);
+            return @max(self.inst.*.snd_wnd, 1);
         }
 
         fn waitsndInner(self: *const Self) u32 {
