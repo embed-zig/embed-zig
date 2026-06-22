@@ -185,6 +185,9 @@ pub fn make(comptime Impl: type) type {
         if (!@hasDecl(Impl, "connect_wifi_sta")) {
             @compileError("zux.App.make requires Impl.connect_wifi_sta");
         }
+        if (!@hasDecl(Impl, "disconnect_wifi_sta")) {
+            @compileError("zux.App.make requires Impl.disconnect_wifi_sta");
+        }
         if (!@hasDecl(Impl, "wifi_sta_scan_result")) {
             @compileError("zux.App.make requires Impl.wifi_sta_scan_result");
         }
@@ -266,6 +269,7 @@ pub fn make(comptime Impl: type) type {
         _ = @as(*const fn (*Impl, impl_periph_label, drivers.wifi.Sta.ScanConfig) anyerror!void, &Impl.start_wifi_sta_scan);
         _ = @as(*const fn (*Impl, impl_periph_label) anyerror!void, &Impl.stop_wifi_sta_scan);
         _ = @as(*const fn (*Impl, impl_periph_label, drivers.wifi.Sta.ConnectConfig) anyerror!void, &Impl.connect_wifi_sta);
+        _ = @as(*const fn (*Impl, impl_periph_label) anyerror!void, &Impl.disconnect_wifi_sta);
         _ = @as(*const fn (*Impl, impl_periph_label, drivers.wifi.Sta.ScanResult) anyerror!void, &Impl.wifi_sta_scan_result);
         _ = @as(*const fn (*Impl, impl_periph_label, drivers.wifi.Sta.LinkInfo) anyerror!void, &Impl.wifi_sta_connected);
         _ = @as(*const fn (*Impl, impl_periph_label, drivers.wifi.Sta.DisconnectInfo) anyerror!void, &Impl.wifi_sta_disconnected);
@@ -570,6 +574,10 @@ pub fn make(comptime Impl: type) type {
 
         pub fn connect_wifi_sta(self: *Self, label: PeriphLabel, config: Wifi.Sta.ConnectConfig) !void {
             try self.impl.connect_wifi_sta(label, config);
+        }
+
+        pub fn disconnect_wifi_sta(self: *Self, label: PeriphLabel) !void {
+            try self.impl.disconnect_wifi_sta(label);
         }
 
         pub fn nfc_found(self: *Self, label: PeriphLabel, uid: []const u8, card_type: nfc_api.CardType) !void {

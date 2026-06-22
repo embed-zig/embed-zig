@@ -25,6 +25,7 @@
 #define ESP_EMBED_WIFI_EVENT_GOT_IP 3
 #define ESP_EMBED_WIFI_EVENT_LOST_IP 4
 #define ESP_EMBED_WIFI_EVENT_SCAN_RESULT 5
+#define ESP_EMBED_WIFI_EVENT_SCAN_DONE_INTERNAL 100
 
 #define ESP_EMBED_WIFI_SECURITY_UNKNOWN 0
 #define ESP_EMBED_WIFI_SECURITY_OPEN 1
@@ -312,6 +313,8 @@ static void emit_event(const esp_embed_wifi_sta_event_t *event)
     }
 }
 
+static void emit_scan_results(void);
+
 static void event_task(void *arg)
 {
     (void)arg;
@@ -319,6 +322,13 @@ static void event_task(void *arg)
     esp_embed_wifi_sta_event_t event;
     while (true) {
         if (xQueueReceive(s_event_queue, &event, portMAX_DELAY) == pdTRUE) {
+            if (event.event == ESP_EMBED_WIFI_EVENT_SCAN_DONE_INTERNAL) {
+                emit_scan_results();
+                if (s_wifi_state == ESP_EMBED_WIFI_STATE_SCANNING) {
+                    s_wifi_state = ESP_EMBED_WIFI_STATE_IDLE;
+                }
+                continue;
+            }
             if (s_event_cb != NULL) {
                 ESP_LOGI(TAG, "dispatch event=%d", event.event);
                 s_event_cb(s_event_ctx, &event);
@@ -334,7 +344,9 @@ static void emit_scan_results(void)
     uint16_t count = 16;
     wifi_ap_record_t records[16] = { 0 };
 
-    if (esp_wifi_scan_get_ap_records(&count, records) != ESP_OK) {
+    esp_err_t records_err = esp_wifi_scan_get_ap_records(&count, records);
+    if (records_err != ESP_OK) {
+        ESP_LOGW(TAG, "scan_get_ap_records failed rc=%d", (int)records_err);
         return;
     }
 
@@ -370,10 +382,9 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
 
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_SCAN_DONE) {
         ESP_LOGI(TAG, "wifi event scan_done state=%s", state_name(s_wifi_state));
-        emit_scan_results();
-        if (s_wifi_state == ESP_EMBED_WIFI_STATE_SCANNING) {
-            s_wifi_state = ESP_EMBED_WIFI_STATE_IDLE;
-        }
+        esp_embed_wifi_sta_event_t event = { 0 };
+        event.event = ESP_EMBED_WIFI_EVENT_SCAN_DONE_INTERNAL;
+        emit_event(&event);
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED) {
         const wifi_event_sta_connected_t *event = (const wifi_event_sta_connected_t *)event_data;
         ESP_LOGI(

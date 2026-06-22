@@ -4,9 +4,16 @@ const binding = @import("binding.zig");
 
 const StaImpl = @This();
 const Sta = embed.drivers.wifi.Sta;
+const log = esp.grt.std.log.scoped(.esp_wifi_sta);
+const max_event_hooks = 4;
 
-hook_ctx: ?*anyopaque = null,
-hook_cb: ?*const fn (?*anyopaque, Sta.Event) void = null,
+const EventHook = struct {
+    ctx: ?*anyopaque,
+    cb: *const fn (?*anyopaque, Sta.Event) void,
+};
+
+event_hooks: [max_event_hooks]EventHook = undefined,
+event_hook_count: usize = 0,
 last_ip_info: ?Sta.IpInfo = null,
 
 pub fn init(self: *StaImpl) !void {
@@ -102,9 +109,18 @@ pub fn addEventHook(
     ctx: ?*anyopaque,
     cb: *const fn (?*anyopaque, Sta.Event) void,
 ) void {
-    esp.grt.std.log.scoped(.esp_wifi_sta).info("add event hook", .{});
-    self.hook_ctx = ctx;
-    self.hook_cb = cb;
+    for (self.event_hooks[0..self.event_hook_count]) |hook| {
+        if (hook.ctx == ctx and hook.cb == cb) return;
+    }
+    if (self.event_hook_count >= self.event_hooks.len) {
+        log.warn("drop event hook: capacity={d}", .{self.event_hooks.len});
+        return;
+    }
+    self.event_hooks[self.event_hook_count] = .{
+        .ctx = ctx,
+        .cb = cb,
+    };
+    self.event_hook_count += 1;
 }
 
 pub fn removeEventHook(
@@ -112,12 +128,15 @@ pub fn removeEventHook(
     ctx: ?*anyopaque,
     cb: *const fn (?*anyopaque, Sta.Event) void,
 ) void {
-    if (self.hook_ctx == ctx) {
-        if (self.hook_cb) |hook_cb| {
-            if (hook_cb == cb) {
-                self.hook_ctx = null;
-                self.hook_cb = null;
+    var index: usize = 0;
+    while (index < self.event_hook_count) : (index += 1) {
+        const hook = self.event_hooks[index];
+        if (hook.ctx == ctx and hook.cb == cb) {
+            self.event_hook_count -= 1;
+            if (index != self.event_hook_count) {
+                self.event_hooks[index] = self.event_hooks[self.event_hook_count];
             }
+            return;
         }
     }
 }
@@ -133,8 +152,7 @@ pub fn getIpInfo(self: *StaImpl) ?Sta.IpInfo {
 
 pub fn deinit(self: *StaImpl) void {
     binding.esp_embed_wifi_sta_set_event_handler(null, null);
-    self.hook_ctx = null;
-    self.hook_cb = null;
+    self.event_hook_count = 0;
     self.last_ip_info = null;
 }
 
@@ -176,11 +194,10 @@ fn powerSaveFromValue(mode: c_int, listen_interval: u16) ?Sta.PowerSave {
 fn dispatchEvent(ctx: ?*anyopaque, event: *const binding.Event) callconv(.c) void {
     const self: *StaImpl = @ptrCast(@alignCast(ctx orelse return));
     const sta_event = self.makeEvent(event) orelse return;
-    if (self.hook_cb) |cb| {
-        esp.grt.std.log.scoped(.esp_wifi_sta).info("dispatch hook event={s}", .{@tagName(sta_event)});
-        cb(self.hook_ctx, sta_event);
-    } else {
-        esp.grt.std.log.scoped(.esp_wifi_sta).warn("drop event without hook event={s}", .{@tagName(sta_event)});
+    if (self.event_hook_count != 0) {
+        for (self.event_hooks[0..self.event_hook_count]) |hook| {
+            hook.cb(hook.ctx, sta_event);
+        }
     }
 }
 
