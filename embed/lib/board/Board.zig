@@ -1,5 +1,6 @@
 const bt = @import("bt");
 const drivers = @import("drivers");
+const nfc_api = @import("nfc");
 const ledstrip = @import("ledstrip");
 const SpecType = @import("Spec.zig");
 
@@ -46,7 +47,7 @@ pub fn make(comptime grt: type, comptime spec: SpecType) type {
             imu: ?*const fn (ptr: *anyopaque, label: []const u8) anyerror!drivers.imu = null,
             ledStrip: ?*const fn (ptr: *anyopaque, label: []const u8) anyerror!ledstrip.LedStrip = null,
             modem: ?*const fn (ptr: *anyopaque, label: []const u8) anyerror!drivers.Modem = null,
-            nfc: ?*const fn (ptr: *anyopaque, label: []const u8) anyerror!drivers.nfc.Reader = null,
+            nfc: ?*const fn (ptr: *anyopaque, label: []const u8) anyerror!nfc_api.Reader = null,
             touch: ?*const fn (ptr: *anyopaque, label: []const u8) anyerror!drivers.Touch = null,
             wifiSta: ?*const fn (ptr: *anyopaque, label: []const u8) anyerror!drivers.wifi.Sta = null,
             wifiAp: ?*const fn (ptr: *anyopaque, label: []const u8) anyerror!drivers.wifi.Ap = null,
@@ -146,7 +147,7 @@ pub fn make(comptime grt: type, comptime spec: SpecType) type {
                     return error.Unsupported;
                 }
 
-                fn nfcFn(ptr: *anyopaque, label: []const u8) anyerror!drivers.nfc.Reader {
+                fn nfcFn(ptr: *anyopaque, label: []const u8) anyerror!nfc_api.Reader {
                     const self: *Impl = @ptrCast(@alignCast(ptr));
                     if (comptime @hasDecl(Impl, "nfc")) {
                         return self.nfc(label);
@@ -309,7 +310,7 @@ pub fn make(comptime grt: type, comptime spec: SpecType) type {
             return error.Unsupported;
         }
 
-        pub fn nfc(self: Board, label: []const u8) !drivers.nfc.Reader {
+        pub fn nfc(self: Board, label: []const u8) !nfc_api.Reader {
             if (self.vtable.nfc) |f| return f(self.ptr, label);
             return error.Unsupported;
         }
