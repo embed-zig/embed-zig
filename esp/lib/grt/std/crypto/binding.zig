@@ -111,6 +111,33 @@ pub extern fn espz_mbedtls_aes_gcm_state_decrypt(
     tag: [*]const u8,
     tag_len: usize,
 ) c_int;
+pub extern fn espz_mbedtls_aes_gcm_state_start(
+    ctx: *aes_gcm_context,
+    mode: c_int,
+    nonce: [*]const u8,
+    nonce_len: usize,
+) c_int;
+pub extern fn espz_mbedtls_aes_gcm_state_update_ad(
+    ctx: *aes_gcm_context,
+    ad: ?[*]const u8,
+    ad_len: usize,
+) c_int;
+pub extern fn espz_mbedtls_aes_gcm_state_update(
+    ctx: *aes_gcm_context,
+    input: ?[*]const u8,
+    input_len: usize,
+    output: ?[*]u8,
+) c_int;
+pub extern fn espz_mbedtls_aes_gcm_state_finish(
+    ctx: *aes_gcm_context,
+    tag: [*]u8,
+    tag_len: usize,
+) c_int;
+pub extern fn espz_mbedtls_aes_gcm_state_finish_decrypt(
+    ctx: *aes_gcm_context,
+    tag: [*]const u8,
+    tag_len: usize,
+) c_int;
 
 pub extern fn espz_mbedtls_chacha20poly1305_encrypt(
     key: [*]const u8,

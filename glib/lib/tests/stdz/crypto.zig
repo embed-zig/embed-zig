@@ -264,6 +264,7 @@ fn providedAeadStateTests(comptime std: type) !void {
     const key: [A.key_length]u8 = .{ 0x11, 0x22 };
     const nonce: [A.nonce_length]u8 = .{ 0x33, 0x44, 0x55 };
     try aeadStateRoundtrip(std, A, key, nonce, "provided state");
+    try providedAeadStreamingRoundtrip(std, A, key, nonce);
 }
 
 fn providedAeadImpl(comptime std: type) type {
@@ -274,6 +275,10 @@ fn providedAeadImpl(comptime std: type) type {
 
         pub const State = struct {
             key: [key_length]u8,
+            stream_tag: [tag_length]u8 = .{ 0, 0, 0, 0 },
+            npub: [nonce_length]u8 = .{ 0, 0, 0 },
+            stream_offset: usize = 0,
+            decrypting: bool = false,
 
             pub fn init(key: [key_length]u8) !State {
                 return .{ .key = key };
@@ -289,6 +294,44 @@ fn providedAeadImpl(comptime std: type) type {
 
             pub fn decrypt(self: *State, m: []u8, c: []const u8, tag: [tag_length]u8, ad: []const u8, npub: [nonce_length]u8) std.crypto.errors.AuthenticationError!void {
                 return decryptWithKey(m, c, tag, ad, npub, self.key);
+            }
+
+            pub fn startEncrypt(self: *State, npub: [nonce_length]u8, ad: []const u8) void {
+                self.start(npub, ad);
+                self.decrypting = false;
+            }
+
+            pub fn startDecrypt(self: *State, npub: [nonce_length]u8, ad: []const u8) void {
+                self.start(npub, ad);
+                self.decrypting = true;
+            }
+
+            pub fn update(self: *State, out: []u8, input: []const u8) void {
+                for (input, 0..) |b, i| {
+                    const stream_index = self.stream_offset + i;
+                    const out_byte = b ^ self.key[stream_index % self.key.len] ^ self.npub[stream_index % self.npub.len];
+                    out[i] = out_byte;
+                    const tag_byte = if (self.decrypting) b else out_byte;
+                    self.stream_tag[stream_index % self.stream_tag.len] ^= tag_byte;
+                }
+                self.stream_offset += input.len;
+            }
+
+            pub fn finishEncrypt(self: *State, tag: *[tag_length]u8) void {
+                tag.* = self.stream_tag;
+            }
+
+            pub fn finishDecrypt(self: *State, tag: [tag_length]u8) std.crypto.errors.AuthenticationError!void {
+                if (!std.mem.eql(u8, &self.stream_tag, &tag)) return error.AuthenticationFailed;
+            }
+
+            fn start(self: *State, npub: [nonce_length]u8, ad: []const u8) void {
+                self.stream_tag = .{ 0, 0, 0, 0 };
+                self.npub = npub;
+                self.stream_offset = 0;
+                for (ad, 0..) |b, i| self.stream_tag[i % self.stream_tag.len] ^= b;
+                for (npub, 0..) |b, i| self.stream_tag[i % self.stream_tag.len] ^= b;
+                for (self.key, 0..) |b, i| self.stream_tag[i % self.stream_tag.len] ^= b;
             }
         };
 
@@ -319,6 +362,55 @@ fn providedAeadImpl(comptime std: type) type {
             return tag;
         }
     };
+}
+
+fn providedAeadStreamingRoundtrip(
+    comptime std: type,
+    comptime A: type,
+    key: [A.key_length]u8,
+    nonce: [A.nonce_length]u8,
+) !void {
+    if (!@hasDecl(A.State, "startEncrypt")) return error.AeadStreamingMissingStartEncrypt;
+    if (!@hasDecl(A.State, "startDecrypt")) return error.AeadStreamingMissingStartDecrypt;
+    if (!@hasDecl(A.State, "update")) return error.AeadStreamingMissingUpdate;
+    if (!@hasDecl(A.State, "finishEncrypt")) return error.AeadStreamingMissingFinishEncrypt;
+    if (!@hasDecl(A.State, "finishDecrypt")) return error.AeadStreamingMissingFinishDecrypt;
+
+    const plaintext = "streaming provided state";
+    const ad = "stream-ad";
+
+    var encrypt_state = try A.State.init(key);
+    defer encrypt_state.deinit();
+
+    var ciphertext: [plaintext.len]u8 = undefined;
+    var tag: [A.tag_length]u8 = undefined;
+    encrypt_state.startEncrypt(nonce, ad);
+    encrypt_state.update(ciphertext[0..9], plaintext[0..9]);
+    encrypt_state.update(ciphertext[9..], plaintext[9..]);
+    encrypt_state.finishEncrypt(&tag);
+
+    var decrypt_state = try A.State.init(key);
+    defer decrypt_state.deinit();
+
+    var decrypted: [plaintext.len]u8 = undefined;
+    decrypt_state.startDecrypt(nonce, ad);
+    decrypt_state.update(decrypted[0..7], ciphertext[0..7]);
+    decrypt_state.update(decrypted[7..], ciphertext[7..]);
+    try decrypt_state.finishDecrypt(tag);
+    if (!std.mem.eql(u8, plaintext, &decrypted)) return error.AeadStreamingDecryptMismatch;
+
+    var bad_tag = tag;
+    bad_tag[0] ^= 0xff;
+    var bad_state = try A.State.init(key);
+    defer bad_state.deinit();
+    var bad_decrypted: [plaintext.len]u8 = undefined;
+    bad_state.startDecrypt(nonce, ad);
+    bad_state.update(&bad_decrypted, &ciphertext);
+    if (bad_state.finishDecrypt(bad_tag)) |_| {
+        return error.AeadStreamingShouldFailBadTag;
+    } else |err| switch (err) {
+        error.AuthenticationFailed => {},
+    }
 }
 
 fn randomTests(comptime std: type) !void {

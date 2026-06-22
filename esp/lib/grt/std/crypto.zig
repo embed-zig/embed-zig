@@ -715,6 +715,49 @@ fn AesGcm(comptime key_bits: comptime_int) type {
         pub const tag_length: usize = 16;
         pub const nonce_length: usize = 12;
         pub const key_length: usize = key_bits / 8;
+        pub const Binding = struct {
+            pub fn encrypt(c: []u8, tag: *[tag_length]u8, m: []const u8, ad: []const u8, npub: [nonce_length]u8, key: [key_length]u8) void {
+                glib.std.debug.assert(c.len == m.len);
+                const ad_ptr: ?[*]const u8 = if (ad.len == 0) null else ad.ptr;
+                const msg_ptr: ?[*]const u8 = if (m.len == 0) null else m.ptr;
+                const out_ptr: ?[*]u8 = if (c.len == 0) null else c.ptr;
+                const rc = binding.espz_mbedtls_aes_gcm_encrypt(
+                    key_bits,
+                    &key,
+                    &npub,
+                    npub.len,
+                    ad_ptr,
+                    ad.len,
+                    msg_ptr,
+                    m.len,
+                    out_ptr,
+                    tag,
+                    tag_length,
+                );
+                panicOnNonZero(rc, "mbedTLS AES-GCM binding encrypt failed");
+            }
+
+            pub fn decrypt(m: []u8, c: []const u8, tag: [tag_length]u8, ad: []const u8, npub: [nonce_length]u8, key: [key_length]u8) AuthenticationError!void {
+                glib.std.debug.assert(m.len == c.len);
+                const ad_ptr: ?[*]const u8 = if (ad.len == 0) null else ad.ptr;
+                const msg_ptr: ?[*]const u8 = if (c.len == 0) null else c.ptr;
+                const out_ptr: ?[*]u8 = if (m.len == 0) null else m.ptr;
+                const rc = binding.espz_mbedtls_aes_gcm_decrypt(
+                    key_bits,
+                    &key,
+                    &npub,
+                    npub.len,
+                    ad_ptr,
+                    ad.len,
+                    msg_ptr,
+                    c.len,
+                    out_ptr,
+                    &tag,
+                    tag_length,
+                );
+                if (rc != 0) return error.AuthenticationFailed;
+            }
+        };
         pub const State = struct {
             ctx: binding.aes_gcm_context = undefined,
 
@@ -768,6 +811,45 @@ fn AesGcm(comptime key_bits: comptime_int) type {
                     tag_length,
                 );
                 if (rc != 0) return error.AuthenticationFailed;
+            }
+
+            pub fn startEncrypt(self: *@This(), npub: [nonce_length]u8, ad: []const u8) void {
+                self.start(0, npub, ad);
+            }
+
+            pub fn startDecrypt(self: *@This(), npub: [nonce_length]u8, ad: []const u8) void {
+                self.start(1, npub, ad);
+            }
+
+            pub fn update(self: *@This(), out: []u8, input: []const u8) void {
+                glib.std.debug.assert(out.len == input.len);
+                const msg_ptr: ?[*]const u8 = if (input.len == 0) null else input.ptr;
+                const out_ptr: ?[*]u8 = if (out.len == 0) null else out.ptr;
+                const rc = binding.espz_mbedtls_aes_gcm_state_update(
+                    &self.ctx,
+                    msg_ptr,
+                    input.len,
+                    out_ptr,
+                );
+                panicOnNonZero(rc, "mbedTLS AES-GCM state update failed");
+            }
+
+            pub fn finishEncrypt(self: *@This(), tag: *[tag_length]u8) void {
+                const rc = binding.espz_mbedtls_aes_gcm_state_finish(&self.ctx, tag, tag_length);
+                panicOnNonZero(rc, "mbedTLS AES-GCM state finish encrypt failed");
+            }
+
+            pub fn finishDecrypt(self: *@This(), tag: [tag_length]u8) AuthenticationError!void {
+                const rc = binding.espz_mbedtls_aes_gcm_state_finish_decrypt(&self.ctx, &tag, tag_length);
+                if (rc != 0) return error.AuthenticationFailed;
+            }
+
+            fn start(self: *@This(), mode: c_int, npub: [nonce_length]u8, ad: []const u8) void {
+                const rc = binding.espz_mbedtls_aes_gcm_state_start(&self.ctx, mode, &npub, npub.len);
+                panicOnNonZero(rc, "mbedTLS AES-GCM state start failed");
+                const ad_ptr: ?[*]const u8 = if (ad.len == 0) null else ad.ptr;
+                const ad_rc = binding.espz_mbedtls_aes_gcm_state_update_ad(&self.ctx, ad_ptr, ad.len);
+                panicOnNonZero(ad_rc, "mbedTLS AES-GCM state update ad failed");
             }
         };
 

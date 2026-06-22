@@ -1338,6 +1338,89 @@ int espz_mbedtls_aes_gcm_state_decrypt(
 #endif
 }
 
+int espz_mbedtls_aes_gcm_state_start(
+    espz_mbedtls_aes_gcm_context *ctx,
+    int mode,
+    const unsigned char *nonce,
+    size_t nonce_len
+) {
+#if defined(ESP_PLATFORM)
+    return esp_aes_gcm_starts(espz_aes_gcm_ctx(ctx), mode == 0 ? MBEDTLS_GCM_ENCRYPT : MBEDTLS_GCM_DECRYPT, nonce, nonce_len);
+#else
+    return mbedtls_gcm_starts(espz_aes_gcm_ctx(ctx), mode == 0 ? MBEDTLS_GCM_ENCRYPT : MBEDTLS_GCM_DECRYPT, nonce, nonce_len);
+#endif
+}
+
+int espz_mbedtls_aes_gcm_state_update_ad(
+    espz_mbedtls_aes_gcm_context *ctx,
+    const unsigned char *ad,
+    size_t ad_len
+) {
+#if defined(ESP_PLATFORM)
+    return esp_aes_gcm_update_ad(espz_aes_gcm_ctx(ctx), ad, ad_len);
+#else
+    return mbedtls_gcm_update_ad(espz_aes_gcm_ctx(ctx), ad, ad_len);
+#endif
+}
+
+int espz_mbedtls_aes_gcm_state_update(
+    espz_mbedtls_aes_gcm_context *ctx,
+    const unsigned char *input,
+    size_t input_len,
+    unsigned char *output
+) {
+    unsigned char empty_input = 0;
+    unsigned char empty_output = 0;
+    const unsigned char *safe_input = input_len == 0 && input == NULL ? &empty_input : input;
+    unsigned char *safe_output = input_len == 0 && output == NULL ? &empty_output : output;
+#if defined(ESP_PLATFORM)
+    size_t olen = 0;
+    return esp_aes_gcm_update(espz_aes_gcm_ctx(ctx), safe_input, input_len, safe_output, 0, &olen);
+#else
+    size_t olen = 0;
+    return mbedtls_gcm_update(espz_aes_gcm_ctx(ctx), safe_input, input_len, safe_output, input_len, &olen);
+#endif
+}
+
+int espz_mbedtls_aes_gcm_state_finish(
+    espz_mbedtls_aes_gcm_context *ctx,
+    unsigned char *tag,
+    size_t tag_len
+) {
+    if (tag_len > 16) {
+        return MBEDTLS_ERR_GCM_BAD_INPUT;
+    }
+#if defined(ESP_PLATFORM)
+    unsigned char empty_output = 0;
+    size_t olen = 0;
+    return esp_aes_gcm_finish(espz_aes_gcm_ctx(ctx), &empty_output, 0, &olen, tag, tag_len);
+#else
+    return mbedtls_gcm_finish(espz_aes_gcm_ctx(ctx), tag, tag_len);
+#endif
+}
+
+int espz_mbedtls_aes_gcm_state_finish_decrypt(
+    espz_mbedtls_aes_gcm_context *ctx,
+    const unsigned char *tag,
+    size_t tag_len
+) {
+    if (tag_len > 16) {
+        return MBEDTLS_ERR_GCM_BAD_INPUT;
+    }
+    unsigned char check_tag[16] = {0};
+#if defined(ESP_PLATFORM)
+    unsigned char empty_output = 0;
+    size_t olen = 0;
+    int ret = esp_aes_gcm_finish(espz_aes_gcm_ctx(ctx), &empty_output, 0, &olen, check_tag, tag_len);
+#else
+    int ret = mbedtls_gcm_finish(espz_aes_gcm_ctx(ctx), check_tag, tag_len);
+#endif
+    if (ret != 0) {
+        return ret;
+    }
+    return mbedtls_ct_memcmp(check_tag, tag, tag_len) == 0 ? 0 : MBEDTLS_ERR_GCM_AUTH_FAILED;
+}
+
 int espz_mbedtls_chacha20poly1305_encrypt(
     const unsigned char *key,
     const unsigned char *nonce,

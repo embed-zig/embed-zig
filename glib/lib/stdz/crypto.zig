@@ -223,6 +223,7 @@ fn makeAead(comptime Impl: type) type {
     }
 
     return struct {
+        pub const Inner = Impl;
         pub const tag_length = Impl.tag_length;
         pub const nonce_length = Impl.nonce_length;
         pub const key_length = Impl.key_length;
@@ -250,6 +251,62 @@ fn makeProvidedAeadState(comptime StateImpl: type, comptime Impl: type) type {
             *const fn (*StateImpl, []u8, []const u8, [Impl.tag_length]u8, []const u8, [Impl.nonce_length]u8) re_export.AuthenticationError!void,
             &StateImpl.decrypt,
         );
+    }
+
+    const has_streaming = comptime @hasDecl(StateImpl, "startEncrypt") and
+        @hasDecl(StateImpl, "startDecrypt") and
+        @hasDecl(StateImpl, "update") and
+        @hasDecl(StateImpl, "finishEncrypt") and
+        @hasDecl(StateImpl, "finishDecrypt");
+
+    if (has_streaming) {
+        comptime {
+            _ = @as(*const fn (*StateImpl, [Impl.nonce_length]u8, []const u8) void, &StateImpl.startEncrypt);
+            _ = @as(*const fn (*StateImpl, [Impl.nonce_length]u8, []const u8) void, &StateImpl.startDecrypt);
+            _ = @as(*const fn (*StateImpl, []u8, []const u8) void, &StateImpl.update);
+            _ = @as(*const fn (*StateImpl, *[Impl.tag_length]u8) void, &StateImpl.finishEncrypt);
+            _ = @as(*const fn (*StateImpl, [Impl.tag_length]u8) re_export.AuthenticationError!void, &StateImpl.finishDecrypt);
+        }
+
+        return struct {
+            impl: StateImpl,
+
+            pub fn init(key: [Impl.key_length]u8) !@This() {
+                return .{ .impl = try StateImpl.init(key) };
+            }
+
+            pub fn deinit(self: *@This()) void {
+                self.impl.deinit();
+            }
+
+            pub fn encrypt(self: *@This(), c: []u8, tag: *[Impl.tag_length]u8, m: []const u8, ad: []const u8, npub: [Impl.nonce_length]u8) void {
+                self.impl.encrypt(c, tag, m, ad, npub);
+            }
+
+            pub fn decrypt(self: *@This(), m: []u8, c: []const u8, tag: [Impl.tag_length]u8, ad: []const u8, npub: [Impl.nonce_length]u8) re_export.AuthenticationError!void {
+                return self.impl.decrypt(m, c, tag, ad, npub);
+            }
+
+            pub fn startEncrypt(self: *@This(), npub: [Impl.nonce_length]u8, ad: []const u8) void {
+                self.impl.startEncrypt(npub, ad);
+            }
+
+            pub fn startDecrypt(self: *@This(), npub: [Impl.nonce_length]u8, ad: []const u8) void {
+                self.impl.startDecrypt(npub, ad);
+            }
+
+            pub fn update(self: *@This(), out: []u8, input: []const u8) void {
+                self.impl.update(out, input);
+            }
+
+            pub fn finishEncrypt(self: *@This(), tag: *[Impl.tag_length]u8) void {
+                self.impl.finishEncrypt(tag);
+            }
+
+            pub fn finishDecrypt(self: *@This(), tag: [Impl.tag_length]u8) re_export.AuthenticationError!void {
+                return self.impl.finishDecrypt(tag);
+            }
+        };
     }
 
     return struct {
