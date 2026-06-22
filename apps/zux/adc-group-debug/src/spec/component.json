@@ -1,0 +1,20 @@
+{
+  "kind": "Doc",
+  "spec": [
+    {
+      "kind": "Component/button/grouped",
+      "spec": {
+        "label": "keys",
+        "id": 2,
+        "button_count": 7
+      }
+    },
+    {
+      "kind": "Component/display",
+      "spec": {
+        "label": "display",
+        "id": 3
+      }
+    }
+  ]
+}

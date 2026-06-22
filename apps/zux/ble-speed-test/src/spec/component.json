@@ -1,0 +1,26 @@
+{
+  "kind": "Doc",
+  "spec": [
+    {
+      "kind": "Component/bt",
+      "spec": {
+        "label": "bt",
+        "id": 1
+      }
+    },
+    {
+      "kind": "Component/display",
+      "spec": {
+        "label": "display",
+        "id": 2
+      }
+    },
+    {
+      "kind": "Component/button/single",
+      "spec": {
+        "label": "boot",
+        "id": 3
+      }
+    }
+  ]
+}

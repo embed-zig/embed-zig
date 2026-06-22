@@ -1,0 +1,14 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "server rx old packet counts reordered or duplicate",
+    "description": "An old RX sequence is counted as reordered or duplicate and does not rewind the expected sequence.",
+    "initial_state": {
+      "boot": {},
+      "display": { "enabled": true, "brightness": 255 },
+      "ble_link": { "role": "server", "phase": "running", "connected": true, "subscribed": false, "conn_handle": 64, "conn_interval": 24, "att_mtu": 256, "payload_len": 253, "service_uuid": 65248, "tx_char_uuid": 65249, "rx_char_uuid": 65250, "last_error_code": 0 },
+      "tx_stats": { "running": true, "window_ms": 1000, "tx_seq": 0, "rx_expected_seq": 8, "tx_bytes_total": 0, "rx_bytes_total": 2048, "tx_packets_total": 0, "rx_packets_total": 8, "rx_lost_packets": 0, "rx_reordered_packets": 0, "rx_duplicate_packets": 0, "tx_bps": 0, "rx_bps": 0, "tx_pps": 0, "rx_pps": 0 }
+    },
+    "steps": [ { "inputs": [ { "custom": { "type": "ble_speed_test.rx_packet", "source_id": 1, "payload": { "seq": 6, "bytes": 253, "window_ms": 1000 } } } ], "outputs": [ { "label": "tx_stats", "state": { "rx_expected_seq": 8, "rx_reordered_packets": 1 } } ] } ]
+  }
+}

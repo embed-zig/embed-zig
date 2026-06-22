@@ -1,0 +1,111 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "button click resets stats",
+    "description": "A physical button click emits a custom reset event and clears all throughput counters without stopping the transfer.",
+    "initial_state": {
+      "boot": {},
+      "display": {
+        "enabled": true,
+        "brightness": 255
+      },
+      "ble_link": {
+        "role": "client",
+        "phase": "running",
+        "connected": true,
+        "subscribed": true,
+        "conn_handle": 64,
+        "conn_interval": 24,
+        "att_mtu": 256,
+        "payload_len": 253,
+        "service_uuid": 65248,
+        "tx_char_uuid": 65249,
+        "rx_char_uuid": 65250,
+        "last_error_code": 0
+      },
+      "tx_stats": {
+        "running": true,
+        "window_ms": 1000,
+        "tx_seq": 77,
+        "rx_expected_seq": 99,
+        "tx_bytes_total": 8192,
+        "rx_bytes_total": 4096,
+        "tx_packets_total": 32,
+        "rx_packets_total": 16,
+        "rx_lost_packets": 4,
+        "rx_reordered_packets": 2,
+        "rx_duplicate_packets": 1,
+        "tx_bps": 65536,
+        "rx_bps": 32768,
+        "tx_pps": 32,
+        "rx_pps": 16
+      }
+    },
+    "steps": [
+      {
+        "inputs": [
+          {
+            "raw_single_button": {
+              "source_id": 3,
+              "pressed": true
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 20000000,
+          "n": 1
+        }
+      },
+      {
+        "inputs": [
+          {
+            "raw_single_button": {
+              "source_id": 3,
+              "pressed": false
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 400000000,
+          "n": 1
+        },
+        "outputs": [
+          {
+            "label": "boot",
+            "state": {
+              "source_id": 3,
+              "button_id": null,
+              "gesture_kind": "click",
+              "click_count": 1,
+              "long_press": 0
+            }
+          },
+          {
+            "label": "tx_stats",
+            "state": {
+              "running": true,
+              "window_ms": 1000,
+              "tx_seq": 0,
+              "rx_expected_seq": 0,
+              "tx_bytes_total": 0,
+              "rx_bytes_total": 0,
+              "tx_packets_total": 0,
+              "rx_packets_total": 0,
+              "rx_lost_packets": 0,
+              "rx_reordered_packets": 0,
+              "rx_duplicate_packets": 0,
+              "tx_bps": 0,
+              "rx_bps": 0,
+              "tx_pps": 0,
+              "rx_pps": 0
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

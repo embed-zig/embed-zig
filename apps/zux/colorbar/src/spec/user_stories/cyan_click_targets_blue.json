@@ -1,0 +1,45 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "cyan click targets blue",
+    "description": "Given cyan, a boot click changes scene.current to blue.",
+    "initial_state": {
+      "boot": {},
+      "display": {
+        "enabled": true,
+        "brightness": 255
+      },
+      "scene": {
+        "current": "cyan"
+      }
+    },
+    "steps": [
+      {
+        "inputs": [
+          {
+            "button_gesture": {
+              "source_id": 1,
+              "gesture": {
+                "click": 1
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "current": "blue"
+            }
+          },
+          {
+            "label": "display_driver",
+            "state": {
+              "rendered": true
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

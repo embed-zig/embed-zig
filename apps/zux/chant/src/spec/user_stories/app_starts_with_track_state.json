@@ -1,0 +1,62 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "app starts with track state",
+    "description": "The app starts playing with player.selected pointing at Twinkle.",
+    "initial_state": {
+      "play_pause": {},
+      "boot": {},
+      "next": {},
+      "previous": {},
+      "volume_up": {},
+      "volume_down": {},
+      "controls": {},
+      "touch": {},
+      "audio": {
+        "started": true,
+        "gain_db": 0,
+        "min_gain_db": -60,
+        "max_gain_db": 6,
+        "gain_step_db": 1
+      },
+      "display": {
+        "enabled": true,
+        "brightness": 255
+      },
+      "player": {
+        "playing": true,
+        "recording": false,
+        "selected": "twinkle",
+        "loop": true
+      },
+      "playback": {
+        "progress_pct": 0
+      }
+    },
+    "steps": [
+      {
+        "outputs": [
+          {
+            "label": "player",
+            "state": {
+              "selected": "twinkle",
+              "loop": true,
+              "playing": true,
+              "recording": false
+            }
+          },
+          {
+            "label": "audio",
+            "state": {
+              "started": true,
+              "gain_db": 0,
+              "min_gain_db": -60,
+              "max_gain_db": 6,
+              "gain_step_db": 1
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

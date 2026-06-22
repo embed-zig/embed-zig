@@ -1,0 +1,78 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "raw grouped button updates debug state",
+    "description": "Raw grouped button events update the debug store and produce a click gesture after release.",
+    "initial_state": {
+      "keys": {},
+      "display": {
+        "enabled": true,
+        "brightness": 255
+      },
+      "debug": {
+        "raw_id": 999,
+        "raw_pressed": false,
+        "raw_events": 0,
+        "gesture_id": 999,
+        "gesture_events": 0,
+        "click_count": 0
+      }
+    },
+    "steps": [
+      {
+        "inputs": [
+          {
+            "raw_grouped_button": {
+              "source_id": 2,
+              "button_id": 4,
+              "pressed": true
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "debug",
+            "state": {
+              "raw_id": 4,
+              "raw_pressed": true,
+              "raw_events": 1,
+              "gesture_id": 999,
+              "gesture_events": 0,
+              "click_count": 0
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "raw_grouped_button": {
+              "source_id": 2,
+              "button_id": 4,
+              "pressed": false
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 400000000,
+          "n": 1
+        },
+        "outputs": [
+          {
+            "label": "debug",
+            "state": {
+              "raw_id": 4,
+              "raw_pressed": false,
+              "raw_events": 2,
+              "gesture_id": 4,
+              "gesture_events": 1,
+              "click_count": 1
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

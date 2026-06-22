@@ -1,0 +1,30 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "idle keeps current scene",
+    "description": "Without a boot click, scene.current stays unchanged.",
+    "initial_state": {
+      "boot": {},
+      "keys": {},
+      "display": {
+        "enabled": true,
+        "brightness": 255
+      },
+      "scene": {
+        "current": "green"
+      }
+    },
+    "steps": [
+      {
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "current": "green"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

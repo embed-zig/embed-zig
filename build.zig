@@ -3,6 +3,8 @@ const build_modules = @import("build/modules.zig");
 const build_tests = @import("tests/build.zig");
 const esp_build = @import("esp/build.zig");
 
+pub const esp = esp_build;
+
 pub const desktop = struct {
     pub const macos = @import("build/desktop/macos.zig");
 };
@@ -82,6 +84,11 @@ pub fn build(b: *std.Build) void {
         if (std.mem.startsWith(u8, module_spec.dependency_module_name, "zux_")) {
             app_mod.addImport("embed", embed);
             app_mod.addImport("lvgl", apps_lvgl);
+        }
+        if (std.mem.eql(u8, module_spec.dependency_module_name, "zux_kcp-test") or
+            std.mem.eql(u8, module_spec.dependency_module_name, "zux_netperf"))
+        {
+            app_mod.addImport("kcp", thirdparty_dep.module("kcp"));
         }
         b.modules.put(module_spec.export_name, app_mod) catch @panic("OOM");
     }

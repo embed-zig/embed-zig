@@ -1,0 +1,14 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "client starts scanning",
+    "description": "Client starts in scanning phase and renders the Display.",
+    "initial_state": {
+      "boot": {},
+      "display": { "enabled": true, "brightness": 255 },
+      "ble_link": { "role": "client", "phase": "scanning", "connected": false, "subscribed": false, "conn_handle": 0, "conn_interval": 0, "att_mtu": 23, "payload_len": 20, "service_uuid": 65248, "tx_char_uuid": 65249, "rx_char_uuid": 65250, "last_error_code": 0 },
+      "tx_stats": { "running": false, "window_ms": 1000, "tx_seq": 0, "rx_expected_seq": 0, "tx_bytes_total": 0, "rx_bytes_total": 0, "tx_packets_total": 0, "rx_packets_total": 0, "rx_lost_packets": 0, "rx_reordered_packets": 0, "rx_duplicate_packets": 0, "tx_bps": 0, "rx_bps": 0, "tx_pps": 0, "rx_pps": 0 }
+    },
+    "steps": [ { "outputs": [ { "label": "ble_link", "state": { "role": "client", "phase": "scanning", "connected": false } } ] } ]
+  }
+}

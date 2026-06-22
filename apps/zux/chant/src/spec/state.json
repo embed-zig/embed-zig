@@ -1,0 +1,56 @@
+{
+  "kind": "Doc",
+  "spec": [
+    {
+      "kind": "Store",
+      "spec": {
+        "label": "player",
+        "state": {
+          "playing": "bool",
+          "recording": "bool",
+          "selected": {
+            "enum": {
+              "type": "u8",
+              "values": [
+                "twinkle",
+                "happy_birthday",
+                "doll_bear"
+              ]
+            }
+          },
+          "loop": "bool"
+        }
+      }
+    },
+    {
+      "kind": "Store",
+      "spec": {
+        "label": "playback",
+        "state": {
+          "progress_pct": "u8"
+        }
+      }
+    },
+    {
+      "kind": "StatePath",
+      "spec": {
+        "path": "app/control",
+        "labels": [
+          "audio",
+          "player"
+        ]
+      }
+    },
+    {
+      "kind": "StatePath",
+      "spec": {
+        "path": "app/ui",
+        "labels": [
+          "audio",
+          "player",
+          "playback"
+        ]
+      }
+    }
+  ]
+}

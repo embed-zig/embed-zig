@@ -1,0 +1,20 @@
+{
+  "kind": "Doc",
+  "spec": [
+    {
+      "kind": "Reducer",
+      "spec": {
+        "label": "debug_reducer",
+        "fn_name": "Debug.reduce"
+      }
+    },
+    {
+      "kind": "Render",
+      "spec": {
+        "label": "debug_render",
+        "state_path": "app/ui",
+        "fn_name": "Debug.render"
+      }
+    }
+  ]
+}

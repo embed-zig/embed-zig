@@ -1,0 +1,28 @@
+{
+  "kind": "Doc",
+  "spec": [
+    {
+      "kind": "Reducer",
+      "spec": {
+        "label": "app_reducer",
+        "fn_name": "Reducers.reduce"
+      }
+    },
+    {
+      "kind": "Render",
+      "spec": {
+        "label": "app_sync",
+        "state_path": "app/control",
+        "fn_name": "Renders.control.render"
+      }
+    },
+    {
+      "kind": "Render",
+      "spec": {
+        "label": "app_render",
+        "state_path": "app/ui",
+        "fn_name": "Renders.ui.render"
+      }
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "kind": "Doc",
+  "spec": [
+    {
+      "kind": "Store",
+      "spec": {
+        "label": "debug",
+        "state": {
+          "raw_id": "u32",
+          "raw_pressed": "bool",
+          "raw_events": "u32",
+          "gesture_id": "u32",
+          "gesture_events": "u32",
+          "click_count": "u32"
+        }
+      }
+    },
+    {
+      "kind": "StatePath",
+      "spec": {
+        "path": "app/ui",
+        "labels": [
+          "debug"
+        ]
+      }
+    }
+  ]
+}

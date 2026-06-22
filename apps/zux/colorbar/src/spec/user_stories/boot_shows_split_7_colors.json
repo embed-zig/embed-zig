@@ -1,0 +1,42 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "boot shows split 7 colors",
+    "description": "The app starts with scene.current set to split_7_colors and renders the display.",
+    "initial_state": {
+      "boot": {},
+      "display": {
+        "enabled": true,
+        "brightness": 255
+      },
+      "scene": {
+        "current": "split_7_colors"
+      }
+    },
+    "steps": [
+      {
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "current": "split_7_colors"
+            }
+          },
+          {
+            "label": "display",
+            "state": {
+              "enabled": true,
+              "brightness": 255
+            }
+          },
+          {
+            "label": "display_driver",
+            "state": {
+              "rendered": true
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

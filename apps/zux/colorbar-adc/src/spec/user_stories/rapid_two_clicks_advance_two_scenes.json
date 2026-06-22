@@ -1,0 +1,71 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "rapid two clicks advance two scenes",
+    "description": "Two boot clicks advance scene.current by two steps in order.",
+    "initial_state": {
+      "boot": {},
+      "display": {
+        "enabled": true,
+        "brightness": 255
+      },
+      "scene": {
+        "current": "split_7_colors"
+      }
+    },
+    "steps": [
+      {
+        "inputs": [
+          {
+            "button_gesture": {
+              "source_id": 1,
+              "gesture": {
+                "click": 1
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "current": "red"
+            }
+          },
+          {
+            "label": "display_driver",
+            "state": {
+              "rendered": true
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "button_gesture": {
+              "source_id": 1,
+              "gesture": {
+                "click": 1
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "current": "orange"
+            }
+          },
+          {
+            "label": "display_driver",
+            "state": {
+              "rendered": true
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

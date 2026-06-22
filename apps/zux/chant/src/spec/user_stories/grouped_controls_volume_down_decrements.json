@@ -1,0 +1,117 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "grouped controls volume down decrements",
+    "description": "When raw grouped Controls button id 5 is clicked, Volume Down decreases audio.gain_db by one step.",
+    "initial_state": {
+      "play_pause": {},
+      "boot": {},
+      "next": {},
+      "previous": {},
+      "volume_up": {},
+      "volume_down": {},
+      "controls": {},
+      "touch": {},
+      "audio": {
+        "started": true,
+        "gain_db": 0,
+        "min_gain_db": -60,
+        "max_gain_db": 6,
+        "gain_step_db": 1
+      },
+      "display": {
+        "enabled": true,
+        "brightness": 255
+      },
+      "player": {
+        "playing": true,
+        "recording": false,
+        "selected": "doll_bear",
+        "loop": true
+      },
+      "playback": {
+        "progress_pct": 0
+      }
+    },
+    "steps": [
+      {
+        "inputs": [
+          {
+            "raw_grouped_button": {
+              "source_id": 10,
+              "button_id": 5,
+              "pressed": true
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 20000000,
+          "n": 1
+        }
+      },
+      {
+        "inputs": [
+          {
+            "raw_grouped_button": {
+              "source_id": 10,
+              "button_id": 5,
+              "pressed": false
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 400000000,
+          "n": 1
+        },
+        "outputs": [
+          {
+            "label": "controls",
+            "state": {
+              "source_id": 10,
+              "button_id": 5,
+              "gesture_kind": "click",
+              "click_count": 1,
+              "long_press": 0
+            }
+          },
+          {
+            "label": "player",
+            "state": {
+              "playing": true,
+              "recording": false,
+              "selected": "doll_bear",
+              "loop": true
+            }
+          },
+          {
+            "label": "audio",
+            "state": {
+              "started": true,
+              "gain_db": -1,
+              "min_gain_db": -60,
+              "max_gain_db": 6,
+              "gain_step_db": 1
+            }
+          },
+          {
+            "label": "display",
+            "state": {
+              "enabled": true,
+              "brightness": 255
+            }
+          },
+          {
+            "label": "display_driver",
+            "state": {
+              "rendered": true
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

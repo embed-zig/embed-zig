@@ -1,0 +1,86 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "playing play pause pauses",
+    "description": "When the player is playing, Play/Pause pauses playback without changing player.selected or audio.gain_db.",
+    "initial_state": {
+      "play_pause": {},
+      "boot": {},
+      "next": {},
+      "previous": {},
+      "volume_up": {},
+      "volume_down": {},
+      "controls": {},
+      "touch": {},
+      "audio": {
+        "started": true,
+        "gain_db": 0,
+        "min_gain_db": -60,
+        "max_gain_db": 6,
+        "gain_step_db": 1
+      },
+      "display": {
+        "enabled": true,
+        "brightness": 255
+      },
+      "player": {
+        "playing": true,
+        "recording": false,
+        "selected": "happy_birthday",
+        "loop": true
+      },
+      "playback": {
+        "progress_pct": 0
+      }
+    },
+    "steps": [
+      {
+        "inputs": [
+          {
+            "button_gesture": {
+              "source_id": 1,
+              "button_id": null,
+              "gesture": {
+                "click": 1
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "player",
+            "state": {
+              "playing": false,
+              "recording": false,
+              "selected": "happy_birthday",
+              "loop": true
+            }
+          },
+          {
+            "label": "audio",
+            "state": {
+              "started": false,
+              "gain_db": 0,
+              "min_gain_db": -60,
+              "max_gain_db": 6,
+              "gain_step_db": 1
+            }
+          },
+          {
+            "label": "display",
+            "state": {
+              "enabled": true,
+              "brightness": 255
+            }
+          },
+          {
+            "label": "display_driver",
+            "state": {
+              "rendered": true
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

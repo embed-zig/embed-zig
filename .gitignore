@@ -4,14 +4,24 @@ openteam/
 # Zig build outputs
 .*zig-*/
 zig-out/
+zig-out*/
 *.o
 .build*/
 
 # Tool state and reports
 .tmp/
+.logs/
 .claude/
 test-results/
 playwright-report/
+Debug_bk_flash*.log
+bk_flash*.log
+desktop/ui/openapi-ts-error-*.log
+
+# Local firmware/build outputs
+build-esp32c6-sdio/
+build-p4-slave-ota*/
+examples/esp/launcher/build-*/
 
 # Local machine files
 .DS_Store

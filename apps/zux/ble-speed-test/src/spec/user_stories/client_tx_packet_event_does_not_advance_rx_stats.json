@@ -1,0 +1,14 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "client tx packet event does not advance rx stats",
+    "description": "A client TX packet custom event does not mutate RX counters.",
+    "initial_state": {
+      "boot": {},
+      "display": { "enabled": true, "brightness": 255 },
+      "ble_link": { "role": "client", "phase": "running", "connected": true, "subscribed": true, "conn_handle": 64, "conn_interval": 24, "att_mtu": 256, "payload_len": 253, "service_uuid": 65248, "tx_char_uuid": 65249, "rx_char_uuid": 65250, "last_error_code": 0 },
+      "tx_stats": { "running": true, "window_ms": 1000, "tx_seq": 0, "rx_expected_seq": 7, "tx_bytes_total": 0, "rx_bytes_total": 4096, "tx_packets_total": 0, "rx_packets_total": 16, "rx_lost_packets": 2, "rx_reordered_packets": 1, "rx_duplicate_packets": 1, "tx_bps": 0, "rx_bps": 1000, "tx_pps": 0, "rx_pps": 16 }
+    },
+    "steps": [ { "inputs": [ { "custom": { "type": "ble_speed_test.tx_packet", "source_id": 1, "payload": { "seq": 1, "bytes": 253, "window_ms": 1000 } } } ], "outputs": [ { "label": "tx_stats", "state": { "rx_expected_seq": 7, "rx_bytes_total": 4096, "rx_packets_total": 16, "rx_lost_packets": 2, "rx_reordered_packets": 1, "rx_duplicate_packets": 1, "rx_bps": 1000, "rx_pps": 16 } } ] } ]
+  }
+}

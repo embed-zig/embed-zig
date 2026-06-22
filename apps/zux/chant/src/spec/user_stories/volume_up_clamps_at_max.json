@@ -1,0 +1,73 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "volume up clamps at max",
+    "description": "When audio.gain_db is already at maximum, Volume Up keeps audio.gain_db at maximum.",
+    "initial_state": {
+      "play_pause": {},
+      "boot": {},
+      "next": {},
+      "previous": {},
+      "volume_up": {},
+      "volume_down": {},
+      "controls": {},
+      "touch": {},
+      "audio": {
+        "started": false,
+        "gain_db": 6,
+        "min_gain_db": -60,
+        "max_gain_db": 6,
+        "gain_step_db": 1
+      },
+      "display": {
+        "enabled": true,
+        "brightness": 255
+      },
+      "player": {
+        "playing": false,
+        "recording": false,
+        "selected": "happy_birthday",
+        "loop": true
+      },
+      "playback": {
+        "progress_pct": 0
+      }
+    },
+    "steps": [
+      {
+        "inputs": [
+          {
+            "button_gesture": {
+              "source_id": 5,
+              "button_id": null,
+              "gesture": {
+                "click": 1
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "player",
+            "state": {
+              "playing": false,
+              "recording": false,
+              "selected": "happy_birthday",
+              "loop": true
+            }
+          },
+          {
+            "label": "audio",
+            "state": {
+              "started": false,
+              "gain_db": 6,
+              "min_gain_db": -60,
+              "max_gain_db": 6,
+              "gain_step_db": 1
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

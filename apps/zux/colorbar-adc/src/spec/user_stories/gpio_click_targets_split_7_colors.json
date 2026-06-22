@@ -1,0 +1,47 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "gpio click targets split 7 colors",
+    "description": "The GPIO color button changes scene.current to split_7_colors.",
+    "initial_state": {
+      "boot": {},
+      "keys": {},
+      "display": {
+        "enabled": true,
+        "brightness": 255
+      },
+      "scene": {
+        "current": "red"
+      }
+    },
+    "steps": [
+      {
+        "inputs": [
+          {
+            "button_gesture": {
+              "source_id": 1,
+              "button_id": null,
+              "gesture": {
+                "click": 1
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "current": "split_7_colors"
+            }
+          },
+          {
+            "label": "display_driver",
+            "state": {
+              "rendered": true
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

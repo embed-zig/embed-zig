@@ -101,10 +101,17 @@ const apps_integration_base_modules = .{
 };
 
 const apps_zux_base_modules = .{
+    @import("apps_zux/adc_group_debug.zig"),
     @import("apps_zux/archive_smoke.zig"),
+    @import("apps_zux/ble_speed_test.zig"),
     @import("apps_zux/button_ledstrip.zig"),
+    @import("apps_zux/chant.zig"),
     @import("apps_zux/compress_smoke.zig"),
+    @import("apps_zux/colorbar.zig"),
+    @import("apps_zux/colorbar_adc.zig"),
     @import("apps_zux/fs_smoke.zig"),
+    @import("apps_zux/kcp_test.zig"),
+    @import("apps_zux/net_smoke.zig"),
     @import("apps_zux/preferences_smoke.zig"),
     @import("apps_zux/system_smoke.zig"),
     @import("apps_zux/task_smoke.zig"),

@@ -1,0 +1,14 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "server disconnect returns to advertising",
+    "description": "After a server-side disconnect, the server returns to advertising.",
+    "initial_state": {
+      "boot": {},
+      "display": { "enabled": true, "brightness": 255 },
+      "ble_link": { "role": "server", "phase": "running", "connected": true, "subscribed": false, "conn_handle": 64, "conn_interval": 24, "att_mtu": 256, "payload_len": 253, "service_uuid": 65248, "tx_char_uuid": 65249, "rx_char_uuid": 65250, "last_error_code": 0 },
+      "tx_stats": { "running": true, "window_ms": 1000, "tx_seq": 4, "rx_expected_seq": 4, "tx_bytes_total": 1012, "rx_bytes_total": 506, "tx_packets_total": 4, "rx_packets_total": 2, "rx_lost_packets": 0, "rx_reordered_packets": 0, "rx_duplicate_packets": 0, "tx_bps": 8096, "rx_bps": 4048, "tx_pps": 4, "rx_pps": 2 }
+    },
+    "steps": [ { "inputs": [ { "ble_periph_disconnected": { "source_id": 1, "conn_handle": 64 } } ], "outputs": [ { "label": "ble_link", "state": { "role": "server", "phase": "advertising", "connected": false } } ] } ]
+  }
+}

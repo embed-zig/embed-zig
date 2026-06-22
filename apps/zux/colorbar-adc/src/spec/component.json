@@ -1,0 +1,28 @@
+{
+  "kind": "Doc",
+  "spec": [
+    {
+      "kind": "Component/button/single",
+      "spec": {
+        "label": "boot",
+        "id": 1
+      }
+    },
+    {
+      "kind": "Component/button/grouped",
+      "spec": {
+        "label": "keys",
+        "id": 2,
+        "button_count": 7,
+        "type": "virtual"
+      }
+    },
+    {
+      "kind": "Component/display",
+      "spec": {
+        "label": "display",
+        "id": 3
+      }
+    }
+  ]
+}

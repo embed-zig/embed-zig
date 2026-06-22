@@ -1,0 +1,28 @@
+{
+  "kind": "Doc",
+  "spec": [
+    {
+      "kind": "Reducer",
+      "spec": {
+        "label": "app_reducer",
+        "fn_name": "Reducers.reduce"
+      }
+    },
+    {
+      "kind": "Render",
+      "spec": {
+        "label": "ui_render",
+        "state_path": "$store/speed_test",
+        "fn_name": "Ui.render"
+      }
+    },
+    {
+      "kind": "Render",
+      "spec": {
+        "label": "button_render",
+        "state_path": "$store/boot",
+        "fn_name": "Button.render"
+      }
+    }
+  ]
+}

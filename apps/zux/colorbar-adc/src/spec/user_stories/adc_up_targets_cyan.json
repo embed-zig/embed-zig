@@ -1,0 +1,41 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "adc up targets cyan",
+    "description": "ADC button up changes scene.current to cyan.",
+    "initial_state": {
+      "boot": {},
+      "keys": {},
+      "display": {
+        "enabled": true,
+        "brightness": 255
+      },
+      "scene": {
+        "current": "split_7_colors"
+      }
+    },
+    "steps": [
+      {
+        "inputs": [
+          {
+            "button_gesture": {
+              "source_id": 2,
+              "button_id": 4,
+              "gesture": {
+                "click": 1
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "current": "cyan"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "client start transfer sets running",
+    "description": "A start-transfer custom event marks client transfer statistics as running.",
+    "initial_state": {
+      "boot": {},
+      "display": { "enabled": true, "brightness": 255 },
+      "ble_link": { "role": "client", "phase": "running", "connected": true, "subscribed": true, "conn_handle": 64, "conn_interval": 24, "att_mtu": 256, "payload_len": 253, "service_uuid": 65248, "tx_char_uuid": 65249, "rx_char_uuid": 65250, "last_error_code": 0 },
+      "tx_stats": { "running": false, "window_ms": 1000, "tx_seq": 0, "rx_expected_seq": 0, "tx_bytes_total": 0, "rx_bytes_total": 0, "tx_packets_total": 0, "rx_packets_total": 0, "rx_lost_packets": 0, "rx_reordered_packets": 0, "rx_duplicate_packets": 0, "tx_bps": 0, "rx_bps": 0, "tx_pps": 0, "rx_pps": 0 }
+    },
+    "steps": [ { "inputs": [ { "custom": { "type": "ble_speed_test.transfer_start", "source_id": 1, "payload": { "window_ms": 1000 } } } ], "outputs": [ { "label": "tx_stats", "state": { "running": true, "window_ms": 1000 } } ] } ]
+  }
+}

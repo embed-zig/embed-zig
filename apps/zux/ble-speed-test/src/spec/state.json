@@ -1,0 +1,85 @@
+{
+  "kind": "Doc",
+  "spec": [
+    {
+      "kind": "Store",
+      "spec": {
+        "label": "speed_test",
+        "state": {
+          "role": {
+            "enum": {
+              "type": "u8",
+              "values": [
+                "client",
+                "server"
+              ]
+            }
+          },
+          "phase": {
+            "enum": {
+              "type": "u8",
+              "values": [
+                "idle",
+                "scanning",
+                "advertising",
+                "running",
+                "stopped",
+                "failed"
+              ]
+            }
+          },
+          "connected": "bool",
+          "subscribed": "bool",
+          "conn_handle": "u16",
+          "conn_interval": "u16",
+          "att_mtu": "u16",
+          "payload_len": "u16",
+          "service_uuid": "u16",
+          "tx_char_uuid": "u16",
+          "rx_char_uuid": "u16",
+          "last_error_code": "u32",
+          "last_error_name_len": "u8",
+          "last_error_name_buf": "[32]u8",
+          "running": "bool",
+          "window_ms": "u32",
+          "tx_seq": "u32",
+          "rx_expected_seq": "u32",
+          "tx_bytes_total": "u64",
+          "rx_bytes_total": "u64",
+          "tx_packets_total": "u64",
+          "rx_packets_total": "u64",
+          "rx_lost_packets": "u64",
+          "rx_reordered_packets": "u64",
+          "rx_duplicate_packets": "u64",
+          "tx_bps": "u32",
+          "rx_bps": "u32",
+          "tx_pps": "u32",
+          "rx_pps": "u32",
+          "title_len": "u8",
+          "title_buf": "[32]u8",
+          "role_len": "u8",
+          "role_buf": "[48]u8",
+          "link_len": "u8",
+          "link_buf": "[80]u8",
+          "mtu_len": "u8",
+          "mtu_buf": "[64]u8",
+          "tx_len": "u8",
+          "tx_buf": "[80]u8",
+          "rx_len": "u8",
+          "rx_buf": "[96]u8",
+          "error_len": "u8",
+          "error_buf": "[48]u8"
+        }
+      }
+    },
+    {
+      "kind": "StatePath",
+      "spec": {
+        "path": "speed_test",
+        "labels": [
+          "speed_test"
+        ]
+      }
+    }
+  ]
+}

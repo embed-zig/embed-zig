@@ -1,0 +1,14 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "client stats window recomputes rates",
+    "description": "A client stats-window custom event recomputes TX/RX bit rates and packet rates from window counters.",
+    "initial_state": {
+      "boot": {},
+      "display": { "enabled": true, "brightness": 255 },
+      "ble_link": { "role": "client", "phase": "running", "connected": true, "subscribed": true, "conn_handle": 64, "conn_interval": 24, "att_mtu": 256, "payload_len": 253, "service_uuid": 65248, "tx_char_uuid": 65249, "rx_char_uuid": 65250, "last_error_code": 0 },
+      "tx_stats": { "running": true, "window_ms": 1000, "tx_seq": 4, "rx_expected_seq": 4, "tx_bytes_total": 1012, "rx_bytes_total": 506, "tx_packets_total": 4, "rx_packets_total": 2, "rx_lost_packets": 0, "rx_reordered_packets": 0, "rx_duplicate_packets": 0, "tx_bps": 0, "rx_bps": 0, "tx_pps": 0, "rx_pps": 0 }
+    },
+    "steps": [ { "inputs": [ { "custom": { "type": "ble_speed_test.stats_window", "source_id": 1, "payload": { "tx_bytes": 1012, "rx_bytes": 506, "tx_packets": 4, "rx_packets": 2, "window_ms": 1000 } } } ], "outputs": [ { "label": "tx_stats", "state": { "tx_bps": 8096, "rx_bps": 4048, "tx_pps": 4, "rx_pps": 2 } } ] } ]
+  }
+}

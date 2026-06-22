@@ -1,0 +1,73 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "volume down clamps at min",
+    "description": "When audio.gain_db is already at minimum, Volume Down keeps audio.gain_db at minimum.",
+    "initial_state": {
+      "play_pause": {},
+      "boot": {},
+      "next": {},
+      "previous": {},
+      "volume_up": {},
+      "volume_down": {},
+      "controls": {},
+      "touch": {},
+      "audio": {
+        "started": true,
+        "gain_db": -60,
+        "min_gain_db": -60,
+        "max_gain_db": 6,
+        "gain_step_db": 1
+      },
+      "display": {
+        "enabled": true,
+        "brightness": 255
+      },
+      "player": {
+        "playing": true,
+        "recording": false,
+        "selected": "doll_bear",
+        "loop": true
+      },
+      "playback": {
+        "progress_pct": 0
+      }
+    },
+    "steps": [
+      {
+        "inputs": [
+          {
+            "button_gesture": {
+              "source_id": 6,
+              "button_id": null,
+              "gesture": {
+                "click": 1
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "player",
+            "state": {
+              "playing": true,
+              "recording": false,
+              "selected": "doll_bear",
+              "loop": true
+            }
+          },
+          {
+            "label": "audio",
+            "state": {
+              "started": true,
+              "gain_db": -60,
+              "min_gain_db": -60,
+              "max_gain_db": 6,
+              "gain_step_db": 1
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

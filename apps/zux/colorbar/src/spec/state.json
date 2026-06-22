@@ -1,0 +1,37 @@
+{
+  "kind": "Doc",
+  "spec": [
+    {
+      "kind": "Store",
+      "spec": {
+        "label": "scene",
+        "state": {
+          "current": {
+            "enum": {
+              "type": "u8",
+              "values": [
+                "split_7_colors",
+                "red",
+                "orange",
+                "yellow",
+                "green",
+                "cyan",
+                "blue",
+                "violet"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "kind": "StatePath",
+      "spec": {
+        "path": "app/ui",
+        "labels": [
+          "scene"
+        ]
+      }
+    }
+  ]
+}

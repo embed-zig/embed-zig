@@ -1,0 +1,83 @@
+{
+  "kind": "Doc",
+  "spec": [
+    {
+      "kind": "Component/audio_system",
+      "spec": {
+        "label": "audio",
+        "id": 8
+      }
+    },
+    {
+      "kind": "Component/display",
+      "spec": {
+        "label": "display",
+        "id": 7
+      }
+    },
+    {
+      "kind": "Component/touch",
+      "spec": {
+        "label": "touch",
+        "id": 9,
+        "target": "display"
+      }
+    },
+    {
+      "kind": "Component/button/single",
+      "spec": {
+        "label": "play_pause",
+        "id": 1,
+        "type": "virtual"
+      }
+    },
+    {
+      "kind": "Component/button/single",
+      "spec": {
+        "label": "boot",
+        "id": 2
+      }
+    },
+    {
+      "kind": "Component/button/single",
+      "spec": {
+        "label": "next",
+        "id": 3,
+        "type": "virtual"
+      }
+    },
+    {
+      "kind": "Component/button/single",
+      "spec": {
+        "label": "previous",
+        "id": 4,
+        "type": "virtual"
+      }
+    },
+    {
+      "kind": "Component/button/single",
+      "spec": {
+        "label": "volume_up",
+        "id": 5,
+        "type": "virtual"
+      }
+    },
+    {
+      "kind": "Component/button/single",
+      "spec": {
+        "label": "volume_down",
+        "id": 6,
+        "type": "virtual"
+      }
+    },
+    {
+      "kind": "Component/button/grouped",
+      "spec": {
+        "label": "controls",
+        "id": 10,
+        "button_count": 7,
+        "type": "virtual"
+      }
+    }
+  ]
+}
