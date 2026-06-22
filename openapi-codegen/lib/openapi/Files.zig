@@ -210,7 +210,7 @@ fn parseNamedRef(comptime current_file_name: []const u8, comptime ref_path: []co
     file_name: []const u8,
     name: []const u8,
 } {
-    const reference = parseJsonReference(current_file_name, ref_path) orelse return null;
+    const reference = comptime parseJsonReference(current_file_name, ref_path) orelse return null;
     if (!std.mem.startsWith(u8, reference.pointer, prefix)) return null;
 
     return .{
@@ -220,8 +220,11 @@ fn parseNamedRef(comptime current_file_name: []const u8, comptime ref_path: []co
 }
 
 fn parseJsonReference(comptime current_file_name: []const u8, comptime ref_path: []const u8) ?JsonReference {
-    const anchor_index = std.mem.indexOfScalar(u8, ref_path, '#') orelse return null;
-    const file_name = if (anchor_index == 0) current_file_name else ref_path[0..anchor_index];
+    const anchor_index = comptime std.mem.indexOfScalar(u8, ref_path, '#') orelse return null;
+    const file_name = if (anchor_index == 0)
+        current_file_name
+    else
+        normalizeRefFileName(current_file_name, ref_path[0..anchor_index]);
 
     return .{
         .file_name = file_name,
@@ -229,10 +232,87 @@ fn parseJsonReference(comptime current_file_name: []const u8, comptime ref_path:
     };
 }
 
+fn normalizeRefFileName(comptime current_file_name: []const u8, comptime ref_file_name: []const u8) []const u8 {
+    if (!std.mem.startsWith(u8, ref_file_name, "./") and !std.mem.startsWith(u8, ref_file_name, "../")) {
+        return ref_file_name;
+    }
+
+    const current_dir = dirname(current_file_name);
+    const joined = if (current_dir.len == 0)
+        ref_file_name
+    else
+        glib.std.fmt.comptimePrint("{s}/{s}", .{ current_dir, ref_file_name });
+
+    return normalizeRelativePath(joined);
+}
+
+fn dirname(comptime file_name: []const u8) []const u8 {
+    const index = std.mem.lastIndexOfScalar(u8, file_name, '/') orelse return "";
+    return file_name[0..index];
+}
+
+fn normalizeRelativePath(comptime path: []const u8) []const u8 {
+    comptime var segments: [maxSegments(path)][]const u8 = undefined;
+    comptime var segment_count: usize = 0;
+    comptime var index: usize = 0;
+
+    inline while (index <= path.len) {
+        const start = index;
+        while (index < path.len and path[index] != '/') : (index += 1) {}
+        const segment = path[start..index];
+
+        if (segment.len == 0 or std.mem.eql(u8, segment, ".")) {
+            // Skip empty and current-dir segments.
+        } else if (std.mem.eql(u8, segment, "..")) {
+            if (segment_count != 0 and !std.mem.eql(u8, segments[segment_count - 1], "..")) {
+                segment_count -= 1;
+            } else {
+                segments[segment_count] = segment;
+                segment_count += 1;
+            }
+        } else {
+            segments[segment_count] = segment;
+            segment_count += 1;
+        }
+
+        index += 1;
+    }
+
+    comptime var output_len: usize = 2;
+    inline for (segments[0..segment_count], 0..) |segment, i| {
+        if (i != 0) output_len += 1;
+        output_len += segment.len;
+    }
+
+    comptime var out: [output_len]u8 = undefined;
+    out[0] = '.';
+    out[1] = '/';
+    comptime var out_index: usize = 2;
+    inline for (segments[0..segment_count], 0..) |segment, i| {
+        if (i != 0) {
+            out[out_index] = '/';
+            out_index += 1;
+        }
+        inline for (segment) |c| {
+            out[out_index] = c;
+            out_index += 1;
+        }
+    }
+    return glib.std.fmt.comptimePrint("{s}", .{out});
+}
+
+fn maxSegments(comptime path: []const u8) usize {
+    comptime var count: usize = 1;
+    inline for (path) |c| {
+        if (c == '/') count += 1;
+    }
+    return count;
+}
+
 fn decodeJsonPointerSegment(comptime encoded: []const u8) []const u8 {
     comptime var extra: usize = 0;
     comptime var index: usize = 0;
-    while (index < encoded.len) : (index += 1) {
+    inline while (index < encoded.len) : (index += 1) {
         if (encoded[index] == '~' and index + 1 < encoded.len) {
             extra += 1;
             index += 1;
@@ -242,7 +322,7 @@ fn decodeJsonPointerSegment(comptime encoded: []const u8) []const u8 {
     comptime var buffer: [encoded.len - extra]u8 = undefined;
     comptime var out_index: usize = 0;
     index = 0;
-    while (index < encoded.len) : (index += 1) {
+    inline while (index < encoded.len) : (index += 1) {
         if (encoded[index] == '~' and index + 1 < encoded.len) {
             const next = encoded[index + 1];
             buffer[out_index] = switch (next) {

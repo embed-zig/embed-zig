@@ -26,4 +26,19 @@ pub fn build(b: *std.Build) void {
             .{ .name = "glib", .module = glib_mod },
         },
     });
+
+    const tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("lib/tests.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "glib", .module = glib_mod },
+                .{ .name = "openapi", .module = openapi_mod },
+            },
+        }),
+    });
+
+    const test_step = b.step("test", "Run openapi-codegen tests");
+    test_step.dependOn(&b.addRunArtifact(tests).step);
 }

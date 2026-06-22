@@ -9,11 +9,11 @@ const ObjectMap = std.json.ObjectMap;
 pub fn parseComptime(comptime document: []const u8) Spec {
     @setEvalBranchQuota(5_000_000);
 
-    var parser: ComptimeParser = .{
+    comptime var parser: ComptimeParser = .{
         .source = document,
     };
 
-    return parser.parseSpec() catch |err| {
+    return comptime parser.parseSpec() catch |err| {
         @compileError(std.fmt.comptimePrint(
             "Failed to parse JSON document at comptime: {s}",
             .{@errorName(err)},
@@ -1026,6 +1026,8 @@ const ComptimeParser = struct {
                 schema.format = try self.parseString();
             } else if (std.mem.eql(u8, field_name, "required")) {
                 schema.required = try self.parseStringArray();
+            } else if (std.mem.eql(u8, field_name, "enum")) {
+                schema.enum_values = try self.parseLiteralArray();
             } else if (std.mem.eql(u8, field_name, "properties")) {
                 schema.properties = try self.parseNamedMap(Spec.SchemaOrRef, Self.parseSchemaOrRefValue);
             } else if (std.mem.eql(u8, field_name, "items")) {
@@ -1097,6 +1099,38 @@ const ComptimeParser = struct {
 
     fn parseStringArray(self: *Self) ![]const []const u8 {
         return try self.parseArray([]const u8, parseStringValue);
+    }
+
+    fn parseLiteralArray(self: *Self) ![]const Spec.Literal {
+        return try self.parseArray(Spec.Literal, parseLiteralValue);
+    }
+
+    fn parseLiteralValue(self: *Self) !Spec.Literal {
+        self.skipWhitespace();
+        const ch = self.peekChar() orelse return error.UnexpectedEndOfInput;
+        return switch (ch) {
+            '"' => .{ .string = try self.parseString() },
+            't', 'f' => .{ .bool = try self.parseBool() },
+            'n' => blk: {
+                try self.parseNull();
+                break :blk .null;
+            },
+            '-', '0'...'9' => try self.parseNumberLiteral(),
+            '[' => .{ .array = try self.parseArray(Spec.Literal, parseLiteralValue) },
+            '{' => .{ .object = try self.parseNamedMap(Spec.Literal, parseLiteralValue) },
+            else => error.UnexpectedToken,
+        };
+    }
+
+    fn parseNumberLiteral(self: *Self) !Spec.Literal {
+        self.skipWhitespace();
+        const start = self.index;
+        try self.skipNumber();
+        const text = self.source[start..self.index];
+        if (std.mem.indexOfAny(u8, text, ".eE") != null) {
+            return .{ .float = try std.fmt.parseFloat(f64, text) };
+        }
+        return .{ .integer = try std.fmt.parseInt(i64, text, 10) };
     }
 
     fn parseStringValue(self: *Self) ![]const u8 {
