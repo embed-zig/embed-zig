@@ -15,6 +15,8 @@ pub const max_identity_len: usize = 32;
 pub const max_phone_number_len: usize = 32;
 pub const max_sms_text_len: usize = 256;
 
+pub const Apn = @import("modem/apn.zig");
+
 pub const Rat = enum {
     unknown,
     gsm,
@@ -229,6 +231,10 @@ pub const DataOpenError = error{
     InvalidConfig,
     TimedOut,
     Unsupported,
+    AttachFailed,
+    PdpActivateFailed,
+    CmuxFailed,
+    PppDialFailed,
     Unexpected,
 };
 
@@ -262,6 +268,7 @@ pub const VTable = struct {
     start: *const fn (ptr: *anyopaque) StartError!void,
     stop: *const fn (ptr: *anyopaque) void,
     state: *const fn (ptr: *anyopaque) State,
+    simState: ?*const fn (ptr: *anyopaque) SimState = null,
     imei: *const fn (ptr: *anyopaque) ?[]const u8,
     imsi: *const fn (ptr: *anyopaque) ?[]const u8,
     apn: *const fn (ptr: *anyopaque) ?[]const u8,
@@ -291,6 +298,11 @@ pub fn stop(self: root) void {
 
 pub fn state(self: root) State {
     return self.vtable.state(self.ptr);
+}
+
+pub fn simState(self: root) SimState {
+    if (self.vtable.simState) |query| return query(self.ptr);
+    return self.state().sim;
 }
 
 pub fn imei(self: root) ?[]const u8 {
@@ -400,6 +412,11 @@ pub fn make(comptime grt: type, comptime Impl: type) type {
             return self.impl.state();
         }
 
+        pub fn simState(self: *@This()) SimState {
+            if (@hasDecl(Impl, "simState")) return self.impl.simState();
+            return self.impl.state().sim;
+        }
+
         pub fn imei(self: *@This()) ?[]const u8 {
             return self.impl.imei();
         }
@@ -477,6 +494,11 @@ pub fn make(comptime grt: type, comptime Impl: type) type {
             return self.state();
         }
 
+        fn simStateFn(ptr: *anyopaque) SimState {
+            const self: *Ctx = @ptrCast(@alignCast(ptr));
+            return self.simState();
+        }
+
         fn imeiFn(ptr: *anyopaque) ?[]const u8 {
             const self: *Ctx = @ptrCast(@alignCast(ptr));
             return self.imei();
@@ -547,6 +569,7 @@ pub fn make(comptime grt: type, comptime Impl: type) type {
             .start = startFn,
             .stop = stopFn,
             .state = stateFn,
+            .simState = simStateFn,
             .imei = imeiFn,
             .imsi = imsiFn,
             .apn = apnFn,
@@ -647,9 +670,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             comptime {
                 _ = root.deinit;
                 _ = root.state;
+                _ = root.simState;
                 _ = root.imei;
                 _ = root.imsi;
-                _ = root.apn;
+                _ = root.Apn;
                 _ = root.setApn;
                 _ = root.dataOpen;
                 _ = root.dataClose;
@@ -692,6 +716,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 _ = root.DataWriteError;
                 _ = root.CallbackFn;
                 _ = root.make;
+                _ = root.apn;
                 _ = make(grt, Impl).init;
                 if (!@hasField(make(grt, Impl).Config, "allocator")) {
                     @compileError("make config must expose allocator");
@@ -773,6 +798,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             const current_state = modem.state();
             try grt.std.testing.expectEqual(SimState.ready, current_state.sim);
+            try grt.std.testing.expectEqual(SimState.ready, modem.simState());
             try grt.std.testing.expectEqual(RegistrationState.home, current_state.registration);
             try grt.std.testing.expectEqual(PacketState.connected, current_state.packet);
             try grt.std.testing.expectEqual(@as(?[]const u8, "860000000000001"), modem.imei());
@@ -943,6 +969,77 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             modem.dataClose();
             try grt.std.testing.expectEqual(DataState.closed, modem.dataState());
         }
+
+        fn detectsApnFromImsi() !void {
+            try grt.std.testing.expectEqualStrings("cmiot", Apn.detectFromImsi("460001234567890").?);
+            try grt.std.testing.expectEqualStrings("cmiot", Apn.detectFromImsi("460021234567890").?);
+            try grt.std.testing.expectEqualStrings("cmiot", Apn.detectFromImsi("460041234567890").?);
+            try grt.std.testing.expectEqualStrings("cmiot", Apn.detectFromImsi("460071234567890").?);
+            try grt.std.testing.expectEqualStrings("cmiot", Apn.detectFromImsi("460081234567890").?);
+            try grt.std.testing.expectEqualStrings("cmiot", Apn.detectFromImsi("460131234567890").?);
+
+            try grt.std.testing.expectEqualStrings("3gnet", Apn.detectFromImsi("460011234567890").?);
+            try grt.std.testing.expectEqualStrings("3gnet", Apn.detectFromImsi("460061234567890").?);
+            try grt.std.testing.expectEqualStrings("3gnet", Apn.detectFromImsi("460091234567890").?);
+
+            try grt.std.testing.expectEqualStrings("ctnet", Apn.detectFromImsi("460031234567890").?);
+            try grt.std.testing.expectEqualStrings("ctnet", Apn.detectFromImsi("460051234567890").?);
+            try grt.std.testing.expectEqualStrings("ctnet", Apn.detectFromImsi("460111234567890").?);
+
+            try grt.std.testing.expectEqual(@as(?[]const u8, null), Apn.detectFromImsi("001011234567890"));
+            try grt.std.testing.expectEqualStrings(Apn.default, Apn.detectApn("001011234567890"));
+            try grt.std.testing.expectEqualStrings(Apn.default, Apn.detectApn(""));
+        }
+
+        fn forwardsExplicitSimState(allocator: glib.std.mem.Allocator) !void {
+            const Impl = struct {
+                pub const Config = struct {
+                    allocator: glib.std.mem.Allocator,
+                };
+
+                pub fn init(config: Config) !@This() {
+                    _ = config;
+                    return .{};
+                }
+
+                pub fn deinit(self: *@This()) void {
+                    _ = self;
+                }
+
+                pub fn state(_: *@This()) State {
+                    return .{ .sim = .unknown };
+                }
+
+                pub fn simState(_: *@This()) SimState {
+                    return .locked;
+                }
+
+                pub fn imei(_: *@This()) ?[]const u8 {
+                    return null;
+                }
+
+                pub fn imsi(_: *@This()) ?[]const u8 {
+                    return null;
+                }
+
+                pub fn apn(_: *@This()) ?[]const u8 {
+                    return null;
+                }
+
+                pub fn setApn(_: *@This(), _: []const u8) SetApnError!void {}
+
+                pub fn setEventCallback(_: *@This(), _: *const anyopaque, _: CallbackFn) void {}
+
+                pub fn clearEventCallback(_: *@This()) void {}
+            };
+
+            const Built = make(grt, Impl);
+            var modem = try Built.init(.{ .allocator = allocator });
+            defer modem.deinit();
+
+            try grt.std.testing.expectEqual(SimState.unknown, modem.state().sim);
+            try grt.std.testing.expectEqual(SimState.locked, modem.simState());
+        }
     };
 
     const Runner = struct {
@@ -967,6 +1064,14 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 return false;
             };
             TestCase.forwardsPublicDataSurface(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.detectsApnFromImsi() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.forwardsExplicitSimState(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
