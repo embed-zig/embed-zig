@@ -35,8 +35,14 @@ pub const NvsEntry = struct {
     value: NvsValue,
 };
 
+pub const FsImageRoot = enum {
+    app,
+    build_config,
+};
+
 pub const FsImage = struct {
     dir: []const u8,
+    root: FsImageRoot = .app,
 };
 
 pub const DataSource = union(enum) {
@@ -78,8 +84,16 @@ pub const data = struct {
         return .{ .spiffs = .{ .dir = dir } };
     }
 
+    pub fn spiffsFromBuildConfig(dir: []const u8) DataSource {
+        return .{ .spiffs = .{ .dir = dir, .root = .build_config } };
+    }
+
     pub fn littlefs(dir: []const u8) DataSource {
         return .{ .littlefs = .{ .dir = dir } };
+    }
+
+    pub fn littlefsFromBuildConfig(dir: []const u8) DataSource {
+        return .{ .littlefs = .{ .dir = dir, .root = .build_config } };
     }
 
     pub fn rawFile(path: []const u8) DataSource {

@@ -27,6 +27,7 @@ const grt_idf_requires = [_][]const u8{
     "freertos",
     "heap",
     "esp_hw_support",
+    "esp_netif",
     "esp_timer",
     "lwip",
     "mbedtls",

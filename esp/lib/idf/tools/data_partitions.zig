@@ -22,9 +22,9 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
-    if (args.len < 6 or args.len > 7) {
+    if (args.len < 7 or args.len > 9) {
         std.debug.print(
-            "usage: data_partitions <build|flash> <app_root> <build_dir> <esp_idf> <python_exe> [port]\n",
+            "usage: data_partitions <build|flash> <app_root> <build_dir> <esp_idf> <python_exe> <build_config_source> [port] [baud]\n",
             .{},
         );
         return error.InvalidArgs;
@@ -35,14 +35,16 @@ pub fn main() !void {
     const build_dir = args[3];
     const idf_root = args[4];
     const python_executable_path = args[5];
-    const port = if (args.len == 7) args[6] else "";
+    const build_config_source = args[6];
+    const port = if (args.len >= 8) args[7] else "";
+    const baud = if (args.len == 9) args[8] else "2000000";
 
     if (std.mem.eql(u8, mode, "build")) {
-        try buildDataPartitionImages(allocator, app_root, build_dir, idf_root, python_executable_path);
+        try buildDataPartitionImages(allocator, app_root, build_dir, idf_root, python_executable_path, build_config_source);
         return;
     }
     if (std.mem.eql(u8, mode, "flash")) {
-        try flashBuiltDataPartitionImages(allocator, app_root, build_dir, idf_root, python_executable_path, port);
+        try flashBuiltDataPartitionImages(allocator, app_root, build_dir, idf_root, python_executable_path, build_config_source, port, baud);
         return;
     }
     return error.InvalidArgs;
@@ -92,13 +94,14 @@ pub fn buildDataPartitionImages(
     build_dir: []const u8,
     idf_root: []const u8,
     python_executable_path: []const u8,
+    build_config_source: []const u8,
 ) !void {
     const images = try resolveDataPartitionImagesAlloc(allocator, build_dir);
     defer freeDataPartitionImages(allocator, images);
 
     try std.fs.cwd().makePath(build_dir);
     for (images) |image| {
-        try buildDataPartitionImage(allocator, app_root, build_dir, idf_root, python_executable_path, image);
+        try buildDataPartitionImage(allocator, app_root, build_dir, idf_root, python_executable_path, build_config_source, image);
     }
 }
 
@@ -108,27 +111,30 @@ pub fn flashBuiltDataPartitionImages(
     build_dir: []const u8,
     idf_root: []const u8,
     python_executable_path: []const u8,
+    _: []const u8,
     port: []const u8,
+    baud: []const u8,
 ) !void {
     const images = try resolveDataPartitionImagesAlloc(allocator, build_dir);
     defer freeDataPartitionImages(allocator, images);
 
     for (images) |image| {
-        try flashBuiltDataPartitionImage(allocator, idf_root, python_executable_path, port, image);
+        try flashBuiltDataPartitionImage(allocator, idf_root, python_executable_path, port, baud, image);
     }
 }
 
 fn buildDataPartitionImage(
     allocator: std.mem.Allocator,
-    _: []const u8,
+    app_root: []const u8,
     build_dir: []const u8,
     idf_root: []const u8,
     python_executable_path: []const u8,
+    build_config_source: []const u8,
     image: DataPartitionImage,
 ) !void {
     switch (image.data) {
         .spiffs => |cfg| {
-            const source_dir = try std.fs.path.join(allocator, &.{cfg.dir});
+            const source_dir = try resolveFsImagePath(allocator, app_root, build_config_source, cfg);
             defer allocator.free(source_dir);
             const spiffsgen_path = try std.fs.path.join(allocator, &.{ idf_root, "components", "spiffs", "spiffsgen.py" });
             defer allocator.free(spiffsgen_path);
@@ -136,6 +142,8 @@ fn buildDataPartitionImage(
                 return error.InvalidArgs;
             const size_arg = try std.fmt.allocPrint(allocator, "0x{x}", .{size});
             defer allocator.free(size_arg);
+            const obj_name_len_arg = try std.fmt.allocPrint(allocator, "{d}", .{spiffsObjectNameLen()});
+            defer allocator.free(obj_name_len_arg);
             try ensureParentDir(image.output_bin);
             try runCommand(allocator, &.{
                 python_executable_path,
@@ -147,6 +155,8 @@ fn buildDataPartitionImage(
                 "256",
                 "--block-size",
                 "4096",
+                "--obj-name-len",
+                obj_name_len_arg,
             }, ".");
         },
         .littlefs => return error.LittlefsNotImplemented,
@@ -182,11 +192,36 @@ fn buildDataPartitionImage(
     }
 }
 
+fn resolveFsImagePath(
+    allocator: std.mem.Allocator,
+    app_root: []const u8,
+    build_config_source: []const u8,
+    cfg: PartitionTable.FsImage,
+) ![]const u8 {
+    if (std.fs.path.isAbsolute(cfg.dir)) return allocator.dupe(u8, cfg.dir);
+    const root = switch (cfg.root) {
+        .app => app_root,
+        .build_config => std.fs.path.dirname(build_config_source) orelse ".",
+    };
+    return std.fs.path.join(allocator, &.{ root, cfg.dir });
+}
+
+fn spiffsObjectNameLen() u32 {
+    if (@hasDecl(build_config, "sdk_config")) {
+        const sdk_config = build_config.sdk_config;
+        if (@hasField(@TypeOf(sdk_config), "SPIFFS_OBJ_NAME_LEN")) {
+            return sdk_config.SPIFFS_OBJ_NAME_LEN;
+        }
+    }
+    return 32;
+}
+
 fn flashBuiltDataPartitionImage(
     allocator: std.mem.Allocator,
     _: []const u8,
     python_executable_path: []const u8,
     port: []const u8,
+    baud: []const u8,
     image: DataPartitionImage,
 ) !void {
     var flash_args = std.array_list.Managed([]const u8).init(allocator);
@@ -199,6 +234,8 @@ fn flashBuiltDataPartitionImage(
     if (port.len != 0) {
         try flash_args.appendSlice(&.{ "--port", port });
     }
+    try flash_args.appendSlice(&.{ "-b", baud });
+    try flash_args.appendSlice(&.{ "--before", "default_reset", "--after", "hard_reset" });
     const offset_arg = try std.fmt.allocPrint(allocator, "0x{x}", .{image.offset});
     defer allocator.free(offset_arg);
     try flash_args.appendSlice(&.{

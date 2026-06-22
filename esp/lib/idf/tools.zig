@@ -137,6 +137,7 @@ pub fn addDataPartitionBuildTool(
     run.addArg(context.build_dir);
     run.addArg(context.idf_path);
     run.addArg(context.python_executable_path);
+    run.addFileArg(.{ .cwd_relative = moduleRootSourcePath(b, context.build_config_module, "build_config") });
     return &run.step;
 }
 
@@ -144,6 +145,7 @@ pub fn addDataPartitionFlashTool(
     b: *std.Build,
     context: BuildContext.BuildContext,
     port: ?[]const u8,
+    baud: u32,
 ) *std.Build.Step {
     const run = addBuiltinHostTool(
         b,
@@ -161,7 +163,9 @@ pub fn addDataPartitionFlashTool(
     run.addArg(context.build_dir);
     run.addArg(context.idf_path);
     run.addArg(context.python_executable_path);
+    run.addFileArg(.{ .cwd_relative = moduleRootSourcePath(b, context.build_config_module, "build_config") });
     run.addArg(port orelse "");
+    run.addArg(b.fmt("{d}", .{baud}));
     return &run.step;
 }
 
