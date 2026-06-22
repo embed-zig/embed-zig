@@ -30,10 +30,6 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    const thirdparty_dep = b.dependency("thirdparty", .{
-        .target = target,
-        .optimize = optimize,
-    });
     const selected_app = apps_dep.module(app_name);
 
     const generated_test = createTestSource(b);
@@ -48,7 +44,7 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "desktop", .module = desktop_dep.module("desktop") },
             .{ .name = "gstd", .module = gstd_dep.module("gstd") },
-            .{ .name = "lvgl_osal", .module = thirdparty_dep.module("lvgl_osal") },
+            .{ .name = "lvgl_osal", .module = apps_dep.module("lvgl_osal") },
             .{ .name = "selected_app", .module = selected_app },
         },
     });
@@ -97,7 +93,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "desktop", .module = desktop_dep.module("desktop") },
             .{ .name = "glib", .module = glib_dep.module("glib") },
             .{ .name = "gstd", .module = gstd_dep.module("gstd") },
-            .{ .name = "lvgl_osal", .module = thirdparty_dep.module("lvgl_osal") },
+            .{ .name = "lvgl_osal", .module = apps_dep.module("lvgl_osal") },
             .{ .name = "selected_app", .module = selected_app },
         },
     });

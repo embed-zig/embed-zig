@@ -29,10 +29,8 @@ pub fn build(b: *std.Build) void {
         .target = context.target,
         .optimize = optimize,
         .ble_speed_role = ble_speed_role,
-    });
-    const thirdparty_dep = b.dependency("thirdparty", .{
-        .target = context.target,
-        .optimize = optimize,
+        .lvgl_c_sysroot = if (context.toolchain_sysroot) |sysroot| sysroot.root else "",
+        .lvgl_c_short_enums = true,
     });
     const selected_app = apps_dep.module(app_name);
 
@@ -42,7 +40,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{
             .{ .name = "esp", .module = esp_dep.module("esp") },
-            .{ .name = "lvgl_osal", .module = thirdparty_dep.module("lvgl_osal") },
+            .{ .name = "lvgl_osal", .module = apps_dep.module("lvgl_osal") },
             .{ .name = "selected_app", .module = selected_app },
         },
         .link_libc = true,

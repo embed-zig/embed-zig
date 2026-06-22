@@ -1,6 +1,7 @@
 const std = @import("std");
 const build_modules = @import("build/modules.zig");
 const build_tests = @import("tests/build.zig");
+const esp_build = @import("esp/build.zig");
 
 pub const desktop = struct {
     pub const macos = @import("build/desktop/macos.zig");
@@ -9,6 +10,9 @@ pub const desktop = struct {
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const sysroot = b.option([]const u8, "sysroot", "C sysroot path for cross-target libc headers") orelse "";
+    const lvgl_c_short_enums = b.option(bool, "lvgl_c_short_enums", "Pass -fshort-enums to the LVGL C build") orelse false;
+    if (sysroot.len != 0) b.sysroot = sysroot;
     const embed_dep = b.dependency("embed", .{
         .target = target,
         .optimize = optimize,
@@ -28,10 +32,8 @@ pub fn build(b: *std.Build) void {
     const apps_dep = b.dependency("apps", .{
         .target = target,
         .optimize = optimize,
-    });
-    const esp_dep = b.dependency("esp", .{
-        .target = target,
-        .optimize = optimize,
+        .lvgl_c_sysroot = sysroot,
+        .lvgl_c_short_enums = lvgl_c_short_enums,
     });
     const openapi_codegen_dep = b.dependency("openapi_codegen", .{
         .target = target,
@@ -47,7 +49,13 @@ pub fn build(b: *std.Build) void {
     const openapi = openapi_codegen_dep.module("openapi");
     const codegen = openapi_codegen_dep.module("codegen");
     const desktop_module = desktop_dep.module("desktop");
-    const esp = esp_dep.module("esp");
+    const esp_modules = esp_build.createModules(b, .{
+        .target = target,
+        .optimize = optimize,
+        .glib = glib,
+        .embed_core = embed,
+        .sources = esp_build.moduleSources(b, "esp"),
+    });
 
     b.modules.put("glib", glib) catch @panic("OOM");
     b.modules.put("gstd", gstd) catch @panic("OOM");
@@ -56,12 +64,26 @@ pub fn build(b: *std.Build) void {
     b.modules.put("codegen", codegen) catch @panic("OOM");
     b.modules.put("openapi-codegen", codegen) catch @panic("OOM");
     b.modules.put("desktop", desktop_module) catch @panic("OOM");
-    b.modules.put("esp", esp) catch @panic("OOM");
+    b.modules.put("esp", esp_modules.esp) catch @panic("OOM");
+    const apps_lvgl = apps_dep.module("lvgl");
+    const apps_lvgl_osal = apps_dep.module("lvgl_osal");
     for (build_modules.thirdparty_modules) |module_spec| {
-        b.modules.put(module_spec.export_name, thirdparty_dep.module(module_spec.dependency_module_name)) catch @panic("OOM");
+        const module = if (std.mem.eql(u8, module_spec.dependency_module_name, "lvgl"))
+            apps_lvgl
+        else if (std.mem.eql(u8, module_spec.dependency_module_name, "lvgl_osal"))
+            apps_lvgl_osal
+        else
+            thirdparty_dep.module(module_spec.dependency_module_name);
+        b.modules.put(module_spec.export_name, module) catch @panic("OOM");
     }
     for (build_modules.apps_modules) |module_spec| {
-        b.modules.put(module_spec.export_name, apps_dep.module(module_spec.dependency_module_name)) catch @panic("OOM");
+        const app_mod = apps_dep.module(module_spec.dependency_module_name);
+        app_mod.addImport("glib", glib);
+        if (std.mem.startsWith(u8, module_spec.dependency_module_name, "zux_")) {
+            app_mod.addImport("embed", embed);
+            app_mod.addImport("lvgl", apps_lvgl);
+        }
+        b.modules.put(module_spec.export_name, app_mod) catch @panic("OOM");
     }
 
     desktop_module.addImport("embed", embed);

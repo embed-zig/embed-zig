@@ -18,9 +18,6 @@
         .apps = .{
             .path = "apps",
         },
-        .esp = .{
-            .path = "esp",
-        },
         .openapi_codegen = .{
             .path = "openapi-codegen",
         },

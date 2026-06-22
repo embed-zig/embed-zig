@@ -25,6 +25,8 @@ const AppRegistry = struct {
     optimize: std.builtin.OptimizeMode,
     launcher: *std.Build.Module,
     glib_empty_zux_app: *std.Build.Module,
+    lvgl_c_sysroot: []const u8,
+    lvgl_c_short_enums: bool,
     modules: std.StringHashMap(*std.Build.Module),
 
     fn init(
@@ -33,6 +35,8 @@ const AppRegistry = struct {
         optimize: std.builtin.OptimizeMode,
         launcher: *std.Build.Module,
         glib_empty_zux_app: *std.Build.Module,
+        lvgl_c_sysroot: []const u8,
+        lvgl_c_short_enums: bool,
     ) AppRegistry {
         return .{
             .b = b,
@@ -40,6 +44,8 @@ const AppRegistry = struct {
             .optimize = optimize,
             .launcher = launcher,
             .glib_empty_zux_app = glib_empty_zux_app,
+            .lvgl_c_sysroot = lvgl_c_sysroot,
+            .lvgl_c_short_enums = lvgl_c_short_enums,
             .modules = std.StringHashMap(*std.Build.Module).init(b.allocator),
         };
     }
@@ -58,11 +64,22 @@ const AppRegistry = struct {
         }
         self.modules.put(name, module) catch @panic("OOM");
     }
+
+    pub fn thirdpartyModule(self: *AppRegistry, name: []const u8) *std.Build.Module {
+        return self.b.dependency("thirdparty", .{
+            .target = self.target,
+            .optimize = self.optimize,
+            .lvgl_c_sysroot = self.lvgl_c_sysroot,
+            .lvgl_c_short_enums = self.lvgl_c_short_enums,
+        }).module(name);
+    }
 };
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const lvgl_c_sysroot = b.option([]const u8, "lvgl_c_sysroot", "Optional C sysroot passed to the LVGL package") orelse "";
+    const lvgl_c_short_enums = b.option(bool, "lvgl_c_short_enums", "Pass -fshort-enums to the LVGL C build") orelse false;
 
     const glib = b.dependency("glib", .{
         .target = target,
@@ -83,8 +100,10 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    var registry = AppRegistry.init(b, target, optimize, launcher, glib_empty_zux_app);
+    var registry = AppRegistry.init(b, target, optimize, launcher, glib_empty_zux_app, lvgl_c_sysroot, lvgl_c_short_enums);
     defer registry.deinit();
+    b.modules.put("lvgl", registry.thirdpartyModule("lvgl")) catch @panic("OOM");
+    b.modules.put("lvgl_osal", registry.thirdpartyModule("lvgl_osal")) catch @panic("OOM");
 
     glib_unit_test_std.register(&registry);
     glib_unit_test_mime.register(&registry);

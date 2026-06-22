@@ -13,6 +13,9 @@
         .embed = .{
             .path = "../embed",
         },
+        .thirdparty = .{
+            .path = "../thirdparty",
+        },
     },
     .paths = .{
         "build.zig",
