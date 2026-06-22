@@ -17,6 +17,7 @@ typedef struct {
     size_t mic_count;
     size_t ref_count;
     int afe_task_priority;
+    int enable_aec;
     int speech_enhancement;
     int voice_communication_agc;
     int voice_communication_agc_gain;
@@ -114,7 +115,7 @@ int espz_esp_sr_afe_init(void)
     if (afe_data != NULL) return ESP_OK;
 
     afe_config_t afe_config = AFE_CONFIG_DEFAULT();
-    afe_config.aec_init = true;
+    afe_config.aec_init = config.enable_aec != 0;
     afe_config.se_init = config.speech_enhancement != 0;
     afe_config.vad_init = false;
     afe_config.wakenet_init = false;
@@ -152,10 +153,11 @@ int espz_esp_sr_afe_init(void)
 
     ESP_LOGI(
         TAG,
-        "initialized: feed=%d samples channels=%d fetch=%d se=%d agc=%d",
+        "initialized: feed=%d samples channels=%d fetch=%d aec=%d se=%d agc=%d",
         chunk_samples,
         channel_count,
         fetch_samples,
+        config.enable_aec != 0,
         config.speech_enhancement != 0,
         config.voice_communication_agc != 0);
     return ESP_OK;

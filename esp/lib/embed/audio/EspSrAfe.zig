@@ -11,6 +11,7 @@ pub const Config = struct {
 
 pub const Options = struct {
     afe_task_priority: i32 = 8,
+    enable_aec: bool = true,
     monitor_gain: i32 = 1,
     speech_enhancement: bool = false,
     voice_communication_agc: bool = false,
@@ -35,6 +36,7 @@ pub fn Processor(comptime Mic: type, comptime config: Config) type {
                 .mic_count = 1,
                 .ref_count = config.ref_count,
                 .afe_task_priority = config.options.afe_task_priority,
+                .enable_aec = @intFromBool(config.options.enable_aec),
                 .speech_enhancement = @intFromBool(config.options.speech_enhancement),
                 .voice_communication_agc = @intFromBool(config.options.voice_communication_agc),
                 .voice_communication_agc_gain = config.options.voice_communication_agc_gain,

@@ -5,6 +5,7 @@ pub const Config = extern struct {
     mic_count: usize,
     ref_count: usize,
     afe_task_priority: i32,
+    enable_aec: c_int,
     speech_enhancement: c_int,
     voice_communication_agc: c_int,
     voice_communication_agc_gain: i32,
