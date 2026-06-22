@@ -1,0 +1,388 @@
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
+
+#include <common/bk_err.h>
+#include <components/bk_display.h>
+#include <components/log.h>
+#include <components/media_types.h>
+#include <driver/gpio.h>
+#include <driver/hal/hal_gpio_types.h>
+#include <driver/pwr_clk.h>
+#include <modules/pm.h>
+#include "frame_buffer.h"
+#include "gpio_driver.h"
+#include "lcd_panel_devices.h"
+#include "media_service.h"
+
+#define BK_EMBED_DISPLAY_OK 0
+#define BK_EMBED_DISPLAY_INVALID_ARG 1
+#define BK_EMBED_DISPLAY_INVALID_STATE 2
+#define BK_EMBED_DISPLAY_NO_MEM 3
+#define BK_EMBED_DISPLAY_UNEXPECTED 9
+
+#define TAG "bk_embed_rgb"
+
+extern const lcd_device_t lcd_device_h050iwv;
+static bk_display_ctlr_handle_t s_handle;
+static bk_display_ctlr_handle_t s_debug_handle;
+static frame_buffer_t *s_shadow;
+static uint16_t s_width;
+static uint16_t s_height;
+static uint32_t s_frame_size;
+static uint8_t s_clk_pin;
+static uint8_t s_cs_pin;
+static uint8_t s_sda_pin;
+static uint8_t s_reset_pin;
+static uint8_t s_ldo_pin;
+static uint8_t s_backlight_pin;
+static uint8_t s_brightness;
+static bool s_initialized;
+static bool s_enabled;
+static bool s_media_initialized;
+
+static int map_rc(bk_err_t rc)
+{
+    if (rc == BK_OK) {
+        return BK_EMBED_DISPLAY_OK;
+    }
+    if (rc == BK_ERR_NULL_PARAM || rc == BK_ERR_PARAM) {
+        return BK_EMBED_DISPLAY_INVALID_ARG;
+    }
+    return BK_EMBED_DISPLAY_UNEXPECTED;
+}
+
+static bk_err_t display_frame_free_cb(void *arg)
+{
+    frame_buffer_t *frame = (frame_buffer_t *)arg;
+    if (frame != NULL) {
+        frame_buffer_display_free(frame);
+    }
+    return BK_OK;
+}
+
+static void fill_frame_meta(frame_buffer_t *frame)
+{
+    frame->fmt = PIXEL_FMT_RGB565;
+    frame->width = s_width;
+    frame->height = s_height;
+    frame->length = s_frame_size;
+    frame->size = s_frame_size;
+}
+
+static void backlight_set(bool on)
+{
+    gpio_dev_unmap(s_backlight_pin);
+    bk_gpio_enable_output(s_backlight_pin);
+    if (on) {
+        bk_gpio_pull_up(s_backlight_pin);
+        bk_gpio_set_output_high(s_backlight_pin);
+    } else {
+        bk_gpio_pull_down(s_backlight_pin);
+        bk_gpio_set_output_low(s_backlight_pin);
+    }
+}
+
+static void backlight_open_pin(uint8_t pin)
+{
+    gpio_dev_unmap(pin);
+    bk_gpio_enable_output(pin);
+    bk_gpio_pull_up(pin);
+    bk_gpio_set_output_high(pin);
+}
+
+int bk_embed_display_rgb_init(uint8_t clk_pin, uint8_t cs_pin, uint8_t sda_pin, uint8_t reset_pin, uint8_t ldo_pin, uint8_t backlight_pin)
+{
+    if (s_initialized) {
+        return BK_EMBED_DISPLAY_OK;
+    }
+
+    s_clk_pin = clk_pin;
+    s_cs_pin = cs_pin;
+    s_sda_pin = sda_pin;
+    s_reset_pin = reset_pin;
+    s_ldo_pin = ldo_pin;
+    s_backlight_pin = backlight_pin;
+    s_width = lcd_device_h050iwv.width;
+    s_height = lcd_device_h050iwv.height;
+    s_frame_size = (uint32_t)s_width * (uint32_t)s_height * 2;
+
+    if (!s_media_initialized) {
+        media_service_init();
+        bk_pm_module_vote_psram_ctrl(PM_POWER_PSRAM_MODULE_NAME_LVGL_CODE_RUN, PM_POWER_MODULE_STATE_ON);
+        s_media_initialized = true;
+    }
+
+    bk_display_rgb_ctlr_config_t config = {
+        .lcd_device = &lcd_device_h050iwv,
+        .clk_pin = s_clk_pin,
+        .cs_pin = s_cs_pin,
+        .sda_pin = s_sda_pin,
+        .rst_pin = s_reset_pin,
+    };
+    int rc = map_rc(bk_display_rgb_new(&s_handle, &config));
+    if (rc != BK_EMBED_DISPLAY_OK) {
+        return rc;
+    }
+
+    s_shadow = frame_buffer_display_malloc(s_frame_size);
+    if (s_shadow == NULL) {
+        bk_display_delete(s_handle);
+        s_handle = NULL;
+        return BK_EMBED_DISPLAY_NO_MEM;
+    }
+    memset(s_shadow->frame, 0, s_frame_size);
+    fill_frame_meta(s_shadow);
+
+    s_initialized = true;
+    s_enabled = false;
+    s_brightness = 255;
+    return BK_EMBED_DISPLAY_OK;
+}
+
+void bk_embed_display_rgb_deinit(void)
+{
+    if (!s_initialized) {
+        return;
+    }
+
+    if (s_enabled && s_handle != NULL) {
+        bk_display_close(s_handle);
+    }
+    backlight_set(false);
+
+    if (s_shadow != NULL) {
+        frame_buffer_display_free(s_shadow);
+        s_shadow = NULL;
+    }
+    if (s_handle != NULL) {
+        bk_display_delete(s_handle);
+        s_handle = NULL;
+    }
+
+    s_initialized = false;
+    s_enabled = false;
+    s_brightness = 0;
+}
+
+uint16_t bk_embed_display_rgb_width(void)
+{
+    return s_width;
+}
+
+uint16_t bk_embed_display_rgb_height(void)
+{
+    return s_height;
+}
+
+int bk_embed_display_rgb_set_enabled(bool enabled)
+{
+    if (!s_initialized || s_handle == NULL) {
+        return BK_EMBED_DISPLAY_INVALID_STATE;
+    }
+
+    if (enabled == s_enabled) {
+        if (enabled) {
+            backlight_set(s_brightness > 0);
+        }
+        return BK_EMBED_DISPLAY_OK;
+    }
+
+    if (enabled) {
+        bk_pm_module_vote_ctrl_external_ldo(GPIO_CTRL_LDO_MODULE_LCD, s_ldo_pin, GPIO_OUTPUT_STATE_HIGH);
+    }
+
+    int rc = enabled ? map_rc(bk_display_open(s_handle)) : map_rc(bk_display_close(s_handle));
+    if (rc != BK_EMBED_DISPLAY_OK) {
+        return rc;
+    }
+
+    s_enabled = enabled;
+    if (enabled) {
+        backlight_set(s_brightness > 0);
+    } else {
+        backlight_set(false);
+    }
+    return BK_EMBED_DISPLAY_OK;
+}
+
+bool bk_embed_display_rgb_enabled(void)
+{
+    return s_enabled;
+}
+
+int bk_embed_display_rgb_set_brightness(uint8_t level)
+{
+    if (!s_initialized) {
+        return BK_EMBED_DISPLAY_INVALID_STATE;
+    }
+    s_brightness = level;
+    if (s_enabled) {
+        backlight_set(level > 0);
+    }
+    return BK_EMBED_DISPLAY_OK;
+}
+
+uint8_t bk_embed_display_rgb_brightness(void)
+{
+    return s_brightness;
+}
+
+int bk_embed_display_rgb_flush_rgb565(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint16_t *pixels, size_t len)
+{
+    if (!s_initialized || !s_enabled || s_handle == NULL || s_shadow == NULL) {
+        return BK_EMBED_DISPLAY_INVALID_STATE;
+    }
+    if (pixels == NULL || w == 0 || h == 0 || len < (size_t)w * (size_t)h) {
+        return BK_EMBED_DISPLAY_INVALID_ARG;
+    }
+    if ((uint32_t)x + w > s_width || (uint32_t)y + h > s_height) {
+        return BK_EMBED_DISPLAY_INVALID_ARG;
+    }
+
+    uint16_t *shadow = (uint16_t *)s_shadow->frame;
+    for (uint16_t row = 0; row < h; row++) {
+        memcpy(
+            &shadow[((uint32_t)y + row) * s_width + x],
+            &pixels[(uint32_t)row * w],
+            (size_t)w * sizeof(uint16_t));
+    }
+
+    frame_buffer_t *display_frame = frame_buffer_display_malloc(s_frame_size);
+    if (display_frame == NULL) {
+        BK_LOGE(TAG, "display frame malloc failed\r\n");
+        return BK_EMBED_DISPLAY_NO_MEM;
+    }
+    memcpy(display_frame->frame, s_shadow->frame, s_frame_size);
+    fill_frame_meta(display_frame);
+
+    int rc = map_rc(bk_display_flush(s_handle, display_frame, display_frame_free_cb));
+    if (rc != BK_EMBED_DISPLAY_OK) {
+        frame_buffer_display_free(display_frame);
+        return rc;
+    }
+
+    return BK_EMBED_DISPLAY_OK;
+}
+
+int bk_embed_display_rgb_debug_colorbar(void)
+{
+    if (!s_initialized || !s_enabled || s_handle == NULL) {
+        return BK_EMBED_DISPLAY_INVALID_STATE;
+    }
+
+    frame_buffer_t *display_frame = frame_buffer_display_malloc(s_frame_size);
+    if (display_frame == NULL) {
+        BK_LOGE(TAG, "debug colorbar frame malloc failed\r\n");
+        return BK_EMBED_DISPLAY_NO_MEM;
+    }
+
+    static const uint16_t colors[] = {
+        0xf800,
+        0xfc00,
+        0xffe0,
+        0x07e0,
+        0x07ff,
+        0x001f,
+        0x881f,
+    };
+    uint16_t *dst = (uint16_t *)display_frame->frame;
+    for (uint16_t y = 0; y < s_height; y++) {
+        for (uint16_t x = 0; x < s_width; x++) {
+            size_t index = ((size_t)x * (sizeof(colors) / sizeof(colors[0]))) / s_width;
+            dst[(size_t)y * s_width + x] = colors[index];
+        }
+    }
+    fill_frame_meta(display_frame);
+
+    int rc = map_rc(bk_display_flush(s_handle, display_frame, display_frame_free_cb));
+    if (rc != BK_EMBED_DISPLAY_OK) {
+        frame_buffer_display_free(display_frame);
+        return rc;
+    }
+
+    return BK_EMBED_DISPLAY_OK;
+}
+
+int bk_embed_display_rgb_debug_official_colorbar(void)
+{
+    const uint16_t width = lcd_device_h050iwv.width;
+    const uint16_t height = lcd_device_h050iwv.height;
+    const uint32_t frame_size = (uint32_t)width * (uint32_t)height * 2;
+
+    BK_LOGI(TAG, "official probe: media init\r\n");
+    media_service_init();
+    bk_pm_module_vote_psram_ctrl(PM_POWER_PSRAM_MODULE_NAME_LVGL_CODE_RUN, PM_POWER_MODULE_STATE_ON);
+
+    frame_buffer_t *display_frame = frame_buffer_display_malloc(frame_size);
+    if (display_frame == NULL) {
+        BK_LOGE(TAG, "official probe: frame malloc failed\r\n");
+        return BK_EMBED_DISPLAY_NO_MEM;
+    }
+
+    static const uint16_t colors[] = {
+        0xf800,
+        0xfc00,
+        0xffe0,
+        0x07e0,
+        0x07ff,
+        0x001f,
+        0x881f,
+    };
+    uint16_t *dst = (uint16_t *)display_frame->frame;
+    for (uint16_t y = 0; y < height; y++) {
+        for (uint16_t x = 0; x < width; x++) {
+            size_t index = ((size_t)x * (sizeof(colors) / sizeof(colors[0]))) / width;
+            dst[(size_t)y * width + x] = colors[index];
+        }
+    }
+    display_frame->fmt = PIXEL_FMT_RGB565;
+    display_frame->width = width;
+    display_frame->height = height;
+    display_frame->length = frame_size;
+    display_frame->size = frame_size;
+
+    bk_display_rgb_ctlr_config_t config = {
+        .lcd_device = &lcd_device_h050iwv,
+        .clk_pin = GPIO_0,
+        .cs_pin = GPIO_12,
+        .sda_pin = GPIO_1,
+        .rst_pin = GPIO_6,
+    };
+
+    if (s_debug_handle == NULL) {
+        BK_LOGI(TAG, "official probe: display new %ux%u\r\n", width, height);
+        int rc = map_rc(bk_display_rgb_new(&s_debug_handle, &config));
+        if (rc != BK_EMBED_DISPLAY_OK) {
+            BK_LOGE(TAG, "official probe: display new failed rc=%d\r\n", rc);
+            frame_buffer_display_free(display_frame);
+            return rc;
+        }
+    }
+
+    BK_LOGI(TAG, "official probe: ldo high\r\n");
+    bk_pm_module_vote_ctrl_external_ldo(GPIO_CTRL_LDO_MODULE_LCD, GPIO_13, GPIO_OUTPUT_STATE_HIGH);
+
+    BK_LOGI(TAG, "official probe: display open\r\n");
+    int rc = map_rc(bk_display_open(s_debug_handle));
+    if (rc != BK_EMBED_DISPLAY_OK) {
+        BK_LOGE(TAG, "official probe: display open failed rc=%d\r\n", rc);
+        frame_buffer_display_free(display_frame);
+        return rc;
+    }
+
+    BK_LOGI(TAG, "official probe: backlight high\r\n");
+    backlight_open_pin(GPIO_7);
+
+    BK_LOGI(TAG, "official probe: flush\r\n");
+    rc = map_rc(bk_display_flush(s_debug_handle, display_frame, display_frame_free_cb));
+    if (rc != BK_EMBED_DISPLAY_OK) {
+        BK_LOGE(TAG, "official probe: flush failed rc=%d\r\n", rc);
+        frame_buffer_display_free(display_frame);
+        return rc;
+    }
+
+    BK_LOGI(TAG, "official probe: done\r\n");
+    return BK_EMBED_DISPLAY_OK;
+}

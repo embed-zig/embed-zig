@@ -1,0 +1,29 @@
+.{
+    .name = .bk_launcher,
+    .version = "0.1.0",
+    .fingerprint = 0xf96d0549bed160bf,
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{
+        .bk = .{
+            .path = "../../../bk",
+        },
+        .glib = .{
+            .path = "../../../glib",
+        },
+        .apps = .{
+            .path = "../../../apps",
+        },
+        .thirdparty = .{
+            .path = "../../../thirdparty",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "build_config.zig",
+        "ap",
+        "cp",
+        "apps",
+        "partitions",
+    },
+}

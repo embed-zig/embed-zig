@@ -1,0 +1,20 @@
+.{
+    .name = .bk,
+    .version = "0.1.0",
+    .fingerprint = 0xcc72a30a440c4bbb,
+    .minimum_zig_version = "0.15.2",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "build_boards",
+        "lib",
+    },
+    .dependencies = .{
+        .glib = .{
+            .path = "../glib",
+        },
+        .embed = .{
+            .path = "../embed",
+        },
+    },
+}
