@@ -144,6 +144,18 @@ fn runSyncSmoke() void {
     log.info("AP sync smoke ok", .{});
 }
 
+fn runTimeSleepSmoke() void {
+    grt.time.sleep(0);
+    grt.time.sleepNanos(0);
+
+    const started = grt.time.instant.now();
+    grt.time.sleepMillis(1);
+    const ended = grt.time.instant.now();
+    const elapsed_ns = if (ended >= started) ended - started else 0;
+    const elapsed_ms = @divTrunc(elapsed_ns, grt.time.duration.MilliSecond);
+    log.info("AP time sleep smoke ok elapsed_ms={}", .{elapsed_ms});
+}
+
 fn runEasyFlashSmoke() void {
     const init_rc = easyflash_init();
     if (init_rc != 0) {
@@ -298,6 +310,7 @@ fn runNetSmoke() void {
 fn runSmokeSuite() void {
     runAllocatorSmoke();
     runSyncSmoke();
+    runTimeSleepSmoke();
     runThreadAndChannelSmoke();
     runNetSmoke();
     runEasyFlashSmoke();
@@ -310,6 +323,7 @@ fn apHeartbeatTask() void {
     while (true) {
         const count = heartbeatCount();
         runSyncSmoke();
+        runTimeSleepSmoke();
         runNetSmoke();
         log.info("AP heartbeat {}", .{count});
         grt.time.sleepNanos(@intCast(5 * grt.time.duration.Second));

@@ -11,9 +11,18 @@ pub const instant = struct {
 };
 
 pub const sleep = struct {
+    /// BK delay is millisecond-based. Positive nanosecond durations round up to
+    /// the next millisecond and saturate at the largest BK timeout value.
     pub fn sleep(ns: u64) void {
         if (ns == 0) return;
-        _ = rtos_delay_milliseconds(nsToMsCeil(ns));
+        if (builtin.is_test) return;
+        _ = rtos_delay_milliseconds(delayMillisForNanos(ns));
+    }
+
+    pub fn delayMillisForNanos(ns: u64) u32 {
+        if (ns == 0) return 0;
+        const ms = (ns / ns_per_ms) + @intFromBool(ns % ns_per_ms != 0);
+        return @intCast(@min(ms, glib.std.math.maxInt(u32)));
     }
 };
 
@@ -37,11 +46,6 @@ fn uptimeMs() u32 {
         return @intCast(@mod(ms, glib.std.math.maxInt(u32)));
     }
     return rtos_get_time();
-}
-
-fn nsToMsCeil(ns: u64) u32 {
-    const ms = (ns + ns_per_ms - 1) / ns_per_ms;
-    return @intCast(@min(ms, glib.std.math.maxInt(u32)));
 }
 
 extern fn rtos_get_time() u32;

@@ -1,5 +1,6 @@
 const std = @import("std");
 const armino = @import("bk_armino");
+const glib = @import("glib");
 const condition_impl = @import("grt/sync/Condition.zig").Impl;
 const mutex_impl = @import("grt/sync/Mutex.zig").Impl;
 const rwlock_impl = @import("grt/sync/RwLock.zig").Impl;
@@ -31,6 +32,8 @@ test "bk sync backend satisfies glib sync contract" {
 
 test "bk time backend satisfies glib time contract" {
     comptime {
+        const runtime_time = glib.time.make(time_impl);
+
         if (!@hasDecl(time_impl, "instant")) @compileError("missing BK instant time backend");
         if (!@hasDecl(time_impl.instant, "now")) @compileError("missing BK instant now");
         if (!@hasDecl(time_impl, "wall")) @compileError("missing BK wall time backend");
@@ -38,7 +41,20 @@ test "bk time backend satisfies glib time contract" {
         if (!@hasDecl(time_impl.wall, "set")) @compileError("missing BK wall set");
         if (!@hasDecl(time_impl, "sleep")) @compileError("missing BK sleep backend");
         if (!@hasDecl(time_impl.sleep, "sleep")) @compileError("missing BK sleep function");
+
+        if (@TypeOf(runtime_time.sleep) != fn (glib.time.duration.Duration) void) @compileError("BK runtime time.sleep has invalid shape");
+        if (@TypeOf(runtime_time.sleepMillis) != fn (u64) void) @compileError("BK runtime time.sleepMillis has invalid shape");
+        if (@TypeOf(runtime_time.sleepNanos) != fn (u64) void) @compileError("BK runtime time.sleepNanos has invalid shape");
     }
+}
+
+test "bk time sleep rounds nanoseconds to millisecond delay" {
+    try std.testing.expectEqual(@as(u32, 0), time_impl.sleep.delayMillisForNanos(0));
+    try std.testing.expectEqual(@as(u32, 1), time_impl.sleep.delayMillisForNanos(1));
+    try std.testing.expectEqual(@as(u32, 1), time_impl.sleep.delayMillisForNanos(999_999));
+    try std.testing.expectEqual(@as(u32, 1), time_impl.sleep.delayMillisForNanos(1_000_000));
+    try std.testing.expectEqual(@as(u32, 2), time_impl.sleep.delayMillisForNanos(1_000_001));
+    try std.testing.expectEqual(std.math.maxInt(u32), time_impl.sleep.delayMillisForNanos(std.math.maxInt(u64)));
 }
 
 test "bk armino exports compile" {
