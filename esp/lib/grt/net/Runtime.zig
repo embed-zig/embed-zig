@@ -6,6 +6,9 @@ const Condition = @import("../std/thread/Condition.zig");
 const Mutex = @import("../std/thread/Mutex.zig");
 
 const runtime = glib.net.runtime;
+const net_interfaces = glib.net.interfaces;
+const net_routes = glib.net.routes;
+const net_types = glib.net.types;
 const netip = glib.net.netip;
 const max_udp_payload_len = glib.std.math.maxInt(u16);
 
@@ -305,6 +308,64 @@ pub fn udp(domain: runtime.Domain) runtime.CreateError!Udp {
     return createRuntime(Udp, netconnType(domain, .udp));
 }
 
+pub const interfaces = struct {
+    pub fn list(out: []net_interfaces.Info) net_types.Error![]net_interfaces.Info {
+        var raw_buf: [16]binding.netif_info = undefined;
+        const cap = @min(raw_buf.len, out.len);
+        const raw_count = binding.espz_netif_list(&raw_buf, cap);
+        if (raw_count > cap) return error.BufferTooSmall;
+
+        var count: usize = 0;
+        while (count < raw_count) : (count += 1) {
+            out[count] = try infoFromBinding(raw_buf[count]);
+        }
+        return out[0..count];
+    }
+
+    pub fn addEventHook(_: net_interfaces.EventHook) net_types.Error!void {
+        return error.Unsupported;
+    }
+
+    pub fn removeEventHook(_: net_interfaces.EventHook) net_types.Error!void {
+        return error.Unsupported;
+    }
+};
+
+pub const routes = struct {
+    pub fn getDefault(family: net_types.AddressFamily) net_types.Error!?net_routes.Default {
+        var id: usize = 0;
+        try checkNetif(binding.espz_netif_get_default(&id));
+        if (id == 0) return null;
+
+        var raw_buf: [16]binding.netif_info = undefined;
+        const raw_count = binding.espz_netif_list(&raw_buf, raw_buf.len);
+        const count = @min(raw_count, raw_buf.len);
+        var index: usize = 0;
+        while (index < count) : (index += 1) {
+            const raw = raw_buf[index];
+            if (raw.id != id) continue;
+            return .{
+                .family = family,
+                .interface_id = id,
+                .gateway = if (raw.has_ipv4 != 0 and !isZero4(raw.gateway))
+                    netip.Addr.from4(raw.gateway)
+                else
+                    null,
+                .metric = if (raw.route_prio >= 0) @intCast(raw.route_prio) else 0,
+            };
+        }
+
+        return .{
+            .family = family,
+            .interface_id = id,
+        };
+    }
+
+    pub fn setDefault(route: net_routes.Default) net_types.Error!void {
+        try checkNetif(binding.espz_netif_set_default(route.interface_id));
+    }
+};
+
 export fn espz_lwip_runtime_on_event(ctx: ?*anyopaque, event: c_int, _: u16) void {
     const state: *State = @ptrCast(@alignCast(ctx orelse return));
     state.lock();
@@ -321,6 +382,45 @@ export fn espz_lwip_runtime_on_event(ctx: ?*anyopaque, event: c_int, _: u16) voi
         else => {},
     }
     state.wake();
+}
+
+fn infoFromBinding(raw: binding.netif_info) net_types.Error!net_interfaces.Info {
+    const name = raw.name[0..@min(raw.name_len, raw.name.len)];
+    var info = net_interfaces.Info.init(raw.id, name);
+    info.flags.up = raw.up != 0;
+    info.flags.running = raw.up != 0;
+    info.flags.default = raw.is_default != 0;
+    if (raw.has_ipv4 != 0) {
+        try info.appendAddress(.{
+            .family = .ipv4,
+            .address = netip.Addr.from4(raw.ipv4),
+            .prefix_len = prefixLen4(raw.netmask),
+        });
+    }
+    return info;
+}
+
+fn checkNetif(rc: c_int) net_types.Error!void {
+    if (rc == 0) return;
+    if (rc == -2) return error.InvalidInterface;
+    if (rc == -1) return error.Unsupported;
+    return error.Unexpected;
+}
+
+fn isZero4(bytes: [4]u8) bool {
+    return bytes[0] == 0 and bytes[1] == 0 and bytes[2] == 0 and bytes[3] == 0;
+}
+
+fn prefixLen4(bytes: [4]u8) u8 {
+    var prefix: u8 = 0;
+    for (bytes) |byte| {
+        var bit: u8 = 0;
+        while (bit < 8) : (bit += 1) {
+            if ((byte & (@as(u8, 0x80) >> @intCast(bit))) == 0) return prefix;
+            prefix += 1;
+        }
+    }
+    return prefix;
 }
 
 fn createRuntime(comptime Socket: type, netconn_type: u32) runtime.CreateError!Socket {

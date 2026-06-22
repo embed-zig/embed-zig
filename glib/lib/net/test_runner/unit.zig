@@ -5,9 +5,11 @@
 const testing_api = @import("testing");
 const cmux_mod = @import("../Cmux.zig");
 const http_mod = @import("../http.zig");
+const interfaces_mod = @import("../interfaces.zig");
 const netip_mod = @import("../netip.zig");
 const ntp_mod = @import("../ntp.zig");
 const resolver_mod = @import("../Resolver.zig");
+const routes_mod = @import("../routes.zig");
 const tcp_listener = @import("../TcpListener.zig");
 const textproto_mod = @import("../textproto.zig");
 const tls_mod = @import("../tls.zig");
@@ -26,6 +28,8 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
 
             t.parallel();
             t.run("netip", netip_mod.TestRunner(std));
+            t.run("interfaces", interfaces_mod.TestRunner(std));
+            t.run("routes", routes_mod.TestRunner(std));
             t.run("url", url_mod.TestRunner(std));
             t.run("http", http_mod.TestRunner(std, net));
             t.run("textproto", textproto_mod.TestRunner(std));

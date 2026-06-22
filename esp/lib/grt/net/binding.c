@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "esp_netif.h"
 #include "lwip/api.h"
 #include "lwip/err.h"
 #include "lwip/ip.h"
@@ -18,6 +19,19 @@ typedef struct {
     uint8_t bytes[16];
     uint32_t zone;
 } espz_lwip_ip_addr_t;
+
+typedef struct {
+    uintptr_t id;
+    char name[32];
+    size_t name_len;
+    uint8_t up;
+    uint8_t is_default;
+    int route_prio;
+    uint8_t has_ipv4;
+    uint8_t ipv4[4];
+    uint8_t gateway[4];
+    uint8_t netmask[4];
+} espz_netif_info_t;
 
 extern void espz_lwip_runtime_on_event(void *ctx, int event, uint16_t len);
 
@@ -257,4 +271,79 @@ int espz_lwip_netconn_set_tcp_no_delay(struct netconn *conn, int enabled)
         tcp_nagle_enable(conn->pcb.tcp);
     }
     return (int)ERR_OK;
+}
+
+static void espz_netif_fill_ip4(uint8_t out[4], esp_ip4_addr_t addr)
+{
+    out[0] = esp_ip4_addr1(&addr);
+    out[1] = esp_ip4_addr2(&addr);
+    out[2] = esp_ip4_addr3(&addr);
+    out[3] = esp_ip4_addr4(&addr);
+}
+
+static esp_netif_t *espz_netif_find_by_id(uintptr_t id)
+{
+    esp_netif_t *netif = NULL;
+    while ((netif = esp_netif_next_unsafe(netif)) != NULL) {
+        if ((uintptr_t)netif == id) {
+            return netif;
+        }
+    }
+    return NULL;
+}
+
+size_t espz_netif_list(espz_netif_info_t *out, size_t cap)
+{
+    size_t count = 0;
+    esp_netif_t *default_netif = esp_netif_get_default_netif();
+    esp_netif_t *netif = NULL;
+    while ((netif = esp_netif_next_unsafe(netif)) != NULL) {
+        if (count >= cap) {
+            return count + 1;
+        }
+
+        espz_netif_info_t *info = &out[count];
+        memset(info, 0, sizeof(*info));
+        info->id = (uintptr_t)netif;
+        info->up = esp_netif_is_netif_up(netif) ? 1U : 0U;
+        info->is_default = (netif == default_netif) ? 1U : 0U;
+        info->route_prio = esp_netif_get_route_prio(netif);
+
+        const char *desc = esp_netif_get_desc(netif);
+        if (desc != NULL) {
+            size_t len = strnlen(desc, sizeof(info->name));
+            memcpy(info->name, desc, len);
+            info->name_len = len;
+        }
+
+        esp_netif_ip_info_t ip;
+        if (esp_netif_get_ip_info(netif, &ip) == ESP_OK && ip.ip.addr != 0) {
+            info->has_ipv4 = 1U;
+            espz_netif_fill_ip4(info->ipv4, ip.ip);
+            espz_netif_fill_ip4(info->gateway, ip.gw);
+            espz_netif_fill_ip4(info->netmask, ip.netmask);
+        }
+        count++;
+    }
+    return count;
+}
+
+int espz_netif_get_default(uintptr_t *out_id)
+{
+    esp_netif_t *netif = esp_netif_get_default_netif();
+    if (netif == NULL) {
+        *out_id = 0;
+        return 0;
+    }
+    *out_id = (uintptr_t)netif;
+    return 0;
+}
+
+int espz_netif_set_default(uintptr_t id)
+{
+    esp_netif_t *netif = espz_netif_find_by_id(id);
+    if (netif == NULL) {
+        return -2;
+    }
+    return esp_netif_set_default_netif(netif) == ESP_OK ? 0 : -3;
 }

@@ -57,10 +57,6 @@ const PlatformCtx = struct {
             .allocator = allocator,
         });
     }
-
-    pub fn netManager() esp.net.Manager {
-        return esp.net.Manager.init();
-    }
 };
 
 const App = if (launcher_mode == .app)

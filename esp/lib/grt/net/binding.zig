@@ -7,6 +7,19 @@ pub const ip_addr = extern struct {
     zone: u32,
 };
 
+pub const netif_info = extern struct {
+    id: usize,
+    name: [32]u8,
+    name_len: usize,
+    up: u8,
+    is_default: u8,
+    route_prio: c_int,
+    has_ipv4: u8,
+    ipv4: [4]u8,
+    gateway: [4]u8,
+    netmask: [4]u8,
+};
+
 pub const netconn_event_rcvplus: c_int = 0;
 pub const netconn_event_rcvminus: c_int = 1;
 pub const netconn_event_sendplus: c_int = 2;
@@ -59,3 +72,7 @@ pub extern fn espz_lwip_netbuf_from_addr(buf: *netbuf, addr: *ip_addr, port: *u1
 pub extern fn espz_lwip_netconn_set_socket_reuse_addr(conn: *netconn, enabled: c_int) c_int;
 pub extern fn espz_lwip_netconn_set_socket_broadcast(conn: *netconn, enabled: c_int) c_int;
 pub extern fn espz_lwip_netconn_set_tcp_no_delay(conn: *netconn, enabled: c_int) c_int;
+
+pub extern fn espz_netif_list(out: [*]netif_info, cap: usize) usize;
+pub extern fn espz_netif_get_default(out_id: *usize) c_int;
+pub extern fn espz_netif_set_default(id: usize) c_int;

@@ -1,8 +1,5 @@
-const embed = @import("embed");
 const glib = @import("glib");
 const launcher = @import("launcher");
-
-const net = embed.net;
 
 fn EmptyRegistry(comptime T: type) type {
     return struct {
@@ -76,13 +73,11 @@ fn MinimalZuxApp(comptime platform_grt: type) type {
 }
 
 pub const TestPlatformCtx = struct {
+    pub const Net = MockNet;
+
     pub fn setup() !void {}
 
     pub fn teardown() void {}
-
-    pub fn netManager() MockNetManager {
-        return .{};
-    }
 };
 
 pub fn make(comptime platform_ctx: type, comptime platform_grt: type) type {
@@ -92,7 +87,7 @@ pub fn make(comptime platform_ctx: type, comptime platform_grt: type) type {
         pub const ZuxApp = MinimalZuxApp(platform_grt);
 
         pub const title = "net-smoke";
-        pub const description = "Runtime-bound embed.net route control smoke test.";
+        pub const description = "Runtime-bound glib.net route control smoke test.";
 
         allocator: glib.std.mem.Allocator,
         zux_app: ZuxApp,
@@ -177,27 +172,25 @@ pub fn run(comptime platform_ctx: type, comptime platform_grt: type) !void {
 
 fn runSmoke(comptime platform_ctx: type, comptime platform_grt: type) !void {
     const log = platform_grt.std.log.scoped(.zux_net_smoke);
+    const platform_net = if (@hasDecl(platform_ctx, "Net")) platform_ctx.Net else platform_grt.net;
 
     if (@hasDecl(platform_grt.net.Runtime, "init")) {
         try platform_grt.net.Runtime.init();
     }
 
-    var manager_impl = platform_ctx.netManager();
-    const manager = manager_impl.interfaceManager();
-
-    var interfaces_buf: [8]net.iface.Info = undefined;
-    const interfaces = try manager.listInterfaces(&interfaces_buf);
+    var interfaces_buf: [8]platform_net.InterfaceInfo = undefined;
+    const interfaces = try platform_net.interfaces.list(&interfaces_buf);
     log.info("net smoke interfaces={d}", .{interfaces.len});
 
     for (interfaces) |info| {
         logInterface(platform_grt, info);
     }
 
-    const default_route = try manager.getDefaultRoute(.ipv4);
+    const default_route = try platform_net.routes.getDefault(.ipv4);
     if (default_route) |route| {
         log.info("net smoke default route interface_id={d} metric={d}", .{ route.interface_id, route.metric });
-        try manager.setDefaultRoute(route);
-        const updated = (try manager.getDefaultRoute(.ipv4)) orelse return error.DefaultRouteLost;
+        try platform_net.routes.setDefault(route);
+        const updated = (try platform_net.routes.getDefault(.ipv4)) orelse return error.DefaultRouteLost;
         if (updated.interface_id != route.interface_id) return error.DefaultRouteChanged;
         log.info("net smoke set default route passed interface_id={d}", .{updated.interface_id});
     } else {
@@ -207,7 +200,7 @@ fn runSmoke(comptime platform_ctx: type, comptime platform_grt: type) !void {
     log.info("net smoke passed", .{});
 }
 
-fn logInterface(comptime platform_grt: type, info: net.iface.Info) void {
+fn logInterface(comptime platform_grt: type, info: anytype) void {
     const log = platform_grt.std.log.scoped(.zux_net_smoke);
     log.info(
         "netif id={d} name={s} up={} running={} default={} addresses={d}",
@@ -233,40 +226,46 @@ fn logInterface(comptime platform_grt: type, info: net.iface.Info) void {
     }
 }
 
-const MockNetManager = struct {
-    default_route: ?net.route.Default = .{
-        .family = .ipv4,
-        .interface_id = 1,
-        .gateway = glib.net.netip.Addr.from4(.{ 192, 168, 1, 1 }),
-        .metric = 10,
-    },
+const MockNet = struct {
+    pub const InterfaceId = glib.net.InterfaceId;
+    pub const AddressFamily = glib.net.AddressFamily;
+    pub const AddressInfo = glib.net.AddressInfo;
+    pub const InterfaceInfo = glib.net.InterfaceInfo;
+    pub const DefaultRoute = glib.net.DefaultRoute;
 
-    pub fn interfaceManager(self: *MockNetManager) net.Manager {
-        return net.Manager.init(self);
-    }
-
-    pub fn listInterfaces(_: *MockNetManager, out: []net.iface.Info) net.Error![]net.iface.Info {
-        if (out.len < 1) return error.BufferTooSmall;
-        out[0] = net.iface.Info.init(1, "wifi0");
-        out[0].flags.up = true;
-        out[0].flags.running = true;
-        out[0].flags.default = true;
-        try out[0].appendAddress(.{
-            .family = .ipv4,
-            .address = glib.net.netip.Addr.from4(.{ 192, 168, 1, 20 }),
-            .prefix_len = 24,
-        });
-        return out[0..1];
-    }
-
-    pub fn getDefaultRoute(self: *MockNetManager, family: net.AddressFamily) net.Error!?net.route.Default {
-        if (self.default_route) |route| {
-            if (route.family == family) return route;
+    pub const interfaces = struct {
+        pub fn list(out: []InterfaceInfo) glib.net.types.Error![]InterfaceInfo {
+            if (out.len < 1) return error.BufferTooSmall;
+            out[0] = InterfaceInfo.init(1, "wifi0");
+            out[0].flags.up = true;
+            out[0].flags.running = true;
+            out[0].flags.default = true;
+            try out[0].appendAddress(.{
+                .family = .ipv4,
+                .address = glib.net.netip.Addr.from4(.{ 192, 168, 1, 20 }),
+                .prefix_len = 24,
+            });
+            return out[0..1];
         }
-        return null;
-    }
+    };
 
-    pub fn setDefaultRoute(self: *MockNetManager, default_route: net.route.Default) net.Error!void {
-        self.default_route = default_route;
-    }
+    pub const routes = struct {
+        var default_route: ?DefaultRoute = .{
+            .family = .ipv4,
+            .interface_id = 1,
+            .gateway = glib.net.netip.Addr.from4(.{ 192, 168, 1, 1 }),
+            .metric = 10,
+        };
+
+        pub fn getDefault(family: AddressFamily) glib.net.types.Error!?DefaultRoute {
+            if (default_route) |route| {
+                if (route.family == family) return route;
+            }
+            return null;
+        }
+
+        pub fn setDefault(route: DefaultRoute) glib.net.types.Error!void {
+            default_route = route;
+        }
+    };
 };
