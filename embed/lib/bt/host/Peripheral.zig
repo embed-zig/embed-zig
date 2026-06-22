@@ -217,10 +217,7 @@ pub fn make(comptime grt: type) type {
             if ((entry.cccd_value & 0x0001) == 0) return error.NotSubscribed;
             var buf: [att.MAX_PDU_LEN]u8 = undefined;
             const pdu = att.encodeNotification(&buf, entry.value_handle, data);
-            self.hci.sendAcl(conn_handle, pdu) catch |err| return switch (err) {
-                error.Disconnected => error.NotConnected,
-                else => error.Unexpected,
-            };
+            self.hci.sendAcl(conn_handle, pdu) catch |err| return mapHciGattError(err);
         }
 
         pub fn indicate(self: *Self, conn_handle: u16, char_uuid: u16, data: []const u8) bt.GattError!void {
@@ -231,10 +228,7 @@ pub fn make(comptime grt: type) type {
             var buf: [att.MAX_PDU_LEN]u8 = undefined;
             var resp_buf: [att.MAX_PDU_LEN]u8 = undefined;
             const pdu = att.encodeIndication(&buf, entry.value_handle, data);
-            _ = self.hci.sendAttRequest(conn_handle, pdu, &resp_buf) catch |err| return switch (err) {
-                error.Disconnected => error.NotConnected,
-                else => error.Unexpected,
-            };
+            _ = self.hci.sendAttRequest(conn_handle, pdu, &resp_buf) catch |err| return mapHciGattError(err);
         }
 
         pub fn disconnect(self: *Self, conn_handle: u16) void {
@@ -370,6 +364,17 @@ pub fn make(comptime grt: type) type {
             self.mutex.unlock();
             defer self.allocator.free(snapshot);
             for (snapshot) |hook| hook.cb(hook.ctx, info);
+        }
+
+        fn mapHciGattError(err: root.Hci.Error) bt.GattError {
+            return switch (err) {
+                error.Disconnected => error.NotConnected,
+                error.Busy => error.Busy,
+                error.Timeout => error.Timeout,
+                error.Rejected => error.Rejected,
+                error.HwError => error.HwError,
+                else => error.Unexpected,
+            };
         }
 
         fn linkToConnectionInfo(link: root.Hci.Link) bt.ConnectionInfo {
@@ -649,6 +654,13 @@ pub fn make(comptime grt: type) type {
                         }
                     }
                     self.mutex.unlock();
+                    if (needs_response and subscription_info != null) {
+                        var response_buf: [att.MAX_PDU_LEN]u8 = undefined;
+                        const response = att.encodeWriteResponse(&response_buf);
+                        self.hci.sendAcl(conn_handle, response) catch return 0;
+                        self.fireSubscriptionEvent(subscription_info.?);
+                        return 0;
+                    }
                     if (subscription_info) |info| self.fireSubscriptionEvent(info);
                     if (needs_response) return att.encodeWriteResponse(out).len;
                     return 0;
@@ -870,6 +882,77 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     .error_response => |err| try grt.std.testing.expectEqual(att.ErrorCode.invalid_attribute_value_length, err.error_code),
                     else => return error.ExpectedInvalidLength,
                 }
+            }
+
+            {
+                const FailingGattHci = struct {
+                    next_error: root.Hci.Error = error.Busy,
+
+                    pub fn retain(_: *@This()) root.Hci.Error!void {}
+                    pub fn release(_: *@This()) void {}
+                    pub fn setCentralListener(_: *@This(), _: root.Hci.CentralListener) void {}
+                    pub fn setPeripheralListener(_: *@This(), _: root.Hci.PeripheralListener) void {}
+                    pub fn startScanning(_: *@This(), _: root.Hci.ScanConfig) root.Hci.Error!void {}
+                    pub fn stopScanning(_: *@This()) void {}
+                    pub fn startAdvertising(_: *@This(), _: root.Hci.AdvConfig) root.Hci.Error!void {}
+                    pub fn stopAdvertising(_: *@This()) void {}
+                    pub fn connect(_: *@This(), _: root.Hci.BdAddr, _: root.Hci.AddrType, _: root.Hci.ConnConfig) root.Hci.Error!void {}
+                    pub fn cancelConnect(_: *@This()) void {}
+                    pub fn disconnect(_: *@This(), _: u16, _: u8) void {}
+                    pub fn sendAcl(self: *@This(), _: u16, _: []const u8) root.Hci.Error!void {
+                        return self.next_error;
+                    }
+                    pub fn sendAttRequest(self: *@This(), _: u16, _: []const u8, _: []u8) root.Hci.Error!usize {
+                        return self.next_error;
+                    }
+                    pub fn getAddr(_: *@This()) ?root.Hci.BdAddr {
+                        return null;
+                    }
+                    pub fn getLink(_: *@This(), _: root.Hci.Role) ?root.Hci.Link {
+                        return null;
+                    }
+                    pub fn getLinkByHandle(_: *@This(), _: u16) ?root.Hci.Link {
+                        return null;
+                    }
+                    pub fn isScanning(_: *@This()) bool {
+                        return false;
+                    }
+                    pub fn isAdvertising(_: *@This()) bool {
+                        return false;
+                    }
+                    pub fn isConnectingCentral(_: *@This()) bool {
+                        return false;
+                    }
+                    pub fn deinit(_: *@This()) void {}
+                };
+
+                var hci = FailingGattHci{ .next_error = error.Busy };
+                var peripheral = Impl{
+                    .hci = root.Hci.make(&hci),
+                    .allocator = grt.std.testing.allocator,
+                    .state = .connected,
+                    .conn_handle = 0x0040,
+                };
+                defer peripheral.chars.deinit(grt.std.testing.allocator);
+                defer peripheral.hooks.deinit(grt.std.testing.allocator);
+                defer peripheral.services.deinit(grt.std.testing.allocator);
+
+                peripheral.setConfig(.{
+                    .services = &.{
+                        bt.Service(0x180D, &.{
+                            bt.Char(0x2A37, (bt.CharConfig{}).withNotify().withIndicate()),
+                        }),
+                    },
+                });
+                peripheral.chars.items[0].cccd_value = 0x0003;
+
+                try grt.std.testing.expectError(error.Busy, peripheral.notify(0x0040, 0x2A37, "x"));
+                hci.next_error = error.Rejected;
+                try grt.std.testing.expectError(error.Rejected, peripheral.indicate(0x0040, 0x2A37, "x"));
+                hci.next_error = error.HwError;
+                try grt.std.testing.expectError(error.HwError, peripheral.notify(0x0040, 0x2A37, "x"));
+                hci.next_error = error.Disconnected;
+                try grt.std.testing.expectError(error.NotConnected, peripheral.indicate(0x0040, 0x2A37, "x"));
             }
         }
     };

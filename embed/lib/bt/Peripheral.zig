@@ -192,6 +192,10 @@ pub const GattError = error{
     InvalidHandle,
     NotConnected,
     NotSubscribed,
+    Busy,
+    Timeout,
+    Rejected,
+    HwError,
     Unexpected,
 };
 

@@ -106,6 +106,7 @@ pub fn make(comptime grt: type) type {
             self.mutex.unlock();
             if (need_start) {
                 self.start() catch |err| {
+                    log.warn("hci retain failed while starting host: err={s}", .{@errorName(err)});
                     self.mutex.lock();
                     glib.std.debug.assert(self.active_roles != 0);
                     self.active_roles -= 1;
@@ -155,14 +156,23 @@ pub fn make(comptime grt: type) type {
             self.mutex.unlock();
 
             self.transport.setReadDeadline(null);
-            const task = try grt.task.go("bt/hci/recv", self.config.task_options, glib.task.Routine.init(self, recvLoop));
+            const task = grt.task.go("bt/hci/recv", self.config.task_options, glib.task.Routine.init(self, recvLoop)) catch |err| {
+                log.warn("hci host start failed: recv task spawn err={s}", .{@errorName(err)});
+                return err;
+            };
             self.mutex.lock();
             self.recv_task = task;
             self.mutex.unlock();
             errdefer self.stop();
 
-            try self.sendCommandSync(commands.RESET, &.{});
-            try self.sendCommandSync(commands.READ_BD_ADDR, &.{});
+            self.sendCommandSync(commands.RESET, &.{}) catch |err| {
+                log.warn("hci host start failed: RESET err={s}", .{@errorName(err)});
+                return err;
+            };
+            self.sendCommandSync(commands.READ_BD_ADDR, &.{}) catch |err| {
+                log.warn("hci host start failed: READ_BD_ADDR err={s}", .{@errorName(err)});
+                return err;
+            };
             if (self.cmd_status.isSuccess() and self.cmd_return_len >= 6) {
                 self.mutex.lock();
                 @memcpy(&self.gap.bd_addr, self.cmd_return_params[0..6]);
@@ -173,13 +183,22 @@ pub fn make(comptime grt: type) type {
             // Set event mask to receive LE Meta, Disconnection Complete, etc.
             var mask_buf: [8]u8 = undefined;
             grt.std.mem.writeInt(u64, &mask_buf, 0x20001FFFFFFFFFFF, .little);
-            try self.sendCommandSync(commands.SET_EVENT_MASK, &mask_buf);
+            self.sendCommandSync(commands.SET_EVENT_MASK, &mask_buf) catch |err| {
+                log.warn("hci host start failed: SET_EVENT_MASK err={s}", .{@errorName(err)});
+                return err;
+            };
 
             var le_mask_buf: [8]u8 = undefined;
             grt.std.mem.writeInt(u64, &le_mask_buf, le_event_mask, .little);
-            try self.sendCommandSync(commands.LE_SET_EVENT_MASK, &le_mask_buf);
+            self.sendCommandSync(commands.LE_SET_EVENT_MASK, &le_mask_buf) catch |err| {
+                log.warn("hci host start failed: LE_SET_EVENT_MASK err={s}", .{@errorName(err)});
+                return err;
+            };
 
-            try self.sendCommandSync(commands.LE_READ_BUFFER_SIZE, &.{});
+            self.sendCommandSync(commands.LE_READ_BUFFER_SIZE, &.{}) catch |err| {
+                log.warn("hci host start failed: LE_READ_BUFFER_SIZE err={s}", .{@errorName(err)});
+                return err;
+            };
             if (self.cmd_status.isSuccess() and self.cmd_return_len >= 3) {
                 const acl_len = grt.std.mem.readInt(u16, self.cmd_return_params[0..2], .little);
                 const acl_packets: u16 = self.cmd_return_params[2];
@@ -553,7 +572,9 @@ pub fn make(comptime grt: type) type {
                     self.dispatching_peripheral_att = false;
                     self.mutex.unlock();
                     if (resp_len > 0) {
-                        self.sendAcl(conn_handle, resp_buf[0..resp_len]) catch {};
+                        self.sendAcl(conn_handle, resp_buf[0..resp_len]) catch |err| {
+                            log.err("ATT response send failed conn={} req=0x{x} err={s}", .{ conn_handle, opcode, @errorName(err) });
+                        };
                     }
                     return;
                 }

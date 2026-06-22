@@ -16,6 +16,7 @@ pub fn make(comptime grt: type) type {
         const min_wait_timeout: glib.time.duration.Duration = glib.time.duration.Second;
         const connect_timeout: glib.time.duration.Duration = 5 * glib.time.duration.Second;
         const CCCD_DISCOVERY_MAX_ATTEMPTS: u32 = 3;
+        const log = grt.std.log.scoped(.bt_host_central);
 
         hci: bt.Hci,
         state: bt.Central.State = .idle,
@@ -99,7 +100,10 @@ pub fn make(comptime grt: type) type {
 
         pub fn start(self: *Self) bt.Central.StartError!void {
             if (self.started) return;
-            self.hci.retain() catch return error.Unexpected;
+            self.hci.retain() catch |err| {
+                log.warn("central start failed: hci retain error={s}", .{@errorName(err)});
+                return error.Unexpected;
+            };
             errdefer {
                 self.hci.release();
             }
@@ -339,11 +343,7 @@ pub fn make(comptime grt: type) type {
         pub fn gattWriteNoResp(self: *Self, conn_handle: u16, attr_handle: u16, data: []const u8) bt.Central.GattError!void {
             var req_buf: [att.MAX_PDU_LEN]u8 = undefined;
             const req = gatt_client.encodeWriteCommand(&req_buf, attr_handle, data);
-            self.hci.sendAcl(conn_handle, req) catch |err| return switch (err) {
-                error.Timeout => error.Timeout,
-                error.Disconnected => error.Disconnected,
-                else => error.Unexpected,
-            };
+            self.hci.sendAcl(conn_handle, req) catch |err| return mapHciGattError(err);
         }
 
         pub fn exchangeMtu(self: *Self, conn_handle: u16, mtu: u16) bt.Central.GattError!u16 {
@@ -450,12 +450,19 @@ pub fn make(comptime grt: type) type {
         }
 
         fn sendAttRequest(self: *Self, conn_handle: u16, req: []const u8, out: []u8) bt.Central.GattError![]const u8 {
-            const n = self.hci.sendAttRequest(conn_handle, req, out) catch |err| return switch (err) {
+            const n = self.hci.sendAttRequest(conn_handle, req, out) catch |err| return mapHciGattError(err);
+            return out[0..n];
+        }
+
+        fn mapHciGattError(err: bt.Hci.Error) bt.Central.GattError {
+            return switch (err) {
+                error.Busy => error.Busy,
                 error.Timeout => error.Timeout,
+                error.Rejected => error.Rejected,
                 error.Disconnected => error.Disconnected,
+                error.HwError => error.HwError,
                 else => error.Unexpected,
             };
-            return out[0..n];
         }
 
         fn discoverCccd(
@@ -763,6 +770,58 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             try grt.std.testing.expectError(error.Rejected, central.connect(.{ 1, 2, 3, 4, 5, 6 }, .public, .{}));
             try grt.std.testing.expectEqual(bt.Central.State.idle, central.getState());
+
+            const FailingGattHci = struct {
+                next_error: bt.Hci.Error = error.Busy,
+
+                pub fn retain(_: *@This()) bt.Hci.Error!void {}
+                pub fn release(_: *@This()) void {}
+                pub fn setCentralListener(_: *@This(), _: bt.Hci.CentralListener) void {}
+                pub fn setPeripheralListener(_: *@This(), _: bt.Hci.PeripheralListener) void {}
+                pub fn startScanning(_: *@This(), _: bt.Hci.ScanConfig) bt.Hci.Error!void {}
+                pub fn stopScanning(_: *@This()) void {}
+                pub fn startAdvertising(_: *@This(), _: bt.Hci.AdvConfig) bt.Hci.Error!void {}
+                pub fn stopAdvertising(_: *@This()) void {}
+                pub fn connect(_: *@This(), _: bt.Hci.BdAddr, _: bt.Hci.AddrType, _: bt.Hci.ConnConfig) bt.Hci.Error!void {}
+                pub fn cancelConnect(_: *@This()) void {}
+                pub fn disconnect(_: *@This(), _: u16, _: u8) void {}
+                pub fn sendAcl(self: *@This(), _: u16, _: []const u8) bt.Hci.Error!void {
+                    return self.next_error;
+                }
+                pub fn sendAttRequest(self: *@This(), _: u16, _: []const u8, _: []u8) bt.Hci.Error!usize {
+                    return self.next_error;
+                }
+                pub fn getAddr(_: *@This()) ?bt.Hci.BdAddr {
+                    return null;
+                }
+                pub fn getLink(_: *@This(), _: bt.Hci.Role) ?bt.Hci.Link {
+                    return null;
+                }
+                pub fn getLinkByHandle(_: *@This(), _: u16) ?bt.Hci.Link {
+                    return null;
+                }
+                pub fn isScanning(_: *@This()) bool {
+                    return false;
+                }
+                pub fn isAdvertising(_: *@This()) bool {
+                    return false;
+                }
+                pub fn isConnectingCentral(_: *@This()) bool {
+                    return false;
+                }
+                pub fn deinit(_: *@This()) void {}
+            };
+
+            var failing_gatt_hci = FailingGattHci{ .next_error = error.Busy };
+            var failing_gatt_central = Impl.init(bt.Hci.make(&failing_gatt_hci), grt.std.testing.allocator);
+            defer failing_gatt_central.deinit();
+
+            try grt.std.testing.expectError(error.Busy, failing_gatt_central.gattWriteNoResp(0x0040, 0x0002, "x"));
+            failing_gatt_hci.next_error = error.Rejected;
+            try grt.std.testing.expectError(error.Rejected, failing_gatt_central.gattWrite(0x0040, 0x0002, "x"));
+            failing_gatt_hci.next_error = error.HwError;
+            var read_buf: [1]u8 = undefined;
+            try grt.std.testing.expectError(error.HwError, failing_gatt_central.gattRead(0x0040, 0x0002, &read_buf));
 
             const PaginatedDiscoveryHci = struct {
                 service_requests: u32 = 0,

@@ -129,8 +129,11 @@ pub const ConnectError = error{
 
 pub const GattError = error{
     AttError,
+    Busy,
     Timeout,
+    Rejected,
     Disconnected,
+    HwError,
     Unexpected,
 };
 
