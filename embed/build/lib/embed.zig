@@ -6,6 +6,7 @@ const lib_bt = @import("bt.zig");
 const lib_drivers = @import("drivers.zig");
 const lib_ledstrip = @import("ledstrip.zig");
 const lib_motion = @import("motion.zig");
+const lib_net = @import("net.zig");
 const lib_nfc = @import("nfc.zig");
 const lib_system = @import("system.zig");
 const lib_zux = @import("zux.zig");
@@ -21,6 +22,7 @@ pub fn create(
     const drivers = lib_drivers.create(b, target, optimize);
     const ledstrip = lib_ledstrip.create(b, target, optimize);
     const motion = lib_motion.create(b, target, optimize);
+    const net = lib_net.create(b, target, optimize);
     const nfc = lib_nfc.create(b, target, optimize);
     const system = lib_system.create(b, target, optimize);
     const zux = lib_zux.create(b, target, optimize);
@@ -41,6 +43,7 @@ pub fn create(
     });
     lib_ledstrip.link(b, target, optimize, ledstrip);
     lib_motion.link(b, target, optimize, motion);
+    lib_net.link(b, target, optimize, net);
     lib_nfc.link(b, target, optimize, nfc);
     lib_system.link(b, target, optimize, system);
     lib_zux.link(b, target, optimize, zux, .{
@@ -59,6 +62,7 @@ pub fn create(
     mod.addImport("drivers", drivers);
     mod.addImport("ledstrip", ledstrip);
     mod.addImport("motion", motion);
+    mod.addImport("embed_net", net);
     mod.addImport("nfc", nfc);
     mod.addImport("system", system);
     mod.addImport("zux", zux);
