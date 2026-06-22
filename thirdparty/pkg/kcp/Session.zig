@@ -1,5 +1,7 @@
 const glib = @import("glib");
 const kcp = @import("../kcp.zig");
+const BytesRingBuf = @import("BytesRingBuf.zig");
+const PacketRingBuf = @import("PacketRingBuf.zig");
 
 const AddrPort = glib.net.netip.AddrPort;
 const ikcp_max_send_segments: usize = 127;
@@ -8,11 +10,12 @@ const udp_packet_capacity: usize = 2048;
 const read_loop_poll_ms: u32 = 100;
 const drive_busy_wait_ms: u32 = 1;
 const drive_recv_message_limit: usize = 16;
+const udp_write_error_backoff = 1 * glib.time.duration.MilliSecond;
 
 pub const Config = struct {
     mtu: u32 = 1400,
-    send_window: u32 = 256,
-    recv_window: u32 = 256,
+    send_window: u32 = 64,
+    recv_window: u32 = 64,
     nodelay: i32 = 1,
     interval_ms: i32 = 10,
     resend: i32 = 2,
@@ -97,6 +100,8 @@ pub fn make(comptime grt: type) type {
         const Mutex = grt.sync.Mutex;
         const Condition = grt.sync.Condition;
         const SegmentPool = kcp.SegmentPool.make(grt);
+        const BytesRing = BytesRingBuf.make(grt);
+        const PacketRing = PacketRingBuf.make(grt);
 
         allocator: grt.std.mem.Allocator,
         pc: grt.net.PacketConn,
@@ -108,24 +113,14 @@ pub fn make(comptime grt: type) type {
         output_err: ?anyerror = null,
         config: Config,
         stats: Stats = .{},
+        stats_mu: Mutex = .{},
         start_at: glib.time.instant.Time,
-        udp_rx_buf: []u8,
-        udp_rx_lens: []usize,
-        udp_tx_buf: []u8,
-        udp_tx_lens: []usize,
-        tx_buf: []u8,
-        rx_buf: []u8,
-        udp_rx_head: usize = 0,
-        udp_rx_len: usize = 0,
-        udp_rx_reserved: bool = false,
-        udp_tx_head: usize = 0,
-        udp_tx_len: usize = 0,
-        tx_head: usize = 0,
-        tx_len: usize = 0,
-        rx_head: usize = 0,
-        rx_len: usize = 0,
+        udp_rx: PacketRing,
+        udp_tx: PacketRing,
+        tx_bytes: BytesRing,
+        rx_bytes: BytesRing,
         mu: Mutex = .{},
-        cond: Condition = .{},
+        session_cond: Condition = .{},
         driver_err: ?anyerror = null,
         last_debug_state: DebugState = emptyDebugState(),
         last_write_wait_log_ms: u32 = 0,
@@ -181,12 +176,10 @@ pub fn make(comptime grt: type) type {
                 .output_ctx = undefined,
                 .config = config,
                 .start_at = start_at,
-                .udp_rx_buf = undefined,
-                .udp_rx_lens = undefined,
-                .udp_tx_buf = undefined,
-                .udp_tx_lens = undefined,
-                .tx_buf = undefined,
-                .rx_buf = undefined,
+                .udp_rx = .{},
+                .udp_tx = .{},
+                .tx_bytes = .{},
+                .rx_bytes = .{},
             };
         }
 
@@ -194,18 +187,14 @@ pub fn make(comptime grt: type) type {
             const allocator = self.allocator;
             const config = self.config;
 
-            self.udp_rx_buf = try allocator.alloc(u8, udp_ring_slots * udp_packet_capacity);
-            errdefer allocator.free(self.udp_rx_buf);
-            self.udp_rx_lens = try allocator.alloc(usize, udp_ring_slots);
-            errdefer allocator.free(self.udp_rx_lens);
-            self.udp_tx_buf = try allocator.alloc(u8, udp_ring_slots * udp_packet_capacity);
-            errdefer allocator.free(self.udp_tx_buf);
-            self.udp_tx_lens = try allocator.alloc(usize, udp_ring_slots);
-            errdefer allocator.free(self.udp_tx_lens);
-            self.tx_buf = try allocator.alloc(u8, config.tx_buffer_capacity);
-            errdefer allocator.free(self.tx_buf);
-            self.rx_buf = try allocator.alloc(u8, config.rx_buffer_capacity);
-            errdefer allocator.free(self.rx_buf);
+            try self.udp_rx.init(allocator, udp_ring_slots, udp_packet_capacity);
+            errdefer self.udp_rx.deinit(allocator);
+            try self.udp_tx.init(allocator, udp_ring_slots, udp_packet_capacity);
+            errdefer self.udp_tx.deinit(allocator);
+            try self.tx_bytes.init(allocator, config.tx_buffer_capacity);
+            errdefer self.tx_bytes.deinit(allocator);
+            try self.rx_bytes.init(allocator, config.rx_buffer_capacity);
+            errdefer self.rx_bytes.deinit(allocator);
             self.output_ctx = .{ .session = self };
             const kcp_allocator = segment_pool.allocator();
             self.inst = kcp.createWithAllocator(conv, &self.output_ctx, kcp_allocator) orelse return error.KcpSessionCreateFailed;
@@ -234,12 +223,10 @@ pub fn make(comptime grt: type) type {
         pub fn deinit(self: *Self) void {
             kcp.release(self.inst);
             if (self.owns_segment_pool) self.segment_pool.deinit();
-            self.allocator.free(self.rx_buf);
-            self.allocator.free(self.tx_buf);
-            self.allocator.free(self.udp_tx_lens);
-            self.allocator.free(self.udp_tx_buf);
-            self.allocator.free(self.udp_rx_lens);
-            self.allocator.free(self.udp_rx_buf);
+            self.rx_bytes.deinit(self.allocator);
+            self.tx_bytes.deinit(self.allocator);
+            self.udp_tx.deinit(self.allocator);
+            self.udp_rx.deinit(self.allocator);
             self.* = undefined;
         }
 
@@ -248,47 +235,45 @@ pub fn make(comptime grt: type) type {
 
             const started = grt.time.instant.now();
             var offset: usize = 0;
-            self.mu.lock();
-            defer self.mu.unlock();
-            if (self.closed) return error.KcpSessionClosed;
-            if (self.driver_err) |err| return err;
-            self.stats.write_calls +%= 1;
+            try self.checkOpen();
+            self.bumpStat("write_calls");
             while (offset < buf.len) {
-                if (self.closed) return error.KcpSessionClosed;
-                if (self.driver_err) |err| return err;
-                const queued = self.writeTxLocked(buf[offset..]);
+                try self.checkOpen();
+                const queued = self.tx_bytes.writeNoWait(buf[offset..]);
                 if (queued > 0) {
                     offset += queued;
-                    self.cond.broadcast();
+                    self.session_cond.signal();
                     continue;
                 }
 
                 if (self.writeTimedOut(started)) {
                     if (offset > 0) return offset;
-                    const state = self.last_debug_state;
+                    const state = self.debugState();
+                    const stats = self.statsSnapshot();
+                    const driver_err = self.driverErr();
                     std.log.scoped(.kcp_session).err(
                         "write timeout offset={d}/{d} tx={d} rx={d} ws={d} room={d} out={d} in={d} tick={d} queue={d} update={d} read_from={d} driver_err={s}",
                         .{
                             offset,
                             buf.len,
-                            self.tx_len,
-                            self.rx_len,
+                            self.tx_bytes.len(),
+                            self.rx_bytes.len(),
                             state.waitsnd,
                             state.room,
-                            self.stats.udp_out_packets,
-                            self.stats.udp_in_packets,
-                            self.stats.tick_calls,
-                            self.stats.queue_calls,
-                            self.stats.update_calls,
-                            self.stats.read_from_calls,
-                            if (self.driver_err) |err| @errorName(err) else "null",
+                            stats.udp_out_packets,
+                            stats.udp_in_packets,
+                            stats.tick_calls,
+                            stats.queue_calls,
+                            stats.update_calls,
+                            stats.read_from_calls,
+                            if (driver_err) |err| @errorName(err) else "null",
                         },
                     );
                     return error.KcpSessionWriteTimeout;
                 }
 
-                self.stats.write_wait_calls +%= 1;
-                self.logWriteWaitLocked(offset, buf.len);
+                self.bumpStat("write_wait_calls");
+                self.logWriteWait(offset, buf.len);
                 self.waitLocked(started, self.config.write_timeout);
             }
             return offset;
@@ -296,19 +281,17 @@ pub fn make(comptime grt: type) type {
 
         pub fn read(self: *Self, buf: []u8) !usize {
             if (buf.len == 0) return 0;
-            self.mu.lock();
-            defer self.mu.unlock();
-            if (self.closed and self.rx_len == 0) return error.KcpSessionClosed;
-            if (self.driver_err) |err| return err;
-            const n = self.readRxLocked(buf);
-            if (n > 0) self.cond.broadcast();
+            if (self.isClosed() and self.rx_bytes.len() == 0) return error.KcpSessionClosed;
+            if (self.driverErr()) |err| return err;
+            const n = self.rx_bytes.read(buf);
+            if (n > 0) self.session_cond.signal();
             return n;
         }
 
         pub fn tick(self: *Self) !u32 {
             self.mu.lock();
             defer self.mu.unlock();
-            self.cond.broadcast();
+            self.wakeAllWaiters();
             if (self.closed) return 0;
             if (self.driver_err) |err| return err;
             return @intCast(@max(self.config.interval_ms, 1));
@@ -352,14 +335,14 @@ pub fn make(comptime grt: type) type {
             defer self.mu.unlock();
             if (self.closed) return;
             self.closed = true;
-            self.stats.close_calls +%= 1;
-            self.cond.broadcast();
+            self.bumpStat("close_calls");
+            self.wakeAllWaiters();
             self.pc.close();
         }
 
         pub fn resetStats(self: *Self) void {
-            self.mu.lock();
-            defer self.mu.unlock();
+            self.stats_mu.lock();
+            defer self.stats_mu.unlock();
             self.stats = .{};
         }
 
@@ -370,36 +353,40 @@ pub fn make(comptime grt: type) type {
         }
 
         pub fn pendingBytes(self: *Self) usize {
-            self.mu.lock();
-            defer self.mu.unlock();
-            return self.tx_len + self.rx_len + self.last_debug_state.waitsnd;
+            return self.tx_bytes.len() + self.rx_bytes.len() + self.debugState().waitsnd;
         }
 
         pub fn snapshot(self: *Self) Snapshot {
-            self.mu.lock();
-            defer self.mu.unlock();
+            const stats = self.statsSnapshot();
+            const state = self.debugState();
+            const tx_len = self.tx_bytes.len();
+            const rx_len = self.rx_bytes.len();
             return .{
-                .stats = self.stats,
-                .state = self.last_debug_state,
-                .tx_bytes = self.tx_len,
-                .rx_bytes = self.rx_len,
-                .pending_bytes = self.tx_len + self.rx_len + self.last_debug_state.waitsnd,
+                .stats = stats,
+                .state = state,
+                .tx_bytes = tx_len,
+                .rx_bytes = rx_len,
+                .pending_bytes = tx_len + rx_len + state.waitsnd,
             };
         }
 
         fn driveOnce(self: *Self) !void {
-            self.stats.tick_calls +%= 1;
+            self.bumpStat("tick_calls");
             var progressed = false;
             const tick_started = grt.time.instant.now();
             if (try self.drainUdpRingToKcp(self.tickRxLimit()) > 0) progressed = true;
             if (try self.drainKcpRecvToRxRing(drive_recv_message_limit) > 0) progressed = true;
             if (try self.drainTxRingToKcp()) progressed = true;
-            try self.updateInner();
+            if (self.shouldUpdateNow()) {
+                try self.updateInner();
+                progressed = true;
+            }
             if (try self.drainKcpRecvToRxRing(drive_recv_message_limit) > 0) progressed = true;
+            self.recordPending();
             const wait_ms = self.nextWaitMs();
             self.logDriveState(progressed, wait_ms);
             if (self.hasImmediateWork()) {
-                self.waitForDriveWork(driveBusyWaitDuration());
+                self.waitForDriveRound(driveBusyWaitDuration());
             } else {
                 const wait_duration = self.remainingInterval(tick_started, wait_ms);
                 self.waitForDriveWork(wait_duration);
@@ -409,22 +396,13 @@ pub fn make(comptime grt: type) type {
         fn drainTxRingToKcp(self: *Self) !bool {
             var progressed = false;
             while (self.canQueue()) {
-                self.mu.lock();
-                if (self.tx_len == 0) {
-                    self.mu.unlock();
-                    break;
-                }
-                const span = self.txContiguousReadSpanLocked(self.kcpSendBatchLimit());
+                const span = self.tx_bytes.readSpan(self.kcpSendBatchLimit());
+                if (span.len == 0) break;
                 const rc = kcp.send(self.inst, @ptrCast(span.ptr), @intCast(span.len));
-                if (rc < 0) {
-                    self.mu.unlock();
-                    return error.KcpSessionSendFailed;
-                }
-                ringDiscard(self.tx_buf, &self.tx_head, &self.tx_len, span.len);
-                self.cond.broadcast();
-                self.mu.unlock();
-                self.stats.queue_calls +%= 1;
-                self.recordPending();
+                if (rc < 0) return error.KcpSessionSendFailed;
+                self.tx_bytes.discard(span.len);
+                self.session_cond.broadcast();
+                self.bumpStat("queue_calls");
                 progressed = true;
             }
             return progressed;
@@ -433,32 +411,27 @@ pub fn make(comptime grt: type) type {
         fn drainKcpRecvToRxRing(self: *Self, max_messages: usize) !usize {
             var count: usize = 0;
             while (count < max_messages) {
-                self.mu.lock();
                 const peek_size = self.kcpRecvPeekSizeLocked();
-                if (peek_size == 0 or self.rxSpaceLocked() < peek_size) {
-                    self.mu.unlock();
-                    break;
-                }
-                const span = self.rxContiguousWriteSpanLocked();
+                if (peek_size == 0 or self.rx_bytes.space() < peek_size) break;
+                const reservation = self.rx_bytes.reserveWriteSpan() orelse break;
+                const span = reservation.buf;
                 if (span.len < peek_size) {
-                    self.mu.unlock();
+                    self.rx_bytes.releaseWriteSpan();
                     break;
                 }
                 const n = kcp.recv(self.inst, @ptrCast(span.ptr), @intCast(span.len));
                 if (n <= 0) {
-                    self.mu.unlock();
+                    self.rx_bytes.releaseWriteSpan();
                     break;
                 }
-                self.rx_len += @intCast(n);
-                self.cond.broadcast();
-                self.mu.unlock();
+                self.rx_bytes.commitWriteSpan(@intCast(n));
                 count += 1;
             }
             return count;
         }
 
         fn readOnce(self: *Self) !void {
-            const reservation = self.reserveUdpPacketSlot();
+            const reservation = self.udp_rx.reserveWrite();
             if (reservation == null) {
                 self.waitForUdpSlot();
                 return;
@@ -466,7 +439,7 @@ pub fn make(comptime grt: type) type {
             const reserved = reservation.?;
             self.pc.setReadDeadline(glib.time.instant.add(grt.time.instant.now(), readLoopDuration()));
             const result = self.pc.readFrom(reserved.buf) catch |err| {
-                self.releaseUdpPacketReservation();
+                self.udp_rx.releaseWrite();
                 switch (err) {
                     error.TimedOut => return,
                     error.Closed => {
@@ -476,39 +449,33 @@ pub fn make(comptime grt: type) type {
                     else => return err,
                 }
             };
-            self.commitUdpPacketSlot(reserved.index, result.bytes_read);
+            if (!self.udp_rx.commitWrite(reserved, result.bytes_read)) {
+                self.bumpStat("udp_ring_dropped_packets");
+            }
+            self.bumpStat("read_from_calls");
+            self.session_cond.signal();
         }
 
         fn drainUdpRingToKcp(self: *Self, max_packets: ?usize) !usize {
             var input_count: usize = 0;
             var flush_pending_ack = false;
-            self.stats.pump_calls +%= 1;
+            self.bumpStat("pump_calls");
 
             while (true) {
-                self.mu.lock();
-                if (self.udp_rx_len == 0) {
-                    self.mu.unlock();
-                    break;
-                }
-                const index = self.udp_rx_head;
-                const frame = self.udpRxPacketSlot(index)[0..self.udp_rx_lens[index]];
+                var frame_storage: [udp_packet_capacity]u8 = undefined;
+                const frame_len = self.udp_rx.popNoWait(&frame_storage) orelse break;
+                const frame = frame_storage[0..frame_len];
                 if (frame.len >= kcp.OVERHEAD and readLe32(frame) == self.inst.*.conv) {
                     self.inst.*.current = self.nowMs();
                     const rc = kcp.input(self.inst, @ptrCast(frame.ptr), @intCast(frame.len));
-                    if (rc < 0) {
-                        self.mu.unlock();
-                        return error.KcpSessionInputFailed;
-                    }
+                    if (rc < 0) return error.KcpSessionInputFailed;
                     if (self.ackCountInner() > 0 and self.pending_ack_since_ms == null) {
                         self.pending_ack_since_ms = self.nowMs();
                     }
                     if (self.ackCountInner() > 0) flush_pending_ack = true;
-                    self.stats.udp_in_packets +%= 1;
+                    self.bumpStat("udp_in_packets");
                 }
-                self.udp_rx_head = (self.udp_rx_head + 1) % udp_ring_slots;
-                self.udp_rx_len -= 1;
-                self.cond.broadcast();
-                self.mu.unlock();
+                self.session_cond.signal();
 
                 try self.checkOutput();
                 input_count += 1;
@@ -518,117 +485,30 @@ pub fn make(comptime grt: type) type {
             }
 
             if (flush_pending_ack and self.shouldFlushAckNow()) {
-                self.stats.pump_flush_ack_calls +%= 1;
+                self.bumpStat("pump_flush_ack_calls");
                 try self.flushAckInner();
             }
 
-            self.recordPending();
             return input_count;
-        }
-
-        fn writeTxLocked(self: *Self, buf: []const u8) usize {
-            if (self.tx_len == 0) self.tx_head = 0;
-            const n = @min(buf.len, self.txSpaceLocked());
-            if (n == 0) return 0;
-            ringWrite(self.tx_buf, &self.tx_head, &self.tx_len, buf[0..n]);
-            return n;
-        }
-
-        fn readRxLocked(self: *Self, out: []u8) usize {
-            const n = @min(out.len, self.rx_len);
-            if (n == 0) return 0;
-            ringRead(self.rx_buf, &self.rx_head, &self.rx_len, out[0..n]);
-            if (self.rx_len == 0) self.rx_head = 0;
-            return n;
-        }
-
-        fn txSpaceLocked(self: *const Self) usize {
-            return self.tx_buf.len - self.tx_len;
-        }
-
-        fn rxSpaceLocked(self: *const Self) usize {
-            return self.rx_buf.len - self.rx_len;
-        }
-
-        const UdpPacketReservation = struct {
-            index: usize,
-            buf: []u8,
-        };
-
-        fn reserveUdpPacketSlot(self: *Self) ?UdpPacketReservation {
-            self.mu.lock();
-            defer self.mu.unlock();
-            if (self.closed) return null;
-            if (self.udp_rx_reserved) return null;
-            if (self.udp_rx_len >= udp_ring_slots) return null;
-            const index = (self.udp_rx_head + self.udp_rx_len) % udp_ring_slots;
-            self.udp_rx_reserved = true;
-            return .{
-                .index = index,
-                .buf = self.udpRxPacketSlot(index),
-            };
-        }
-
-        fn releaseUdpPacketReservation(self: *Self) void {
-            self.mu.lock();
-            defer self.mu.unlock();
-            self.udp_rx_reserved = false;
-            self.cond.broadcast();
-        }
-
-        fn commitUdpPacketSlot(self: *Self, index: usize, len: usize) void {
-            self.mu.lock();
-            defer self.mu.unlock();
-            self.udp_rx_reserved = false;
-            self.stats.read_from_calls +%= 1;
-            const expected = (self.udp_rx_head + self.udp_rx_len) % udp_ring_slots;
-            if (self.closed or index != expected or self.udp_rx_len >= udp_ring_slots) {
-                self.stats.udp_ring_dropped_packets +%= 1;
-                self.cond.broadcast();
-                return;
-            }
-            self.udp_rx_lens[index] = @min(len, udp_packet_capacity);
-            self.udp_rx_len += 1;
-            self.cond.broadcast();
-        }
-
-        fn udpRxPacketSlot(self: *Self, index: usize) []u8 {
-            const start = index * udp_packet_capacity;
-            return self.udp_rx_buf[start..][0..udp_packet_capacity];
-        }
-
-        fn udpTxPacketSlot(self: *Self, index: usize) []u8 {
-            const start = index * udp_packet_capacity;
-            return self.udp_tx_buf[start..][0..udp_packet_capacity];
-        }
-
-        fn txContiguousReadSpanLocked(self: *Self, limit: usize) []const u8 {
-            const n = @min(@min(self.tx_len, limit), self.tx_buf.len - self.tx_head);
-            return self.tx_buf[self.tx_head..][0..n];
-        }
-
-        fn rxContiguousWriteSpanLocked(self: *Self) []u8 {
-            if (self.rx_len == 0) self.rx_head = 0;
-            const space = self.rxSpaceLocked();
-            if (space == 0) return self.rx_buf[0..0];
-            const tail = (self.rx_head + self.rx_len) % self.rx_buf.len;
-            const n = @min(space, self.rx_buf.len - tail);
-            return self.rx_buf[tail..][0..n];
         }
 
         fn hasImmediateWork(self: *Self) bool {
             self.mu.lock();
             defer self.mu.unlock();
-            return self.udp_rx_len > 0 or
-                self.tx_len > 0 or
+            return self.hasImmediateWorkLocked();
+        }
+
+        fn hasImmediateWorkLocked(self: *Self) bool {
+            return self.udp_rx.len() > 0 or
+                (self.tx_bytes.len() > 0 and self.canQueue()) or
                 self.canDrainKcpRecvLocked();
         }
 
         fn canDrainKcpRecvLocked(self: *Self) bool {
             const peek_size = self.kcpRecvPeekSizeLocked();
             return peek_size > 0 and
-                self.rxSpaceLocked() >= peek_size and
-                self.rxContiguousWriteSpanLocked().len >= peek_size;
+                self.rx_bytes.space() >= peek_size and
+                self.rx_bytes.contiguousWriteCapacity() >= peek_size;
         }
 
         fn kcpRecvPeekSizeLocked(self: *Self) usize {
@@ -642,71 +522,64 @@ pub fn make(comptime grt: type) type {
             self.mu.lock();
             defer self.mu.unlock();
             if (self.closed or self.driver_err != null) return;
-            self.cond.timedWait(&self.mu, @intCast(duration)) catch {};
+            if (self.hasImmediateWorkLocked()) return;
+            self.session_cond.timedWait(&self.mu, @intCast(duration)) catch {};
         }
 
-        fn waitForUdpSlot(self: *Self) void {
+        fn waitForDriveRound(self: *Self, duration: glib.time.duration.Duration) void {
+            if (duration == 0) return;
             self.mu.lock();
             defer self.mu.unlock();
             if (self.closed or self.driver_err != null) return;
-            self.cond.timedWait(&self.mu, @intCast(readLoopDuration())) catch {};
+            self.session_cond.timedWait(&self.mu, @intCast(duration)) catch {};
+        }
+
+        fn waitForUdpSlot(self: *Self) void {
+            if (self.isClosed() or self.driverErr() != null) return;
+            self.udp_rx.waitForSpace(readLoopDuration()) catch {};
         }
 
         fn waitAndPopUdpTxPacket(self: *Self, out: *[udp_packet_capacity]u8, stop: *AtomicBool) []const u8 {
-            self.mu.lock();
-            defer self.mu.unlock();
             while (!stop.load(.acquire)) {
-                if (self.udp_tx_len > 0) {
-                    const index = self.udp_tx_head;
-                    const len = self.udp_tx_lens[index];
-                    @memcpy(out[0..len], self.udpTxPacketSlot(index)[0..len]);
-                    self.udp_tx_head = (self.udp_tx_head + 1) % udp_ring_slots;
-                    self.udp_tx_len -= 1;
-                    self.cond.broadcast();
-                    return out[0..len];
-                }
-                if (self.closed or self.driver_err != null) break;
-                self.cond.wait(&self.mu);
+                const len = self.udp_tx.pop(out, readLoopDuration()) catch continue;
+                if (len > 0) return out[0..len];
+                if (self.isClosed() or self.driverErr() != null) break;
             }
             return out[0..0];
         }
 
         fn udpTxLen(self: *Self) usize {
-            self.mu.lock();
-            defer self.mu.unlock();
-            return self.udp_tx_len;
+            return self.udp_tx.len();
         }
 
         fn closeFromReadLoop(self: *Self) void {
             self.mu.lock();
             defer self.mu.unlock();
             self.closed = true;
-            self.cond.broadcast();
+            self.wakeAllWaiters();
         }
 
         fn updateInner(self: *Self) !void {
-            self.stats.update_calls +%= 1;
+            self.bumpStat("update_calls");
             self.inst.*.current = self.nowMs();
             kcp.update(self.inst, self.inst.*.current);
             try self.checkOutput();
             self.clearPendingAckIfFlushed();
-            self.recordPending();
         }
 
         fn flushAckInner(self: *Self) !void {
             if (self.ackCountInner() == 0) return;
-            self.stats.flush_ack_calls +%= 1;
+            self.bumpStat("flush_ack_calls");
             try self.flushInner();
             self.pending_ack_since_ms = null;
         }
 
         fn flushInner(self: *Self) !void {
-            self.stats.flush_calls +%= 1;
+            self.bumpStat("flush_calls");
             self.inst.*.current = self.nowMs();
             kcp.flush(self.inst);
             try self.checkOutput();
             self.clearPendingAckIfFlushed();
-            self.recordPending();
         }
 
         fn checkOutput(self: *Self) !void {
@@ -719,10 +592,28 @@ pub fn make(comptime grt: type) type {
         fn recordPending(self: *Self) void {
             const state = self.debugStateInner();
             const pending = state.waitsnd;
-            if (pending > self.stats.max_waitsnd) self.stats.max_waitsnd = pending;
+            self.recordMaxWaitsnd(pending);
             self.mu.lock();
             defer self.mu.unlock();
             self.last_debug_state = state;
+        }
+
+        fn statsSnapshot(self: *Self) Stats {
+            self.stats_mu.lock();
+            defer self.stats_mu.unlock();
+            return self.stats;
+        }
+
+        fn bumpStat(self: *Self, comptime field: []const u8) void {
+            self.stats_mu.lock();
+            defer self.stats_mu.unlock();
+            @field(self.stats, field) +%= 1;
+        }
+
+        fn recordMaxWaitsnd(self: *Self, pending: u32) void {
+            self.stats_mu.lock();
+            defer self.stats_mu.unlock();
+            if (pending > self.stats.max_waitsnd) self.stats.max_waitsnd = pending;
         }
 
         fn debugStateInner(self: *const Self) DebugState {
@@ -755,21 +646,46 @@ pub fn make(comptime grt: type) type {
             return self.closed;
         }
 
+        fn checkOpen(self: *Self) !void {
+            self.mu.lock();
+            defer self.mu.unlock();
+            if (self.closed) return error.KcpSessionClosed;
+            if (self.driver_err) |err| return err;
+        }
+
+        fn driverErr(self: *Self) ?anyerror {
+            self.mu.lock();
+            defer self.mu.unlock();
+            return self.driver_err;
+        }
+
         fn setDriverErr(self: *Self, err: anyerror) void {
             self.mu.lock();
             defer self.mu.unlock();
             self.driver_err = err;
-            self.cond.broadcast();
+            self.wakeAllWaiters();
+        }
+
+        fn wakeAllWaiters(self: *Self) void {
+            self.session_cond.broadcast();
+            self.udp_rx.wakeAll();
+            self.udp_tx.wakeAll();
+            self.tx_bytes.wakeAll();
+            self.rx_bytes.wakeAll();
         }
 
         fn waitLocked(self: *Self, started: glib.time.instant.Time, timeout: ?glib.time.duration.Duration) void {
+            self.mu.lock();
+            defer self.mu.unlock();
             if (timeout) |duration| {
                 const elapsed = glib.time.instant.sub(grt.time.instant.now(), started);
                 if (elapsed >= duration) return;
                 const remaining: u64 = @intCast(duration - elapsed);
-                self.cond.timedWait(&self.mu, @min(remaining, 10 * glib.time.duration.MilliSecond)) catch {};
+                if (self.tx_bytes.space() > 0) return;
+                self.session_cond.timedWait(&self.mu, @min(remaining, 10 * glib.time.duration.MilliSecond)) catch {};
             } else {
-                self.cond.wait(&self.mu);
+                if (self.tx_bytes.space() > 0) return;
+                self.session_cond.wait(&self.mu);
             }
         }
 
@@ -780,11 +696,7 @@ pub fn make(comptime grt: type) type {
         }
 
         fn canQueue(self: *const Self) bool {
-            return self.waitsndInner() < self.pendingLimit();
-        }
-
-        fn pendingLimit(self: *const Self) u32 {
-            return @max(self.inst.*.snd_wnd, 1);
+            return self.waitsndInner() < self.sendWindow();
         }
 
         fn waitsndInner(self: *const Self) u32 {
@@ -795,9 +707,13 @@ pub fn make(comptime grt: type) type {
 
         fn sendRoomInner(self: *const Self) u32 {
             const pending = self.waitsndInner();
-            const limit = self.pendingLimit();
+            const limit = self.sendWindow();
             if (pending >= limit) return 0;
             return limit - pending;
+        }
+
+        fn sendWindow(self: *const Self) u32 {
+            return @max(self.inst.*.snd_wnd, 1);
         }
 
         fn kcpSendBatchLimit(self: *const Self) usize {
@@ -840,9 +756,15 @@ pub fn make(comptime grt: type) type {
         fn nextWaitMs(self: *const Self) u32 {
             const now_ms = self.nowMs();
             const next_ms: u32 = @intCast(kcp.check(self.inst, now_ms));
-            if (next_ms <= now_ms) return 0;
+            if (timeReached(now_ms, next_ms)) return 0;
             const interval_ms: u32 = @intCast(@max(self.config.interval_ms, 1));
             return @min(next_ms - now_ms, interval_ms);
+        }
+
+        fn shouldUpdateNow(self: *const Self) bool {
+            const now_ms = self.nowMs();
+            const next_ms: u32 = @intCast(kcp.check(self.inst, now_ms));
+            return timeReached(now_ms, next_ms);
         }
 
         fn intervalDuration(self: *const Self) glib.time.duration.Duration {
@@ -882,31 +804,29 @@ pub fn make(comptime grt: type) type {
                 self.output_err = error.KcpSessionUdpPacketTooLarge;
                 return -1;
             }
-            self.mu.lock();
-            defer self.mu.unlock();
-            while (!self.closed and self.driver_err == null and self.udp_tx_len >= udp_ring_slots) {
-                self.cond.timedWait(&self.mu, 10 * glib.time.duration.MilliSecond) catch {};
+            while (true) {
+                if (self.isClosed()) {
+                    self.output_err = error.KcpSessionClosed;
+                    return -1;
+                }
+                if (self.driverErr()) |err| {
+                    self.output_err = err;
+                    return -1;
+                }
+                self.udp_tx.push(frame, 10 * glib.time.duration.MilliSecond) catch |err| switch (err) {
+                    error.TimedOut => continue,
+                    error.PacketTooLarge => {
+                        self.output_err = error.KcpSessionUdpPacketTooLarge;
+                        return -1;
+                    },
+                };
+                return @intCast(frame.len);
             }
-            if (self.closed) {
-                self.output_err = error.KcpSessionClosed;
-                return -1;
-            }
-            if (self.driver_err) |err| {
-                self.output_err = err;
-                return -1;
-            }
-            const index = (self.udp_tx_head + self.udp_tx_len) % udp_ring_slots;
-            const slot = self.udpTxPacketSlot(index);
-            @memcpy(slot[0..frame.len], frame);
-            self.udp_tx_lens[index] = frame.len;
-            self.udp_tx_len += 1;
-            self.cond.broadcast();
-            return @intCast(frame.len);
         }
 
         fn writePacketNow(self: *Self, frame: []const u8) !void {
             const write_start = if (self.config.output_write_timeout != null) grt.time.instant.now() else 0;
-            self.stats.write_to_calls +%= 1;
+            self.bumpStat("write_to_calls");
             if (self.config.output_write_timeout) |timeout| {
                 self.pc.setWriteDeadline(glib.time.instant.add(write_start, timeout));
             }
@@ -914,26 +834,29 @@ pub fn make(comptime grt: type) type {
 
             const written = self.pc.writeTo(frame, self.remote) catch |err| switch (err) {
                 error.TimedOut => {
-                    self.stats.write_to_timeouts +%= 1;
-                    self.stats.udp_dropped_packets +%= 1;
+                    const stats = self.recordUdpWriteTimeout();
                     std.log.scoped(.kcp_session).warn(
                         "udp timeout len={d} out={d} in={d} drop={d}",
-                        .{ frame.len, self.stats.udp_out_packets, self.stats.udp_in_packets, self.stats.udp_dropped_packets },
+                        .{ frame.len, stats.udp_out_packets, stats.udp_in_packets, stats.udp_dropped_packets },
                     );
+                    grt.time.sleep(udp_write_error_backoff);
                     return;
                 },
+                error.Closed, error.MessageTooLong => return err,
                 else => {
+                    const stats = self.recordUdpDrop();
                     std.log.scoped(.kcp_session).warn(
-                        "udp err={s} len={d} out={d} in={d}",
-                        .{ @errorName(err), frame.len, self.stats.udp_out_packets, self.stats.udp_in_packets },
+                        "udp err={s} len={d} out={d} in={d} drop={d}",
+                        .{ @errorName(err), frame.len, stats.udp_out_packets, stats.udp_in_packets, stats.udp_dropped_packets },
                     );
                     return err;
                 },
             };
             if (written != frame.len) {
+                const stats = self.statsSnapshot();
                 std.log.scoped(.kcp_session).warn(
                     "udp short wr={d} len={d} out={d} in={d}",
-                    .{ written, frame.len, self.stats.udp_out_packets, self.stats.udp_in_packets },
+                    .{ written, frame.len, stats.udp_out_packets, stats.udp_in_packets },
                 );
                 return error.ShortKcpSessionUdpWrite;
             }
@@ -942,6 +865,8 @@ pub fn make(comptime grt: type) type {
 
         fn recordUdpOut(self: *Self, frame_len: usize) void {
             const len: u32 = @intCast(frame_len);
+            self.stats_mu.lock();
+            defer self.stats_mu.unlock();
             const first = self.stats.udp_out_packets == 0;
             self.stats.udp_out_packets +%= 1;
             self.stats.udp_out_bytes +%= @intCast(frame_len);
@@ -958,18 +883,35 @@ pub fn make(comptime grt: type) type {
             }
         }
 
-        fn logWriteWaitLocked(self: *Self, offset: usize, total: usize) void {
+        fn recordUdpDrop(self: *Self) Stats {
+            self.stats_mu.lock();
+            defer self.stats_mu.unlock();
+            self.stats.udp_dropped_packets +%= 1;
+            return self.stats;
+        }
+
+        fn recordUdpWriteTimeout(self: *Self) Stats {
+            self.stats_mu.lock();
+            defer self.stats_mu.unlock();
+            self.stats.write_to_timeouts +%= 1;
+            self.stats.udp_dropped_packets +%= 1;
+            return self.stats;
+        }
+
+        fn logWriteWait(self: *Self, offset: usize, total: usize) void {
             const now_ms = self.nowMs();
-            if (now_ms -% self.last_write_wait_log_ms < 1000) return;
-            self.last_write_wait_log_ms = now_ms;
-            const state = self.last_debug_state;
+            if (!self.shouldLogWriteWait(now_ms)) return;
+            const state = self.debugState();
+            const tx_len = self.tx_bytes.len();
+            const rx_len = self.rx_bytes.len();
+            const stats = self.statsSnapshot();
             std.log.scoped(.kcp_session).info(
                 "ww {d}/{d} tx={d} rx={d} ws={d} room={d} cw={d} rw={d} eff={d} infl={d} una={d} nxt={d} sq={d} sb={d} rq={d} rb={d} rto={d} ss={d} xmit={d} out={d} in={d}",
                 .{
                     offset,
                     total,
-                    self.tx_len,
-                    self.rx_len,
+                    tx_len,
+                    rx_len,
                     state.waitsnd,
                     state.room,
                     state.cwnd,
@@ -985,10 +927,18 @@ pub fn make(comptime grt: type) type {
                     state.rx_rto,
                     state.ssthresh,
                     state.xmit,
-                    self.stats.udp_out_packets,
-                    self.stats.udp_in_packets,
+                    stats.udp_out_packets,
+                    stats.udp_in_packets,
                 },
             );
+        }
+
+        fn shouldLogWriteWait(self: *Self, now_ms: u32) bool {
+            self.mu.lock();
+            defer self.mu.unlock();
+            if (now_ms -% self.last_write_wait_log_ms < 1000) return false;
+            self.last_write_wait_log_ms = now_ms;
+            return true;
         }
 
         fn logDriveState(self: *Self, progressed: bool, wait_ms: u32) void {
@@ -1046,40 +996,16 @@ fn readLe32(buf: []const u8) u32 {
         (@as(u32, buf[3]) << 24);
 }
 
+fn timeReached(now_ms: u32, target_ms: u32) bool {
+    return @as(i32, @bitCast(now_ms -% target_ms)) >= 0;
+}
+
 fn readLoopDuration() glib.time.duration.Duration {
     return @as(glib.time.duration.Duration, read_loop_poll_ms) * glib.time.duration.MilliSecond;
 }
 
 fn driveBusyWaitDuration() glib.time.duration.Duration {
     return @as(glib.time.duration.Duration, drive_busy_wait_ms) * glib.time.duration.MilliSecond;
-}
-
-fn ringWrite(ring: []u8, head: *usize, len: *usize, src: []const u8) void {
-    if (src.len == 0) return;
-    const tail = (head.* + len.*) % ring.len;
-    const first = @min(src.len, ring.len - tail);
-    @memcpy(ring[tail..][0..first], src[0..first]);
-    if (first < src.len) {
-        @memcpy(ring[0 .. src.len - first], src[first..]);
-    }
-    len.* += src.len;
-}
-
-fn ringRead(ring: []u8, head: *usize, len: *usize, out: []u8) void {
-    if (out.len == 0) return;
-    const first = @min(out.len, ring.len - head.*);
-    @memcpy(out[0..first], ring[head.*..][0..first]);
-    if (first < out.len) {
-        @memcpy(out[first..], ring[0 .. out.len - first]);
-    }
-    head.* = (head.* + out.len) % ring.len;
-    len.* -= out.len;
-}
-
-fn ringDiscard(ring: []const u8, head: *usize, len: *usize, n: usize) void {
-    if (n == 0) return;
-    head.* = (head.* + n) % ring.len;
-    len.* -= n;
 }
 
 fn emptyDebugState() DebugState {
@@ -1108,41 +1034,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     return glib.testing.TestRunner.fromFn(grt.std, 128 * 1024, struct {
         fn run(_: *glib.testing.T, allocator: grt.std.mem.Allocator) !void {
             _ = allocator;
-            const std = grt.std;
-            const Session = make(grt);
-
-            var tx_storage: [8]u8 = undefined;
-            var rx_storage: [8]u8 = undefined;
-            var session: Session = .{
-                .allocator = undefined,
-                .pc = undefined,
-                .remote = undefined,
-                .inst = undefined,
-                .segment_pool = undefined,
-                .output_ctx = undefined,
-                .config = .{},
-                .start_at = grt.time.instant.now(),
-                .udp_rx_buf = &.{},
-                .udp_rx_lens = &.{},
-                .udp_tx_buf = &.{},
-                .udp_tx_lens = &.{},
-                .tx_buf = &tx_storage,
-                .rx_buf = &rx_storage,
-            };
-
-            session.tx_head = 6;
-            session.tx_len = 0;
-            try std.testing.expectEqual(@as(usize, 4), session.writeTxLocked("abcd"));
-            try std.testing.expectEqual(@as(usize, 0), session.tx_head);
-            try std.testing.expectEqual(@as(usize, 4), session.tx_len);
-            try std.testing.expectEqualSlices(u8, "abcd", tx_storage[0..4]);
-
-            session.rx_head = 6;
-            session.rx_len = 0;
-            const span = session.rxContiguousWriteSpanLocked();
-            try std.testing.expectEqual(@as(usize, 0), session.rx_head);
-            try std.testing.expectEqual(@as(usize, rx_storage.len), span.len);
-            try std.testing.expectEqual(@intFromPtr(&rx_storage[0]), @intFromPtr(span.ptr));
+            _ = make(grt);
         }
     }.run);
 }

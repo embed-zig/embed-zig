@@ -8,7 +8,6 @@ pub const default_udp_payload: usize = 1400;
 pub const default_stream_chunk: usize = 8192;
 pub const default_control_port: u16 = 9821;
 pub const default_conv: u32 = 0x4b435031;
-pub const default_udp_pps: u32 = 1250;
 pub const max_line_len: usize = 512;
 
 pub const Protocol = enum {
@@ -40,8 +39,8 @@ pub const Direction = enum {
 };
 
 pub const KcpConfig = struct {
-    send_window: u32 = 32,
-    recv_window: u32 = 32,
+    send_window: u32 = 64,
+    recv_window: u32 = 64,
     nodelay: i32 = 1,
     interval_ms: i32 = 10,
     resend: i32 = 2,
@@ -53,7 +52,6 @@ pub const Request = struct {
     protocol: Protocol = .kcp,
     direction: Direction = .down,
     bytes: usize = default_bytes,
-    udp_pps: u32 = default_udp_pps,
     conv: u32 = default_conv,
     kcp: KcpConfig = .{},
 
@@ -95,13 +93,12 @@ pub const Result = struct {
 pub fn requestLine(comptime std: type, out: []u8, req: Request) ![]u8 {
     return std.fmt.bufPrint(
         out,
-        "{s} REQ {s} {s} {d} {d} {d} {d} {d} {d} {d} {d} {d} {d}\n",
+        "{s} REQ {s} {s} {d} {d} {d} {d} {d} {d} {d} {d} {d}\n",
         .{
             magic,
             @tagName(req.protocol),
             @tagName(req.direction),
             req.bytes,
-            req.udp_pps,
             req.conv,
             req.kcp.send_window,
             req.kcp.recv_window,
@@ -163,7 +160,6 @@ pub fn parseRequest(comptime std: type, line: []const u8) !Request {
     req.protocol = try Protocol.parse(it.next() orelse return error.InvalidRequest);
     req.direction = try Direction.parse(it.next() orelse return error.InvalidRequest);
     req.bytes = try parseInt(std, usize, it.next());
-    req.udp_pps = try parseInt(std, u32, it.next());
     req.conv = try parseInt(std, u32, it.next());
     req.kcp.send_window = try parseInt(std, u32, it.next());
     req.kcp.recv_window = try parseInt(std, u32, it.next());
@@ -172,8 +168,6 @@ pub fn parseRequest(comptime std: type, line: []const u8) !Request {
     req.kcp.resend = try parseInt(std, i32, it.next());
     req.kcp.no_congestion_control = try parseInt(std, i32, it.next());
     req.kcp.stream = (try parseInt(std, u8, it.next())) != 0;
-    // Compatibility with the short-lived ack_no_delay field from earlier drafts.
-    _ = it.next();
     if (it.next() != null) return error.InvalidRequest;
     return req;
 }
@@ -266,21 +260,13 @@ pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
             try std.testing.expectEqual(req.protocol, parsed.protocol);
             try std.testing.expectEqual(req.direction, parsed.direction);
             try std.testing.expectEqual(req.bytes, parsed.bytes);
-            try std.testing.expectEqual(req.udp_pps, parsed.udp_pps);
             try std.testing.expectEqual(req.kcp.send_window, parsed.kcp.send_window);
             try std.testing.expectEqual(@as(usize, 8192), parsed.streamChunk());
             try std.testing.expectEqual(@as(usize, 1400), parsed.udpPayload());
 
-            const legacy_line = try std.fmt.bufPrint(
-                &buf,
-                "{s} REQ kcp down 4096 1250 9 64 32 1 10 2 1 1 1\n",
-                .{magic},
-            );
-            _ = try parseRequest(std, legacy_line);
-
             const invalid_line = try std.fmt.bufPrint(
                 &buf,
-                "{s} REQ kcp down 4096 1250 9 64 32 1 10 2 1 1 1 2\n",
+                "{s} REQ kcp down 4096 1250 9 64 32 1 10 2 1 1 1\n",
                 .{magic},
             );
             try std.testing.expectError(error.InvalidRequest, parseRequest(std, invalid_line));

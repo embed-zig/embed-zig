@@ -26,6 +26,8 @@ pub const nodelay = c.ikcp_nodelay;
 pub const allocator = c.ikcp_allocator;
 
 pub const SegmentPool = @import("kcp/SegmentPool.zig");
+pub const BytesRingBuf = @import("kcp/BytesRingBuf.zig");
+pub const PacketRingBuf = @import("kcp/PacketRingBuf.zig");
 pub const Session = @import("kcp/Session.zig");
 pub const PerfProtocol = @import("kcp/PerfProtocol.zig");
 pub const PerfServer = @import("kcp/PerfServer.zig");

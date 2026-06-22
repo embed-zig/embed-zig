@@ -69,8 +69,8 @@ fn runKcpSmoke(comptime grt: type, allocator: glib.std.mem.Allocator, t: *glib.t
         .direction = .down,
         .bytes = bytes,
         .kcp = .{
-            .send_window = 32,
-            .recv_window = 32,
+            .send_window = 64,
+            .recv_window = 64,
             .nodelay = 1,
             .interval_ms = 10,
             .resend = 2,

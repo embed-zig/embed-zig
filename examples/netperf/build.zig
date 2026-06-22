@@ -20,7 +20,7 @@ pub fn build(b: *std.Build) void {
     const server_exe = b.addExecutable(.{
         .name = "netperf-server",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("bin/server.zig"),
+            .root_source_file = b.path("server.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{
@@ -35,7 +35,7 @@ pub fn build(b: *std.Build) void {
     const client_exe = b.addExecutable(.{
         .name = "netperf-client",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("bin/client.zig"),
+            .root_source_file = b.path("client.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{

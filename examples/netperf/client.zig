@@ -17,9 +17,8 @@ pub fn main() !void {
     const protocol_text = args.next() orelse "kcp";
     const direction_text = args.next() orelse "down";
     const bytes = try parseArg(usize, args.next(), 10 * 1024 * 1024);
-    const udp_pps = try parseArg(u32, args.next(), 1250);
-    const snd_wnd = try parseArg(u32, args.next(), 32);
-    const rcv_wnd = try parseArg(u32, args.next(), 32);
+    const snd_wnd = try parseArg(u32, args.next(), 64);
+    const rcv_wnd = try parseArg(u32, args.next(), 64);
     const nodelay = try parseArg(i32, args.next(), 1);
     const interval_ms = try parseArg(i32, args.next(), 10);
     const resend = try parseArg(i32, args.next(), 2);
@@ -30,7 +29,6 @@ pub fn main() !void {
         .protocol = try Protocol.Protocol.parse(protocol_text),
         .direction = try Protocol.Direction.parse(direction_text),
         .bytes = bytes,
-        .udp_pps = udp_pps,
         .kcp = .{
             .send_window = snd_wnd,
             .recv_window = rcv_wnd,
@@ -47,7 +45,7 @@ pub fn main() !void {
     const result = try client.run(addr, request);
 
     std.debug.print(
-        "netperf client={s} server={s}:{d} protocol={s} direction={s} bytes={d} stream_chunk={d} udp_payload={d} udp_pps={d} wnd={d}/{d} nodelay={d} interval={d} resend={d} nc={d}\n",
+        "netperf client={s} server={s}:{d} protocol={s} direction={s} bytes={d} stream_chunk={d} udp_payload={d} wnd={d}/{d} nodelay={d} interval={d} resend={d} nc={d}\n",
         .{
             "host",
             host,
@@ -57,7 +55,6 @@ pub fn main() !void {
             bytes,
             request.streamChunk(),
             request.udpPayload(),
-            udp_pps,
             snd_wnd,
             rcv_wnd,
             nodelay,

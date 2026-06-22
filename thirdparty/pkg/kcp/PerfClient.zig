@@ -3,7 +3,7 @@ const Protocol = @import("PerfProtocol.zig");
 const SessionFile = @import("Session.zig");
 
 const AddrPort = glib.net.netip.AddrPort;
-const transfer_timeout = 60 * glib.time.duration.Second;
+const transfer_timeout = 180 * glib.time.duration.Second;
 const udp_idle_timeout = 2 * glib.time.duration.Second;
 const kcp_write_timeout = 10 * glib.time.duration.Second;
 const stream_write_buffer_size = 8192;
@@ -337,7 +337,6 @@ pub fn make(comptime grt: type) type {
                 .resend = request.kcp.resend,
                 .no_congestion_control = request.kcp.no_congestion_control,
                 .stream = request.kcp.stream,
-                .send_batch_bytes = 8192,
                 .write_timeout = kcp_write_timeout,
                 .output_write_timeout = kcp_write_timeout,
             };
@@ -802,6 +801,13 @@ pub fn make(comptime grt: type) type {
                 log.err("{s} {d}/{d} ns={d} tx={d} rx={d} ws={d} room={d} out={d} in={d}", args);
             } else {
                 log.info("{s} {d}/{d} ns={d} tx={d} rx={d} ws={d} room={d} out={d} in={d}", args);
+            }
+            cooperativeProgressYield();
+        }
+
+        fn cooperativeProgressYield() void {
+            if (comptime @hasDecl(grt.system, "taskRuntimeSnapshot")) {
+                grt.time.sleep(1 * glib.time.duration.MilliSecond);
             }
         }
 
