@@ -103,6 +103,11 @@ capabilities.
 | `embed.zux.component.button.GroupedPoller` | `zux/button/grouped` | Grouped button poller. |
 | `embed.zux.component.touch.Poller` | `zux/touch/poller` | Touch polling worker. |
 | `embed.zux.component.imu.Poller` | `zux/imu/poller` | IMU polling worker. |
+| `thirdparty.lvgl_osal` | `lvgl/swdraw` | LVGL software draw worker. |
+| `thirdparty.lvgl_osal` | `lvgl/pxpdraw` | LVGL PXP draw worker. |
+| `thirdparty.lvgl_osal` | `lvgl/vglitedraw` | LVGL VG-Lite draw worker. |
+| `thirdparty.lvgl_osal` | `lvgl/g2draw` | LVGL G2D draw worker. |
+| `thirdparty.lvgl_osal` | `lvgl/thread` | LVGL OSAL fallback worker. |
 | `apps.zux.chant.runtime.ui.Lvgl` | `zux/chant/ui` | LVGL UI runtime. |
 | `apps.zux.chant.runtime.player` | `zux/chant/player` | Music playback control loop. |
 | `apps.zux.chant.runtime.recorder` | `zux/chant/recorder` | Recording state/control loop. |

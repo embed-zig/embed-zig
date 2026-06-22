@@ -186,8 +186,13 @@ pub fn makeWithAllocators(
         }
 
         fn taskName(name: ?[*:0]const u8) []const u8 {
-            const ptr = name orelse return "lvgl";
-            return glib.std.mem.sliceTo(ptr, 0);
+            const ptr = name orelse return "lvgl/thread";
+            const raw = glib.std.mem.sliceTo(ptr, 0);
+            if (glib.std.mem.eql(u8, raw, "swdraw")) return "lvgl/swdraw";
+            if (glib.std.mem.eql(u8, raw, "pxpdraw")) return "lvgl/pxpdraw";
+            if (glib.std.mem.eql(u8, raw, "vglitedraw")) return "lvgl/vglitedraw";
+            if (glib.std.mem.eql(u8, raw, "g2draw")) return "lvgl/g2draw";
+            return "lvgl/thread";
         }
 
         fn normalizeStackSize(stack_size: usize) usize {
@@ -312,6 +317,7 @@ pub fn makeWithAllocators(
             const thread = requireThread(handle) orelse return invalid();
             const cb = callback orelse return invalid();
             const impl = createImpl(ThreadImpl) orelse return invalid();
+            const task_name = taskName(name);
 
             impl.* = .{
                 .handle = undefined,
@@ -319,7 +325,7 @@ pub fn makeWithAllocators(
                 .user_data = user_data,
             };
             _ = prio;
-            impl.handle = Task.go(taskName(name), taskOptions(stack_size), glib.task.Routine.init(impl, threadMain)) catch {
+            impl.handle = Task.go(task_name, taskOptions(stack_size), glib.task.Routine.init(impl, threadMain)) catch {
                 destroyImpl(ThreadImpl, impl);
                 return invalid();
             };

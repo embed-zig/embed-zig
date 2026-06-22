@@ -105,10 +105,16 @@ pub fn BuilderWithOptions(comptime options: BuilderOptions) type {
                 }
 
                 pub fn go(name: []const u8, launch_options: TaskOptions, routine: TaskRoutine) SpawnError!Handle {
-                    const idx = route(Tree, name) orelse return error.UnknownTask;
+                    const idx = route(Tree, name) orelse {
+                        ErrorHandler.onError(name, error.UnknownTask);
+                        return error.UnknownTask;
+                    };
                     inline for (0..self.binding_count) |i| {
                         if (idx == i) {
-                            return self.bindings[i].Handler.go(name, launch_options, routine);
+                            return self.bindings[i].Handler.go(name, launch_options, routine) catch |err| {
+                                ErrorHandler.onError(name, err);
+                                return err;
+                            };
                         }
                     }
                     unreachable;
@@ -425,14 +431,43 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             };
         }
 
+        const FailingHandler = struct {
+            const FailingHandle = struct {
+                pub fn join(_: @This()) void {}
+            };
+            const FailingSpawnError = error{HandlerFailed};
+
+            pub const Handle = FailingHandle;
+            pub const SpawnError = FailingSpawnError;
+
+            pub fn go(name: []const u8, launch_options: TaskOptions, routine: TaskRoutine) FailingSpawnError!FailingHandle {
+                _ = name;
+                _ = launch_options;
+                _ = routine;
+                return error.HandlerFailed;
+            }
+
+            pub fn currentToken() usize {
+                return 24;
+            }
+        };
+
         fn taskRun(state: *State) void {
             state.run_count += 1;
         }
 
         const ErrorHandler = struct {
+            var last_name: []const u8 = "";
+            var last_error: ?anyerror = null;
+
             pub fn onError(name: []const u8, err: anyerror) void {
-                _ = name;
-                @panic(@errorName(err));
+                last_name = name;
+                last_error = err;
+            }
+
+            pub fn reset() void {
+                last_name = "";
+                last_error = null;
             }
         };
 
@@ -496,7 +531,27 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             var state: State = .{};
             const routine = TaskRoutine.init(&state, taskRun);
 
+            ErrorHandler.reset();
             try lib.testing.expectError(error.UnknownTask, Task.go("wifi/main", .{}, routine));
+            try lib.testing.expectEqualStrings("wifi/main", ErrorHandler.last_name);
+            try lib.testing.expectEqual(error.UnknownTask, ErrorHandler.last_error.?);
+        }
+
+        fn handlerSpawnFailureReportsError() !void {
+            const Task = comptime blk: {
+                var builder = Builder();
+                builder.handle("ui/", FailingHandler);
+                builder.onError(ErrorHandler);
+                break :blk builder.make();
+            };
+            var state: State = .{};
+            const routine = TaskRoutine.init(&state, taskRun);
+
+            ErrorHandler.reset();
+            try lib.testing.expectError(error.HandlerFailed, Task.go("ui/app/render", .{}, routine));
+            try lib.testing.expectEqualStrings("ui/app/render", ErrorHandler.last_name);
+            try lib.testing.expectEqual(error.HandlerFailed, ErrorHandler.last_error.?);
+            try lib.testing.expectEqual(@as(usize, 0), state.run_count);
         }
 
         fn exposesCurrentToken() !void {
@@ -529,6 +584,10 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             };
             TestCase.unknownWithoutDefaultReturnsError() catch |err| {
                 t.logErrorf("task.Builder unknown task failed: {}", .{err});
+                return false;
+            };
+            TestCase.handlerSpawnFailureReportsError() catch |err| {
+                t.logErrorf("task.Builder handler error failed: {}", .{err});
                 return false;
             };
             TestCase.exposesCurrentToken() catch |err| {
