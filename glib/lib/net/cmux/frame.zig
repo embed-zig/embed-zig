@@ -58,7 +58,7 @@ pub fn encode(out: []u8, frame: Frame) EncodeError![]const u8 {
     @memcpy(out[header_end .. header_end + frame.info.len], frame.info);
 
     const fcs_index = header_end + frame.info.len;
-    out[fcs_index] = computeFcs(frame, out[1..header_end]);
+    out[fcs_index] = computeFcs(out[1..header_end]);
     out[fcs_index + 1] = control.flag;
     return out[0 .. fcs_index + 2];
 }
@@ -90,13 +90,7 @@ pub fn decode(encoded: []const u8) DecodeError!Frame {
     if (encoded.len != index + info_len + 2) return error.InvalidLength;
 
     const info = encoded[index .. index + info_len];
-    const expected_fcs = computeFcs(.{
-        .dlci = address.dlci,
-        .cr = address.cr,
-        .pf = pf,
-        .frame_type = frame_type,
-        .info = info,
-    }, encoded[1..index]);
+    const expected_fcs = computeFcs(encoded[1..index]);
     if (encoded[index + info_len] != expected_fcs) return error.InvalidFcs;
 
     return .{
@@ -139,23 +133,20 @@ fn lengthFieldLen(info_len: usize) usize {
     return if (info_len > 127) 2 else 1;
 }
 
-fn computeFcs(frame: Frame, header: []const u8) u8 {
-    var fcs: u8 = 0xFF;
-    fcs = crc8_rohc(fcs, header);
-    if (frame.frame_type == .uih) return 0xFF - fcs;
-    return 0xFF - crc8_rohc(fcs, frame.info);
+fn computeFcs(header: []const u8) u8 {
+    return 0xFF - fcsCrc(header);
 }
 
-fn crc8_rohc(initial: u8, buf: []const u8) u8 {
-    var crc = initial;
+fn fcsCrc(buf: []const u8) u8 {
+    var crc: u8 = 0xFF;
     for (buf) |byte| {
         crc ^= byte;
         var bit: u8 = 0;
         while (bit < 8) : (bit += 1) {
-            if ((crc & 0x80) != 0) {
-                crc = (crc << 1) ^ 0x07;
+            if ((crc & 0x01) != 0) {
+                crc = (crc >> 1) ^ 0xE0;
             } else {
-                crc <<= 1;
+                crc >>= 1;
             }
         }
     }
@@ -186,6 +177,17 @@ pub fn TestRunner(comptime std: type) @import("testing").TestRunner {
             try std.testing.expectEqualStrings("abc", decoded.info);
         }
 
+        fn matchesEspModemSabm0Vector() !void {
+            var storage: [16]u8 = undefined;
+            const encoded = try encode(&storage, .{
+                .dlci = 0,
+                .cr = true,
+                .pf = true,
+                .frame_type = .sabm,
+            });
+            try std.testing.expectEqualSlices(u8, &.{ 0xF9, 0x03, 0x3F, 0x01, 0x1C, 0xF9 }, encoded);
+        }
+
         fn encodesTwoOctetLength() !void {
             var payload: [130]u8 = undefined;
             @memset(&payload, 'x');
@@ -198,6 +200,8 @@ pub fn TestRunner(comptime std: type) @import("testing").TestRunner {
                 .info = &payload,
             });
             try std.testing.expectEqual(@as(u8, 0), encoded[3] & 0x01);
+            try std.testing.expectEqual(@as(u8, 0x01), encoded[4]);
+            try std.testing.expectEqual(@as(u8, 0x03), encoded[encoded.len - 2]);
 
             const decoded = try decode(encoded);
             try std.testing.expectEqual(@as(usize, payload.len), decoded.info.len);
@@ -238,6 +242,11 @@ pub fn TestRunner(comptime std: type) @import("testing").TestRunner {
             t.run("encodesAndDecodesUih", testing_api.TestRunner.fromFn(std, 256 * 1024, struct {
                 fn run(_: *testing_api.T, _: std.mem.Allocator) !void {
                     try TestCase.encodesAndDecodesUih();
+                }
+            }.run));
+            t.run("matchesEspModemSabm0Vector", testing_api.TestRunner.fromFn(std, 256 * 1024, struct {
+                fn run(_: *testing_api.T, _: std.mem.Allocator) !void {
+                    try TestCase.matchesEspModemSabm0Vector();
                 }
             }.run));
             t.run("encodesTwoOctetLength", testing_api.TestRunner.fromFn(std, 256 * 1024, struct {
