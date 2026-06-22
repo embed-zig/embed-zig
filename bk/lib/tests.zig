@@ -1,6 +1,33 @@
 const std = @import("std");
 const armino = @import("bk_armino");
+const condition_impl = @import("grt/sync/Condition.zig").Impl;
+const mutex_impl = @import("grt/sync/Mutex.zig").Impl;
+const rwlock_impl = @import("grt/sync/RwLock.zig").Impl;
 const time_impl = @import("grt/time.zig");
+
+test "bk sync backend satisfies glib sync contract" {
+    comptime {
+        if (@TypeOf(mutex_impl.lock) != fn (*mutex_impl) void) @compileError("BK Mutex.lock has invalid shape");
+        if (@TypeOf(mutex_impl.unlock) != fn (*mutex_impl) void) @compileError("BK Mutex.unlock has invalid shape");
+        if (@TypeOf(mutex_impl.tryLock) != fn (*mutex_impl) bool) @compileError("BK Mutex.tryLock has invalid shape");
+
+        if (@TypeOf(condition_impl.wait) != fn (*condition_impl, *mutex_impl) void) @compileError("BK Condition.wait has invalid shape");
+        if (@TypeOf(condition_impl.timedWait) != fn (*condition_impl, *mutex_impl, u64) error{Timeout}!void) @compileError("BK Condition.timedWait has invalid shape");
+        if (@TypeOf(condition_impl.signal) != fn (*condition_impl) void) @compileError("BK Condition.signal has invalid shape");
+        if (@TypeOf(condition_impl.broadcast) != fn (*condition_impl) void) @compileError("BK Condition.broadcast has invalid shape");
+
+        if (@TypeOf(rwlock_impl.lockShared) != fn (*rwlock_impl) void) @compileError("BK RwLock.lockShared has invalid shape");
+        if (@TypeOf(rwlock_impl.unlockShared) != fn (*rwlock_impl) void) @compileError("BK RwLock.unlockShared has invalid shape");
+        if (@TypeOf(rwlock_impl.lock) != fn (*rwlock_impl) void) @compileError("BK RwLock.lock has invalid shape");
+        if (@TypeOf(rwlock_impl.unlock) != fn (*rwlock_impl) void) @compileError("BK RwLock.unlock has invalid shape");
+        if (@TypeOf(rwlock_impl.tryLockShared) != fn (*rwlock_impl) bool) @compileError("BK RwLock.tryLockShared has invalid shape");
+        if (@TypeOf(rwlock_impl.tryLock) != fn (*rwlock_impl) bool) @compileError("BK RwLock.tryLock has invalid shape");
+
+        if (@hasDecl(mutex_impl, "Thread")) @compileError("BK sync Mutex must not expose Thread");
+        if (@hasDecl(condition_impl, "Thread")) @compileError("BK sync Condition must not expose Thread");
+        if (@hasDecl(rwlock_impl, "Thread")) @compileError("BK sync RwLock must not expose Thread");
+    }
+}
 
 test "bk time backend satisfies glib time contract" {
     comptime {

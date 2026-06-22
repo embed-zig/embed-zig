@@ -36,10 +36,26 @@ extern fn bk_vfs_close(fd: c_int) c_int;
 
 var heartbeat_count: u32 = 0;
 var ap_task_state: ApTask = .{};
+var sync_smoke_mutex: grt.sync.Mutex = .{};
+var sync_smoke_rwlock: grt.sync.RwLock = .{};
+var sync_smoke_state: SyncState = .{};
 
 const ApTask = struct {
     fn run(_: *ApTask) void {
         apHeartbeatTask();
+    }
+};
+
+const SyncState = struct {
+    mutex: grt.sync.Mutex = .{},
+    condition: grt.sync.Condition = .{},
+    ready: bool = false,
+
+    fn signal(self: *SyncState) void {
+        self.mutex.lock();
+        self.ready = true;
+        self.condition.signal();
+        self.mutex.unlock();
     }
 };
 
@@ -83,6 +99,49 @@ fn runThreadAndChannelSmoke() void {
         return;
     }
     log.info("AP channel smoke ok value=0x{x}", .{result.value});
+}
+
+fn runSyncSmoke() void {
+    if (!sync_smoke_mutex.tryLock()) {
+        log.err("AP sync mutex tryLock failed", .{});
+        return;
+    }
+    sync_smoke_mutex.unlock();
+    sync_smoke_mutex.lock();
+    sync_smoke_mutex.unlock();
+
+    if (!sync_smoke_rwlock.tryLockShared()) {
+        log.err("AP sync rwlock shared tryLock failed", .{});
+        return;
+    }
+    sync_smoke_rwlock.unlockShared();
+    if (!sync_smoke_rwlock.tryLock()) {
+        log.err("AP sync rwlock exclusive tryLock failed", .{});
+        return;
+    }
+    sync_smoke_rwlock.unlock();
+
+    sync_smoke_state.mutex.lock();
+    sync_smoke_state.ready = false;
+    const task = grt.task.go("bk/smoke/sync", .{
+        .min_stack_size = 2048,
+    }, grt.task.Routine.init(&sync_smoke_state, SyncState.signal)) catch |err| {
+        sync_smoke_state.mutex.unlock();
+        log.err("AP sync signal task failed: {}", .{err});
+        return;
+    };
+    task.detach();
+
+    while (!sync_smoke_state.ready) {
+        sync_smoke_state.condition.timedWait(&sync_smoke_state.mutex, @intCast(2 * grt.time.duration.Second)) catch |err| {
+            sync_smoke_state.mutex.unlock();
+            log.err("AP sync condition wait failed: {}", .{err});
+            return;
+        };
+    }
+    sync_smoke_state.mutex.unlock();
+
+    log.info("AP sync smoke ok", .{});
 }
 
 fn runEasyFlashSmoke() void {
@@ -238,6 +297,7 @@ fn runNetSmoke() void {
 
 fn runSmokeSuite() void {
     runAllocatorSmoke();
+    runSyncSmoke();
     runThreadAndChannelSmoke();
     runNetSmoke();
     runEasyFlashSmoke();
@@ -249,6 +309,7 @@ fn apHeartbeatTask() void {
 
     while (true) {
         const count = heartbeatCount();
+        runSyncSmoke();
         runNetSmoke();
         log.info("AP heartbeat {}", .{count});
         grt.time.sleepNanos(@intCast(5 * grt.time.duration.Second));

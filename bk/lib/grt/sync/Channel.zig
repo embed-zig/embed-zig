@@ -1,6 +1,7 @@
 const glib = @import("glib");
 const sync = glib.sync;
-const thread = @import("../std/ThreadCommon.zig");
+const Condition = @import("Condition.zig").Impl;
+const Mutex = @import("Mutex.zig").Impl;
 
 const time = struct {
     const duration = glib.time.duration;
@@ -37,9 +38,9 @@ fn Channel(comptime std: type, comptime T: type) type {
 
         const Inner = struct {
             allocator: std.mem.Allocator,
-            mutex: thread.Mutex,
-            can_send: thread.Condition,
-            can_recv: thread.Condition,
+            mutex: Mutex,
+            can_send: Condition,
+            can_recv: Condition,
             ring: []T,
             head: usize,
             tail: usize,
@@ -48,7 +49,7 @@ fn Channel(comptime std: type, comptime T: type) type {
             closed: bool,
             slot: T,
             slot_full: bool,
-            send_mutex: thread.Mutex,
+            send_mutex: Mutex,
         };
 
         pub fn init(allocator: std.mem.Allocator, capacity: usize) anyerror!Self {

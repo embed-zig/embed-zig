@@ -1,5 +1,8 @@
 const glib = @import("glib");
 const this = @import("ThreadCommon.zig");
+const SyncMutex = @import("../sync/Mutex.zig").Impl;
+const SyncCondition = @import("../sync/Condition.zig").Impl;
+const SyncRwLock = @import("../sync/RwLock.zig").Impl;
 
 const BK_OK = 0;
 const wait_forever: u32 = 0xffff_ffff;
@@ -8,9 +11,11 @@ const ns_per_ms: u64 = 1_000_000;
 pub const Id = usize;
 pub const max_name_len: usize = 15;
 pub const default_stack_size: usize = 4096;
+pub const Mutex = SyncMutex;
+pub const Condition = SyncCondition;
+pub const RwLock = SyncRwLock;
 
 pub const RawThread = ?*anyopaque;
-const RawMutex = ?*anyopaque;
 const RawSemaphore = ?*anyopaque;
 pub const ThreadFn = *const fn (?*anyopaque) callconv(.c) void;
 pub const CreateThreadFn = *const fn (
@@ -28,11 +33,6 @@ extern fn free(ptr: ?*anyopaque) void;
 extern fn rtos_delete_thread(thread: ?*RawThread) c_int;
 extern fn rtos_get_current_thread() RawThread;
 extern fn rtos_delay_milliseconds(num_ms: u32) c_int;
-extern fn rtos_init_mutex(mutex: *RawMutex) c_int;
-extern fn rtos_trylock_mutex(mutex: *RawMutex) c_int;
-extern fn rtos_lock_mutex(mutex: *RawMutex) c_int;
-extern fn rtos_unlock_mutex(mutex: *RawMutex) c_int;
-extern fn rtos_deinit_mutex(mutex: *RawMutex) c_int;
 extern fn rtos_init_semaphore_ex(semaphore: *RawSemaphore, max_count: c_int, init_count: c_int) c_int;
 extern fn rtos_get_semaphore(semaphore: *RawSemaphore, timeout_ms: u32) c_int;
 extern fn rtos_set_semaphore(semaphore: *RawSemaphore) c_int;
@@ -241,141 +241,6 @@ pub fn currentThreadToken() usize {
     const value = @intFromPtr(current);
     return if (value == 0) 1 else value;
 }
-
-pub const Mutex = struct {
-    handle: RawMutex = null,
-
-    pub fn lock(self: *Mutex) void {
-        self.ensureInit();
-        _ = rtos_lock_mutex(&self.handle);
-    }
-
-    pub fn unlock(self: *Mutex) void {
-        if (self.handle != null) {
-            _ = rtos_unlock_mutex(&self.handle);
-        }
-    }
-
-    pub fn tryLock(self: *Mutex) bool {
-        self.ensureInit();
-        return rtos_trylock_mutex(&self.handle) == BK_OK;
-    }
-
-    pub fn deinit(self: *Mutex) void {
-        if (self.handle != null) {
-            _ = rtos_deinit_mutex(&self.handle);
-        }
-    }
-
-    fn ensureInit(self: *Mutex) void {
-        if (self.handle == null) {
-            _ = rtos_init_mutex(&self.handle);
-        }
-    }
-};
-
-pub const Condition = struct {
-    semaphore: RawSemaphore = null,
-    lock: Mutex = .{},
-    waiters: u32 = 0,
-
-    pub fn wait(self: *Condition, mutex: *Mutex) void {
-        self.ensureInit();
-        self.lock.lock();
-        self.waiters += 1;
-        self.lock.unlock();
-
-        mutex.unlock();
-        _ = rtos_get_semaphore(&self.semaphore, wait_forever);
-        mutex.lock();
-
-        self.lock.lock();
-        if (self.waiters != 0) self.waiters -= 1;
-        self.lock.unlock();
-    }
-
-    pub fn timedWait(self: *Condition, mutex: *Mutex, timeout_ns: u64) error{Timeout}!void {
-        self.ensureInit();
-        self.lock.lock();
-        self.waiters += 1;
-        self.lock.unlock();
-
-        mutex.unlock();
-        const rc = rtos_get_semaphore(&self.semaphore, nsToMsCeil(timeout_ns));
-        mutex.lock();
-
-        self.lock.lock();
-        if (self.waiters != 0) self.waiters -= 1;
-        self.lock.unlock();
-
-        if (rc != BK_OK) return error.Timeout;
-    }
-
-    pub fn signal(self: *Condition) void {
-        self.ensureInit();
-        self.lock.lock();
-        const should_signal = self.waiters != 0;
-        self.lock.unlock();
-        if (should_signal) {
-            _ = rtos_set_semaphore(&self.semaphore);
-        }
-    }
-
-    pub fn broadcast(self: *Condition) void {
-        self.ensureInit();
-        self.lock.lock();
-        const count = self.waiters;
-        self.lock.unlock();
-
-        var i: u32 = 0;
-        while (i < count) : (i += 1) {
-            _ = rtos_set_semaphore(&self.semaphore);
-        }
-    }
-
-    pub fn deinit(self: *Condition) void {
-        deinitSemaphore(&self.semaphore);
-        self.lock.deinit();
-    }
-
-    fn ensureInit(self: *Condition) void {
-        if (self.semaphore == null) {
-            _ = rtos_init_semaphore_ex(&self.semaphore, 1024, 0);
-        }
-    }
-};
-
-pub const RwLock = struct {
-    mutex: Mutex = .{},
-
-    pub fn lockShared(self: *RwLock) void {
-        self.mutex.lock();
-    }
-
-    pub fn unlockShared(self: *RwLock) void {
-        self.mutex.unlock();
-    }
-
-    pub fn lock(self: *RwLock) void {
-        self.mutex.lock();
-    }
-
-    pub fn unlock(self: *RwLock) void {
-        self.mutex.unlock();
-    }
-
-    pub fn tryLockShared(self: *RwLock) bool {
-        return self.mutex.tryLock();
-    }
-
-    pub fn tryLock(self: *RwLock) bool {
-        return self.mutex.tryLock();
-    }
-
-    pub fn deinit(self: *RwLock) void {
-        self.mutex.deinit();
-    }
-};
 
 fn deinitSemaphore(semaphore: *RawSemaphore) void {
     if (semaphore.* != null) {
