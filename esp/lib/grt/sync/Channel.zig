@@ -6,6 +6,7 @@ const Handle = binding.Handle;
 const pd_true = binding.pd_true;
 const poll_ticks: u32 = 1;
 const ns_per_s: u64 = 1_000_000_000;
+const Alignment = glib.std.mem.Alignment;
 
 pub const ChannelFactory: sync.channel.FactoryType = struct {
     fn factory(comptime std: type) sync.channel.ChannelType {
@@ -22,16 +23,27 @@ pub const Error = error{
 pub const SendResult = sync.channel.SendResult;
 pub const RecvResult = sync.channel.RecvResult;
 
+const AlignedStorage = struct {
+    bytes: []u8,
+    alignment: Alignment,
+};
+
 pub fn Channel(comptime T: type) type {
     comptime {
         if (@sizeOf(T) == 0) @compileError("freertos.Channel does not support zero-sized element types");
     }
 
     return struct {
+        allocator: glib.std.mem.Allocator,
         queue: Handle = null,
         state_lock: Handle = null,
         send_lock: Handle = null,
         ack: Handle = null,
+        queue_control_storage: ?AlignedStorage = null,
+        queue_item_storage: ?[]u8 = null,
+        state_lock_storage: ?AlignedStorage = null,
+        send_lock_storage: ?AlignedStorage = null,
+        ack_storage: ?AlignedStorage = null,
         capacity: usize,
         closed: bool = false,
         recv_waiters: u32 = 0,
@@ -39,24 +51,38 @@ pub fn Channel(comptime T: type) type {
         const Self = @This();
 
         pub fn init(allocator: glib.std.mem.Allocator, capacity: usize) anyerror!Self {
-            _ = allocator;
             if (capacity > glib.std.math.maxInt(u32)) return error.InvalidCapacity;
 
             var self = Self{
+                .allocator = allocator,
                 .capacity = capacity,
             };
             errdefer self.deinit();
 
             const queue_len: u32 = if (capacity == 0) 1 else @intCast(capacity);
-            self.queue = binding.espz_channel_queue_create(queue_len, @sizeOf(T)) orelse
-                return error.CreateFailed;
-            self.state_lock = binding.espz_channel_semaphore_create_mutex() orelse
+            self.queue_control_storage = try allocAlignedStorage(
+                allocator,
+                binding.espz_channel_static_queue_size(),
+                binding.espz_channel_static_queue_align(),
+            );
+            self.queue_item_storage = try allocStorage(allocator, queueStorageSize(queue_len, @sizeOf(T)) orelse return error.InvalidCapacity);
+            self.queue = binding.espz_channel_queue_create_static(
+                queue_len,
+                @sizeOf(T),
+                self.queue_item_storage.?.ptr,
+                self.queue_control_storage.?.bytes.ptr,
+            ) orelse return error.CreateFailed;
+
+            self.state_lock_storage = try allocSemaphoreStorage(allocator);
+            self.state_lock = binding.espz_channel_semaphore_create_mutex_static(self.state_lock_storage.?.bytes.ptr) orelse
                 return error.CreateFailed;
 
             if (capacity == 0) {
-                self.send_lock = binding.espz_channel_semaphore_create_mutex() orelse
+                self.send_lock_storage = try allocSemaphoreStorage(allocator);
+                self.send_lock = binding.espz_channel_semaphore_create_mutex_static(self.send_lock_storage.?.bytes.ptr) orelse
                     return error.CreateFailed;
-                self.ack = binding.espz_channel_semaphore_create_binary() orelse
+                self.ack_storage = try allocSemaphoreStorage(allocator);
+                self.ack = binding.espz_channel_semaphore_create_binary_static(self.ack_storage.?.bytes.ptr) orelse
                     return error.CreateFailed;
             }
 
@@ -69,6 +95,11 @@ pub fn Channel(comptime T: type) type {
             deleteSemaphore(&self.send_lock);
             deleteSemaphore(&self.state_lock);
             deleteQueue(&self.queue);
+            freeAlignedStorage(self.allocator, &self.ack_storage);
+            freeAlignedStorage(self.allocator, &self.send_lock_storage);
+            freeAlignedStorage(self.allocator, &self.state_lock_storage);
+            freeStorage(self.allocator, &self.queue_item_storage);
+            freeAlignedStorage(self.allocator, &self.queue_control_storage);
         }
 
         pub fn close(self: *Self) void {
@@ -177,9 +208,8 @@ pub fn Channel(comptime T: type) type {
                     if (binding.espz_channel_queue_send(self.queue, @ptrCast(&item), poll_ticks) == pd_true) {
                         break;
                     }
-                } else {
-                    pause();
                 }
+                pause();
             }
 
             const ack = self.ack orelse unreachable;
@@ -209,8 +239,6 @@ pub fn Channel(comptime T: type) type {
                     }
                 } else if (remaining <= poll_ticks) {
                     return error.Timeout;
-                } else {
-                    pause();
                 }
 
                 if (self.isClosed()) return .{ .ok = false };
@@ -218,6 +246,7 @@ pub fn Channel(comptime T: type) type {
                     return error.Timeout;
                 }
                 remaining -= poll_ticks;
+                pause();
             }
 
             const ack = self.ack orelse unreachable;
@@ -343,12 +372,69 @@ fn nsToTicksCeil(timeout_ns: u64) u32 {
     return @intCast(ticks);
 }
 
+fn allocStorage(allocator: glib.std.mem.Allocator, size: usize) ![]u8 {
+    if (size == 0) return error.CreateFailed;
+    return allocator.alloc(u8, size) catch return error.CreateFailed;
+}
+
+fn allocAlignedStorage(allocator: glib.std.mem.Allocator, size: u32, align_bytes: u32) !AlignedStorage {
+    if (size == 0) return error.CreateFailed;
+    const alignment = alignmentFromBytes(align_bytes) catch return error.CreateFailed;
+    const bytes = allocator.rawAlloc(size, alignment, @returnAddress()) orelse return error.CreateFailed;
+    return .{
+        .bytes = bytes[0..size],
+        .alignment = alignment,
+    };
+}
+
+fn allocSemaphoreStorage(allocator: glib.std.mem.Allocator) !AlignedStorage {
+    return allocAlignedStorage(
+        allocator,
+        binding.espz_channel_static_semaphore_size(),
+        binding.espz_channel_static_semaphore_align(),
+    );
+}
+
+fn freeStorage(allocator: glib.std.mem.Allocator, storage: *?[]u8) void {
+    if (storage.*) |value| {
+        allocator.free(value);
+        storage.* = null;
+    }
+}
+
+fn freeAlignedStorage(allocator: glib.std.mem.Allocator, storage: *?AlignedStorage) void {
+    if (storage.*) |value| {
+        allocator.rawFree(value.bytes, value.alignment, @returnAddress());
+        storage.* = null;
+    }
+}
+
+fn alignmentFromBytes(bytes: usize) error{InvalidAlignment}!Alignment {
+    return switch (bytes) {
+        1 => .@"1",
+        2 => .@"2",
+        4 => .@"4",
+        8 => .@"8",
+        16 => .@"16",
+        32 => .@"32",
+        64 => .@"64",
+        else => error.InvalidAlignment,
+    };
+}
+
+fn queueStorageSize(length: u32, item_size: usize) ?usize {
+    const len: usize = length;
+    const size, const overflow = @mulWithOverflow(len, item_size);
+    if (overflow != 0) return null;
+    return size;
+}
+
 fn lockSemaphore(handle: Handle) void {
     while (binding.espz_channel_semaphore_take(handle, binding.max_delay) != pd_true) {}
 }
 
 fn pause() void {
-    binding.espz_channel_task_delay(poll_ticks);
+    binding.espz_channel_task_yield();
 }
 
 fn deleteSemaphore(handle: *Handle) void {

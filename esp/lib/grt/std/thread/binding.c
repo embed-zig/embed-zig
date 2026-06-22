@@ -1,6 +1,8 @@
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
+#include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
@@ -8,6 +10,11 @@
 #include "freertos/idf_additions.h"
 
 static portMUX_TYPE espz_global_critical_lock = portMUX_INITIALIZER_UNLOCKED;
+
+typedef struct {
+    char name[16];
+    uint64_t runtime;
+} espz_task_runtime_entry_t;
 
 static uint32_t espz_stack_words_from_bytes(uint32_t bytes)
 {
@@ -238,4 +245,40 @@ TaskHandle_t espz_freertos_current_task_handle(void)
 const char *espz_freertos_current_task_name(void)
 {
     return pcTaskGetName(NULL);
+}
+
+uint32_t espz_freertos_task_runtime_snapshot(espz_task_runtime_entry_t *entries, uint32_t max_entries)
+{
+#if (CONFIG_FREERTOS_USE_TRACE_FACILITY == 1 && CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS == 1)
+    if (entries == NULL || max_entries == 0) {
+        return 0;
+    }
+
+    UBaseType_t task_capacity = uxTaskGetNumberOfTasks();
+    if (task_capacity == 0) {
+        return 0;
+    }
+
+    TaskStatus_t *tasks = pvPortMalloc(task_capacity * sizeof(TaskStatus_t));
+    if (tasks == NULL) {
+        return 0;
+    }
+
+    configRUN_TIME_COUNTER_TYPE total_runtime = 0;
+    const UBaseType_t count = uxTaskGetSystemState(tasks, task_capacity, &total_runtime);
+    const UBaseType_t copied = count > (UBaseType_t)max_entries ? (UBaseType_t)max_entries : count;
+    for (UBaseType_t i = 0; i < copied; ++i) {
+        memset(entries[i].name, 0, sizeof(entries[i].name));
+        if (tasks[i].pcTaskName != NULL) {
+            strncpy(entries[i].name, tasks[i].pcTaskName, sizeof(entries[i].name) - 1);
+        }
+        entries[i].runtime = (uint64_t)tasks[i].ulRunTimeCounter;
+    }
+    vPortFree(tasks);
+    return (uint32_t)copied;
+#else
+    (void)entries;
+    (void)max_entries;
+    return 0;
+#endif
 }

@@ -4,7 +4,7 @@ const Native = @import("task/Native.zig");
 pub fn Impl(comptime policy: anytype) type {
     return struct {
         pub fn make(comptime grt: type) type {
-            @setEvalBranchQuota(10_000);
+            @setEvalBranchQuota(100_000);
 
             comptime var builder = glib.task.Builder();
 
@@ -13,13 +13,14 @@ pub fn Impl(comptime policy: anytype) type {
                 builder.handle(field.name, PolicyHandler(grt, policyEntry(@field(policy, field.name))));
             }
 
-            builder.onError(ErrorHandler);
+            builder.onError(ErrorHandler(grt));
             return builder.make();
         }
     };
 }
 
 const Entry = struct {
+    stack_size: ?usize = null,
     priority: ?u8 = null,
     core_id: ?i32 = null,
     allocator: ?glib.std.mem.Allocator = null,
@@ -40,7 +41,7 @@ fn PolicyHandler(comptime grt: type, comptime entry: Entry) type {
 
             var spawn_config: Native.SpawnConfig = .{
                 .name = task_name.ptr,
-                .stack_size = options.min_stack_size,
+                .stack_size = entry.stack_size orelse options.min_stack_size,
             };
             if (entry.priority) |priority| spawn_config.priority = priority;
             if (entry.core_id) |core_id| spawn_config.core_id = core_id;
@@ -55,16 +56,22 @@ fn PolicyHandler(comptime grt: type, comptime entry: Entry) type {
     };
 }
 
-const ErrorHandler = struct {
-    pub fn onError(_: []const u8, _: anyerror) void {
-        @panic("esp task.go failed");
-    }
-};
+fn ErrorHandler(comptime grt: type) type {
+    return struct {
+        const log = grt.std.log.scoped(.grt_task);
+
+        pub fn onError(name: []const u8, err: anyerror) void {
+            log.err("task.go rejected name={s} err={s}", .{ name, @errorName(err) });
+            @panic("esp task.go rejected");
+        }
+    };
+}
 
 fn policyEntry(comptime value: anytype) Entry {
     const Value = @TypeOf(value);
     return switch (@typeInfo(Value)) {
         .@"struct" => .{
+            .stack_size = if (@hasField(Value, "stack_size")) value.stack_size else null,
             .priority = if (@hasField(Value, "priority")) value.priority else null,
             .core_id = if (@hasField(Value, "core_id")) value.core_id else null,
             .allocator = if (@hasField(Value, "allocator")) value.allocator else null,

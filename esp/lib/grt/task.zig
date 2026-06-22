@@ -5,7 +5,7 @@ pub const impl = struct {
     pub fn make(comptime grt: type) type {
         comptime var builder = glib.task.Builder();
         builder.handle("", DefaultHandler(grt));
-        builder.onError(ErrorHandler);
+        builder.onError(ErrorHandler(grt));
         return builder.make();
     }
 };
@@ -35,11 +35,16 @@ pub fn DefaultHandler(comptime grt: type) type {
     };
 }
 
-const ErrorHandler = struct {
-    pub fn onError(_: []const u8, _: anyerror) void {
-        @panic("esp task.go failed");
-    }
-};
+fn ErrorHandler(comptime grt: type) type {
+    return struct {
+        const log = grt.std.log.scoped(.grt_task);
+
+        pub fn onError(name: []const u8, err: anyerror) void {
+            log.err("task.go rejected name={s} err={s}", .{ name, @errorName(err) });
+            @panic("esp task.go rejected");
+        }
+    };
+}
 
 fn taskName(comptime grt: type, name: []const u8, buf: *[Native.max_name_len:0]u8) [:0]const u8 {
     _ = grt;

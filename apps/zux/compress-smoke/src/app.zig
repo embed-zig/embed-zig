@@ -182,6 +182,7 @@ fn runSmoke(comptime platform_ctx: type, comptime platform_grt: type, allocator:
 
     try expectOutputTooSmall(Compress);
     try expectInflateAlloc(platform_grt, Compress, allocator);
+    try expectInflateStream(platform_grt, Compress);
     log.info("compress smoke passed", .{});
 }
 
@@ -228,6 +229,29 @@ fn expectInflateAlloc(
     defer allocator.free(out);
 
     if (!platform_grt.std.mem.eql(u8, input, out)) return error.UnexpectedAllocData;
+}
+
+fn expectInflateStream(
+    comptime platform_grt: type,
+    comptime Compress: type,
+) !void {
+    if (comptime !Compress.supports_stream) return;
+
+    const Sink = struct {
+        buffer: [input.len]u8 = undefined,
+        len: usize = 0,
+
+        pub fn write(self: *@This(), data: []const u8) !void {
+            if (self.len + data.len > self.buffer.len) return error.StreamOverflow;
+            platform_grt.std.mem.copyForwards(u8, self.buffer[self.len..][0..data.len], data);
+            self.len += data.len;
+        }
+    };
+
+    var sink = Sink{};
+    const len = try Compress.inflateStream(.zlib, &zlib, &sink);
+    if (len != input.len or sink.len != input.len) return error.UnexpectedStreamLength;
+    if (!platform_grt.std.mem.eql(u8, input, sink.buffer[0..sink.len])) return error.UnexpectedStreamData;
 }
 
 fn RuntimeCompress(comptime platform_grt: type) type {

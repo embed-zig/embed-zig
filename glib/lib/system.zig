@@ -15,6 +15,22 @@ pub fn make(comptime Impl: type) type {
         pub fn cpuCount() cpu_mod.CpuCountError!usize {
             return RuntimeCpu.cpuCount();
         }
+
+        pub const TaskRuntimeEntry = if (@hasDecl(Impl, "TaskRuntimeEntry"))
+            Impl.TaskRuntimeEntry
+        else
+            extern struct {
+                name: [16]u8,
+                runtime: u64,
+            };
+
+        pub fn taskRuntimeSnapshot(entries: []TaskRuntimeEntry) usize {
+            if (comptime @hasDecl(Impl, "taskRuntimeSnapshot")) {
+                return Impl.taskRuntimeSnapshot(entries);
+            } else {
+                return 0;
+            }
+        }
     };
 }
 

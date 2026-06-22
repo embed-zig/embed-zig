@@ -173,7 +173,7 @@ pub const runtime = struct {
             const runtime_marker: TypeMarker = .{};
             pub const runtime = Runtime;
             pub const task = if (options.task_impl == void) void else options.task_impl.make(Self);
-            pub const std = stdWithoutThreadSleep(runtime_std_raw, Self.task);
+            pub const std = stdWithoutThreadSleep(runtime_std_raw, runtime_sync, Self.task);
             pub const time = runtime_time;
             pub const system = runtime_system;
             pub const sync = struct {
@@ -204,11 +204,16 @@ pub const runtime = struct {
         return @TypeOf(ns.runtime_marker) == TypeMarker;
     }
 
-    fn stdWithoutThreadSleep(comptime RawStd: type, comptime Task: type) type {
+    fn stdWithoutThreadSleep(comptime RawStd: type, comptime SyncImpl: type, comptime Task: type) type {
         return struct {
             pub const heap = RawStd.heap;
             pub const Thread = RemovedThreadNamespace;
             pub const task = Task;
+            pub const sync = struct {
+                pub const Mutex = @import("sync").Mutex.make(SyncImpl.Mutex);
+                pub const Condition = @import("sync").Condition.make(SyncImpl.Condition);
+                pub const RwLock = @import("sync").RwLock.make(SyncImpl.RwLock);
+            };
             pub const log = RawStd.log;
             pub const posix = RawStd.posix;
             pub const ascii = RawStd.ascii;

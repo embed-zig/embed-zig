@@ -715,6 +715,61 @@ fn AesGcm(comptime key_bits: comptime_int) type {
         pub const tag_length: usize = 16;
         pub const nonce_length: usize = 12;
         pub const key_length: usize = key_bits / 8;
+        pub const State = struct {
+            ctx: binding.aes_gcm_context = undefined,
+
+            pub fn init(key: [key_length]u8) !@This() {
+                var self: @This() = .{};
+                const rc = binding.espz_mbedtls_aes_gcm_state_init(&self.ctx, key_bits, &key);
+                if (rc != 0) return error.CryptoInitFailed;
+                return self;
+            }
+
+            pub fn deinit(self: *@This()) void {
+                binding.espz_mbedtls_aes_gcm_state_free(&self.ctx);
+                self.* = undefined;
+            }
+
+            pub fn encrypt(self: *@This(), c: []u8, tag: *[tag_length]u8, m: []const u8, ad: []const u8, npub: [nonce_length]u8) void {
+                glib.std.debug.assert(c.len == m.len);
+                const ad_ptr: ?[*]const u8 = if (ad.len == 0) null else ad.ptr;
+                const msg_ptr: ?[*]const u8 = if (m.len == 0) null else m.ptr;
+                const out_ptr: ?[*]u8 = if (c.len == 0) null else c.ptr;
+                const rc = binding.espz_mbedtls_aes_gcm_state_encrypt(
+                    &self.ctx,
+                    &npub,
+                    npub.len,
+                    ad_ptr,
+                    ad.len,
+                    msg_ptr,
+                    m.len,
+                    out_ptr,
+                    tag,
+                    tag_length,
+                );
+                panicOnNonZero(rc, "mbedTLS AES-GCM state encrypt failed");
+            }
+
+            pub fn decrypt(self: *@This(), m: []u8, c: []const u8, tag: [tag_length]u8, ad: []const u8, npub: [nonce_length]u8) AuthenticationError!void {
+                glib.std.debug.assert(m.len == c.len);
+                const ad_ptr: ?[*]const u8 = if (ad.len == 0) null else ad.ptr;
+                const msg_ptr: ?[*]const u8 = if (c.len == 0) null else c.ptr;
+                const out_ptr: ?[*]u8 = if (m.len == 0) null else m.ptr;
+                const rc = binding.espz_mbedtls_aes_gcm_state_decrypt(
+                    &self.ctx,
+                    &npub,
+                    npub.len,
+                    ad_ptr,
+                    ad.len,
+                    msg_ptr,
+                    c.len,
+                    out_ptr,
+                    &tag,
+                    tag_length,
+                );
+                if (rc != 0) return error.AuthenticationFailed;
+            }
+        };
 
         pub fn encrypt(c: []u8, tag: *[tag_length]u8, m: []const u8, ad: []const u8, npub: [nonce_length]u8, key: [key_length]u8) void {
             glib.std.debug.assert(c.len == m.len);

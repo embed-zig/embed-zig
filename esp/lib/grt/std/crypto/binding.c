@@ -12,18 +12,27 @@
 #include "mbedtls/private_access.h"
 #if defined(MBEDTLS_MAJOR_VERSION) && MBEDTLS_MAJOR_VERSION >= 4
 #include "mbedtls/private/aes.h"
+#include "mbedtls/private/gcm.h"
 #include "mbedtls/private/rsa.h"
 #include "mbedtls/private/sha256.h"
 #include "mbedtls/private/sha512.h"
 #else
 #include "mbedtls/aes.h"
+#include "mbedtls/gcm.h"
 #include "mbedtls/rsa.h"
 #include "mbedtls/sha256.h"
 #include "mbedtls/sha512.h"
 #endif
+#include "mbedtls/constant_time.h"
 #include "mbedtls/x509.h"
 #include "mbedtls/x509_crt.h"
 #include "psa/crypto.h"
+
+#if defined(ESP_PLATFORM)
+#include "aes/esp_aes_gcm.h"
+#include "esp_log.h"
+#include "esp_timer.h"
+#endif
 
 #if defined(PSA_WANT_ALG_CHACHA20_POLY1305)
 const bool espz_mbedtls_has_chacha20poly1305 = true;
@@ -74,6 +83,10 @@ typedef struct __attribute__((aligned(8))) espz_mbedtls_aes_context {
     unsigned char storage[288];
 } espz_mbedtls_aes_context;
 
+typedef struct __attribute__((aligned(8))) espz_mbedtls_aes_gcm_context {
+    unsigned char storage[640];
+} espz_mbedtls_aes_gcm_context;
+
 _Static_assert(
     sizeof(mbedtls_sha256_context) <= sizeof(((espz_mbedtls_sha256_context *) 0)->storage),
     "espz_mbedtls_sha256_context is too small for mbedtls_sha256_context"
@@ -99,6 +112,26 @@ _Static_assert(
     "espz_mbedtls_aes_context alignment is too small for mbedtls_aes_context"
 );
 
+#if defined(ESP_PLATFORM)
+_Static_assert(
+    sizeof(esp_gcm_context) <= sizeof(((espz_mbedtls_aes_gcm_context *) 0)->storage),
+    "espz_mbedtls_aes_gcm_context is too small for esp_gcm_context"
+);
+_Static_assert(
+    _Alignof(esp_gcm_context) <= _Alignof(espz_mbedtls_aes_gcm_context),
+    "espz_mbedtls_aes_gcm_context alignment is too small for esp_gcm_context"
+);
+#else
+_Static_assert(
+    sizeof(mbedtls_gcm_context) <= sizeof(((espz_mbedtls_aes_gcm_context *) 0)->storage),
+    "espz_mbedtls_aes_gcm_context is too small for mbedtls_gcm_context"
+);
+_Static_assert(
+    _Alignof(mbedtls_gcm_context) <= _Alignof(espz_mbedtls_aes_gcm_context),
+    "espz_mbedtls_aes_gcm_context alignment is too small for mbedtls_gcm_context"
+);
+#endif
+
 static mbedtls_sha256_context *espz_sha256_ctx(espz_mbedtls_sha256_context *ctx) {
     return (mbedtls_sha256_context *) ctx->storage;
 }
@@ -122,6 +155,16 @@ static mbedtls_aes_context *espz_aes_ctx(espz_mbedtls_aes_context *ctx) {
 static const mbedtls_aes_context *espz_aes_ctx_const(const espz_mbedtls_aes_context *ctx) {
     return (const mbedtls_aes_context *) ctx->storage;
 }
+
+#if defined(ESP_PLATFORM)
+static esp_gcm_context *espz_aes_gcm_ctx(espz_mbedtls_aes_gcm_context *ctx) {
+    return (esp_gcm_context *) ctx->storage;
+}
+#else
+static mbedtls_gcm_context *espz_aes_gcm_ctx(espz_mbedtls_aes_gcm_context *ctx) {
+    return (mbedtls_gcm_context *) ctx->storage;
+}
+#endif
 
 #if defined(MBEDTLS_MAJOR_VERSION) && MBEDTLS_MAJOR_VERSION >= 4
 static size_t der_len_len(size_t len) {
@@ -207,6 +250,94 @@ static int espz_psa_init(void) {
     return (int) status;
 }
 
+#if defined(ESP_PLATFORM)
+#define ESPZ_AEAD_DIAG_ENABLED 0
+
+#if ESPZ_AEAD_DIAG_ENABLED
+static const char *espz_crypto_tag = "espz_crypto";
+#endif
+
+typedef struct espz_aead_diag {
+    uint64_t count;
+    uint64_t init_us;
+    uint64_t import_us;
+    uint64_t alloc_copy_us;
+    uint64_t psa_us;
+    uint64_t output_copy_us;
+    uint64_t cleanup_us;
+    uint64_t total_us;
+} espz_aead_diag;
+
+static espz_aead_diag espz_aead_encrypt_diag = {0};
+static espz_aead_diag espz_aead_decrypt_diag = {0};
+
+static int64_t espz_crypto_now_us(void) {
+#if ESPZ_AEAD_DIAG_ENABLED
+    return esp_timer_get_time();
+#else
+    return 0;
+#endif
+}
+
+static uint64_t espz_crypto_elapsed_us(int64_t start) {
+#if ESPZ_AEAD_DIAG_ENABLED
+    const int64_t elapsed = espz_crypto_now_us() - start;
+    return elapsed > 0 ? (uint64_t) elapsed : 0;
+#else
+    (void) start;
+    return 0;
+#endif
+}
+
+static void espz_aead_diag_add(espz_aead_diag *diag, uint64_t init_us, uint64_t import_us, uint64_t alloc_copy_us, uint64_t psa_us, uint64_t output_copy_us, uint64_t cleanup_us, uint64_t total_us) {
+#if ESPZ_AEAD_DIAG_ENABLED
+    diag->count += 1;
+    diag->init_us += init_us;
+    diag->import_us += import_us;
+    diag->alloc_copy_us += alloc_copy_us;
+    diag->psa_us += psa_us;
+    diag->output_copy_us += output_copy_us;
+    diag->cleanup_us += cleanup_us;
+    diag->total_us += total_us;
+#else
+    (void) diag;
+    (void) init_us;
+    (void) import_us;
+    (void) alloc_copy_us;
+    (void) psa_us;
+    (void) output_copy_us;
+    (void) cleanup_us;
+    (void) total_us;
+#endif
+}
+
+static void espz_aead_diag_log(const char *name, const espz_aead_diag *diag) {
+#if ESPZ_AEAD_DIAG_ENABLED
+    #define ESPZ_AEAD_AVG(total, count) ((count) == 0 ? 0 : (total) / (count))
+    if (diag->count == 0 || (diag->count % 1000) != 0) {
+        return;
+    }
+    ESP_LOGI(
+        espz_crypto_tag,
+        "aead %s count=%llu avg_us init=%llu import=%llu alloc_copy=%llu psa=%llu output_copy=%llu cleanup=%llu total=%llu",
+        name,
+        (unsigned long long) diag->count,
+        (unsigned long long) ESPZ_AEAD_AVG(diag->init_us, diag->count),
+        (unsigned long long) ESPZ_AEAD_AVG(diag->import_us, diag->count),
+        (unsigned long long) ESPZ_AEAD_AVG(diag->alloc_copy_us, diag->count),
+        (unsigned long long) ESPZ_AEAD_AVG(diag->psa_us, diag->count),
+        (unsigned long long) ESPZ_AEAD_AVG(diag->output_copy_us, diag->count),
+        (unsigned long long) ESPZ_AEAD_AVG(diag->cleanup_us, diag->count),
+        (unsigned long long) ESPZ_AEAD_AVG(diag->total_us, diag->count)
+    );
+    #undef ESPZ_AEAD_AVG
+#else
+    (void) name;
+    (void) diag;
+#endif
+}
+#endif
+
 static int import_psa_symmetric_key(
     mbedtls_svc_key_id_t *key_id,
     psa_key_type_t key_type,
@@ -252,6 +383,7 @@ static int64_t x509_time_to_unix(const mbedtls_x509_time *time) {
     return (((days * 24) + time->hour) * 60 + time->min) * 60 + time->sec;
 }
 
+#if !(defined(MBEDTLS_MAJOR_VERSION) && MBEDTLS_MAJOR_VERSION >= 4)
 static mbedtls_md_type_t hash_kind_to_md(espz_mbedtls_rsa_hash_kind hash_kind) {
     switch (hash_kind) {
         case ESPZ_MBEDTLS_RSA_HASH_SHA256:
@@ -264,6 +396,7 @@ static mbedtls_md_type_t hash_kind_to_md(espz_mbedtls_rsa_hash_kind hash_kind) {
             return MBEDTLS_MD_NONE;
     }
 }
+#endif
 
 int espz_mbedtls_random_bytes(unsigned char *buf, size_t len) {
     if (len == 0) {
@@ -298,13 +431,32 @@ static int aead_encrypt(
     unsigned char *tag,
     size_t tag_len
 ) {
+#if defined(ESP_PLATFORM)
+    const int64_t total_start = espz_crypto_now_us();
+    uint64_t init_us = 0;
+    uint64_t import_us = 0;
+    uint64_t alloc_copy_us = 0;
+    uint64_t psa_us = 0;
+    uint64_t output_copy_us = 0;
+    uint64_t cleanup_us = 0;
+    int64_t stage_start = total_start;
+#endif
     int rc = espz_psa_init();
+#if defined(ESP_PLATFORM)
+    init_us = espz_crypto_elapsed_us(stage_start);
+#endif
     if (rc != PSA_SUCCESS) {
         return rc;
     }
 
     mbedtls_svc_key_id_t key_id = 0;
+#if defined(ESP_PLATFORM)
+    stage_start = espz_crypto_now_us();
+#endif
     rc = import_psa_symmetric_key(&key_id, key_type, bits, alg, PSA_KEY_USAGE_ENCRYPT, key, key_len);
+#if defined(ESP_PLATFORM)
+    import_us = espz_crypto_elapsed_us(stage_start);
+#endif
     if (rc != PSA_SUCCESS) {
         return rc;
     }
@@ -313,6 +465,9 @@ static int aead_encrypt(
     size_t combined_len = input_len + tag_len;
     size_t written = 0;
 
+#if defined(ESP_PLATFORM)
+    stage_start = espz_crypto_now_us();
+#endif
     if (combined_len > 0) {
         combined = calloc(1, combined_len);
         if (combined == NULL) {
@@ -320,6 +475,10 @@ static int aead_encrypt(
             return PSA_ERROR_INSUFFICIENT_MEMORY;
         }
     }
+#if defined(ESP_PLATFORM)
+    alloc_copy_us = espz_crypto_elapsed_us(stage_start);
+    stage_start = espz_crypto_now_us();
+#endif
 
     const psa_status_t status = psa_aead_encrypt(
         key_id,
@@ -334,25 +493,42 @@ static int aead_encrypt(
         combined_len,
         &written
     );
+#if defined(ESP_PLATFORM)
+    psa_us = espz_crypto_elapsed_us(stage_start);
+#endif
 
     if (status == PSA_SUCCESS) {
         if (written != combined_len) {
             rc = PSA_ERROR_GENERIC_ERROR;
         } else {
+#if defined(ESP_PLATFORM)
+            stage_start = espz_crypto_now_us();
+#endif
             if (input_len > 0) {
                 memcpy(output, combined, input_len);
             }
             if (tag_len > 0) {
                 memcpy(tag, combined + input_len, tag_len);
             }
+#if defined(ESP_PLATFORM)
+            output_copy_us = espz_crypto_elapsed_us(stage_start);
+#endif
             rc = PSA_SUCCESS;
         }
     } else {
         rc = (int) status;
     }
 
+#if defined(ESP_PLATFORM)
+    stage_start = espz_crypto_now_us();
+#endif
     free(combined);
     psa_destroy_key(key_id);
+#if defined(ESP_PLATFORM)
+    cleanup_us = espz_crypto_elapsed_us(stage_start);
+    espz_aead_diag_add(&espz_aead_encrypt_diag, init_us, import_us, alloc_copy_us, psa_us, output_copy_us, cleanup_us, espz_crypto_elapsed_us(total_start));
+    espz_aead_diag_log("encrypt", &espz_aead_encrypt_diag);
+#endif
     return rc;
 }
 
@@ -372,13 +548,32 @@ static int aead_decrypt(
     const unsigned char *tag,
     size_t tag_len
 ) {
+#if defined(ESP_PLATFORM)
+    const int64_t total_start = espz_crypto_now_us();
+    uint64_t init_us = 0;
+    uint64_t import_us = 0;
+    uint64_t alloc_copy_us = 0;
+    uint64_t psa_us = 0;
+    uint64_t output_copy_us = 0;
+    uint64_t cleanup_us = 0;
+    int64_t stage_start = total_start;
+#endif
     int rc = espz_psa_init();
+#if defined(ESP_PLATFORM)
+    init_us = espz_crypto_elapsed_us(stage_start);
+#endif
     if (rc != PSA_SUCCESS) {
         return rc;
     }
 
     mbedtls_svc_key_id_t key_id = 0;
+#if defined(ESP_PLATFORM)
+    stage_start = espz_crypto_now_us();
+#endif
     rc = import_psa_symmetric_key(&key_id, key_type, bits, alg, PSA_KEY_USAGE_DECRYPT, key, key_len);
+#if defined(ESP_PLATFORM)
+    import_us = espz_crypto_elapsed_us(stage_start);
+#endif
     if (rc != PSA_SUCCESS) {
         return rc;
     }
@@ -387,6 +582,9 @@ static int aead_decrypt(
     size_t combined_len = input_len + tag_len;
     size_t written = 0;
 
+#if defined(ESP_PLATFORM)
+    stage_start = espz_crypto_now_us();
+#endif
     if (combined_len > 0) {
         combined = calloc(1, combined_len);
         if (combined == NULL) {
@@ -401,7 +599,19 @@ static int aead_decrypt(
     if (tag_len > 0) {
         memcpy(combined + input_len, tag, tag_len);
     }
+#if defined(ESP_PLATFORM)
+    alloc_copy_us = espz_crypto_elapsed_us(stage_start);
+#endif
 
+    unsigned char empty_output = 0;
+    unsigned char *psa_output = output;
+    if (input_len == 0 && psa_output == NULL) {
+        psa_output = &empty_output;
+    }
+
+#if defined(ESP_PLATFORM)
+    stage_start = espz_crypto_now_us();
+#endif
     const psa_status_t status = psa_aead_decrypt(
         key_id,
         alg,
@@ -411,10 +621,13 @@ static int aead_decrypt(
         ad_len,
         combined,
         combined_len,
-        output,
+        psa_output,
         input_len,
         &written
     );
+#if defined(ESP_PLATFORM)
+    psa_us = espz_crypto_elapsed_us(stage_start);
+#endif
 
     if (status == PSA_SUCCESS) {
         rc = written == input_len ? PSA_SUCCESS : PSA_ERROR_GENERIC_ERROR;
@@ -422,10 +635,157 @@ static int aead_decrypt(
         rc = (int) status;
     }
 
+#if defined(ESP_PLATFORM)
+    stage_start = espz_crypto_now_us();
+#endif
     free(combined);
     psa_destroy_key(key_id);
+#if defined(ESP_PLATFORM)
+    cleanup_us = espz_crypto_elapsed_us(stage_start);
+    espz_aead_diag_add(&espz_aead_decrypt_diag, init_us, import_us, alloc_copy_us, psa_us, output_copy_us, cleanup_us, espz_crypto_elapsed_us(total_start));
+    espz_aead_diag_log("decrypt", &espz_aead_decrypt_diag);
+#endif
     return rc;
 }
+
+#if defined(ESP_PLATFORM)
+static int aes_gcm_encrypt_direct(
+    size_t bits,
+    const unsigned char *key,
+    size_t key_len,
+    const unsigned char *nonce,
+    size_t nonce_len,
+    const unsigned char *ad,
+    size_t ad_len,
+    const unsigned char *input,
+    size_t input_len,
+    unsigned char *output,
+    unsigned char *tag,
+    size_t tag_len
+) {
+    (void) key_len;
+    const int64_t total_start = espz_crypto_now_us();
+    uint64_t init_us = 0;
+    uint64_t import_us = 0;
+    uint64_t alloc_copy_us = 0;
+    uint64_t psa_us = 0;
+    uint64_t output_copy_us = 0;
+    uint64_t cleanup_us = 0;
+    int64_t stage_start = total_start;
+
+    unsigned char empty_input = 0;
+    unsigned char empty_output = 0;
+    const unsigned char *safe_input = input_len == 0 && input == NULL ? &empty_input : input;
+    unsigned char *safe_output = input_len == 0 && output == NULL ? &empty_output : output;
+
+    esp_gcm_context ctx;
+    esp_aes_gcm_init(&ctx);
+    init_us = espz_crypto_elapsed_us(stage_start);
+
+    stage_start = espz_crypto_now_us();
+    int rc = esp_aes_gcm_setkey(&ctx, MBEDTLS_CIPHER_ID_AES, key, (unsigned int) bits);
+    import_us = espz_crypto_elapsed_us(stage_start);
+    if (rc != 0) {
+        stage_start = espz_crypto_now_us();
+        esp_aes_gcm_free(&ctx);
+        cleanup_us = espz_crypto_elapsed_us(stage_start);
+        espz_aead_diag_add(&espz_aead_encrypt_diag, init_us, import_us, alloc_copy_us, psa_us, output_copy_us, cleanup_us, espz_crypto_elapsed_us(total_start));
+        espz_aead_diag_log("encrypt", &espz_aead_encrypt_diag);
+        return rc;
+    }
+
+    stage_start = espz_crypto_now_us();
+    rc = esp_aes_gcm_crypt_and_tag(
+        &ctx,
+        MBEDTLS_GCM_ENCRYPT,
+        input_len,
+        nonce,
+        nonce_len,
+        ad,
+        ad_len,
+        safe_input,
+        safe_output,
+        tag_len,
+        tag
+    );
+    psa_us = espz_crypto_elapsed_us(stage_start);
+
+    stage_start = espz_crypto_now_us();
+    esp_aes_gcm_free(&ctx);
+    cleanup_us = espz_crypto_elapsed_us(stage_start);
+    espz_aead_diag_add(&espz_aead_encrypt_diag, init_us, import_us, alloc_copy_us, psa_us, output_copy_us, cleanup_us, espz_crypto_elapsed_us(total_start));
+    espz_aead_diag_log("encrypt", &espz_aead_encrypt_diag);
+    return rc;
+}
+
+static int aes_gcm_decrypt_direct(
+    size_t bits,
+    const unsigned char *key,
+    size_t key_len,
+    const unsigned char *nonce,
+    size_t nonce_len,
+    const unsigned char *ad,
+    size_t ad_len,
+    const unsigned char *input,
+    size_t input_len,
+    unsigned char *output,
+    const unsigned char *tag,
+    size_t tag_len
+) {
+    (void) key_len;
+    const int64_t total_start = espz_crypto_now_us();
+    uint64_t init_us = 0;
+    uint64_t import_us = 0;
+    uint64_t alloc_copy_us = 0;
+    uint64_t psa_us = 0;
+    uint64_t output_copy_us = 0;
+    uint64_t cleanup_us = 0;
+    int64_t stage_start = total_start;
+
+    unsigned char empty_input = 0;
+    unsigned char empty_output = 0;
+    const unsigned char *safe_input = input_len == 0 && input == NULL ? &empty_input : input;
+    unsigned char *safe_output = input_len == 0 && output == NULL ? &empty_output : output;
+
+    esp_gcm_context ctx;
+    esp_aes_gcm_init(&ctx);
+    init_us = espz_crypto_elapsed_us(stage_start);
+
+    stage_start = espz_crypto_now_us();
+    int rc = esp_aes_gcm_setkey(&ctx, MBEDTLS_CIPHER_ID_AES, key, (unsigned int) bits);
+    import_us = espz_crypto_elapsed_us(stage_start);
+    if (rc != 0) {
+        stage_start = espz_crypto_now_us();
+        esp_aes_gcm_free(&ctx);
+        cleanup_us = espz_crypto_elapsed_us(stage_start);
+        espz_aead_diag_add(&espz_aead_decrypt_diag, init_us, import_us, alloc_copy_us, psa_us, output_copy_us, cleanup_us, espz_crypto_elapsed_us(total_start));
+        espz_aead_diag_log("decrypt", &espz_aead_decrypt_diag);
+        return rc;
+    }
+
+    stage_start = espz_crypto_now_us();
+    rc = esp_aes_gcm_auth_decrypt(
+        &ctx,
+        input_len,
+        nonce,
+        nonce_len,
+        ad,
+        ad_len,
+        tag,
+        tag_len,
+        safe_input,
+        safe_output
+    );
+    psa_us = espz_crypto_elapsed_us(stage_start);
+
+    stage_start = espz_crypto_now_us();
+    esp_aes_gcm_free(&ctx);
+    cleanup_us = espz_crypto_elapsed_us(stage_start);
+    espz_aead_diag_add(&espz_aead_decrypt_diag, init_us, import_us, alloc_copy_us, psa_us, output_copy_us, cleanup_us, espz_crypto_elapsed_us(total_start));
+    espz_aead_diag_log("decrypt", &espz_aead_decrypt_diag);
+    return rc;
+}
+#endif
 
 #if !(defined(MBEDTLS_MAJOR_VERSION) && MBEDTLS_MAJOR_VERSION >= 4)
 static int verify_cert_signature(mbedtls_x509_crt *subject, mbedtls_x509_crt *issuer) {
@@ -744,6 +1104,22 @@ int espz_mbedtls_aes_gcm_encrypt(
     unsigned char *tag,
     size_t tag_len
 ) {
+#if defined(ESP_PLATFORM)
+    return aes_gcm_encrypt_direct(
+        key_bits,
+        key,
+        key_bits / 8,
+        nonce,
+        nonce_len,
+        ad,
+        ad_len,
+        input,
+        input_len,
+        output,
+        tag,
+        tag_len
+    );
+#else
     return aead_encrypt(
         PSA_KEY_TYPE_AES,
         key_bits,
@@ -760,6 +1136,7 @@ int espz_mbedtls_aes_gcm_encrypt(
         tag,
         tag_len
     );
+#endif
 }
 
 int espz_mbedtls_aes_gcm_decrypt(
@@ -775,6 +1152,22 @@ int espz_mbedtls_aes_gcm_decrypt(
     const unsigned char *tag,
     size_t tag_len
 ) {
+#if defined(ESP_PLATFORM)
+    return aes_gcm_decrypt_direct(
+        key_bits,
+        key,
+        key_bits / 8,
+        nonce,
+        nonce_len,
+        ad,
+        ad_len,
+        input,
+        input_len,
+        output,
+        tag,
+        tag_len
+    );
+#else
     return aead_decrypt(
         PSA_KEY_TYPE_AES,
         key_bits,
@@ -791,6 +1184,158 @@ int espz_mbedtls_aes_gcm_decrypt(
         tag,
         tag_len
     );
+#endif
+}
+
+int espz_mbedtls_aes_gcm_state_init(
+    espz_mbedtls_aes_gcm_context *ctx,
+    unsigned int key_bits,
+    const unsigned char *key
+) {
+    memset(ctx->storage, 0, sizeof(ctx->storage));
+#if defined(ESP_PLATFORM)
+    esp_aes_gcm_init(espz_aes_gcm_ctx(ctx));
+    return esp_aes_gcm_setkey(espz_aes_gcm_ctx(ctx), MBEDTLS_CIPHER_ID_AES, key, key_bits);
+#else
+    mbedtls_gcm_init(espz_aes_gcm_ctx(ctx));
+    return mbedtls_gcm_setkey(espz_aes_gcm_ctx(ctx), MBEDTLS_CIPHER_ID_AES, key, key_bits);
+#endif
+}
+
+void espz_mbedtls_aes_gcm_state_free(espz_mbedtls_aes_gcm_context *ctx) {
+#if defined(ESP_PLATFORM)
+    esp_aes_gcm_free(espz_aes_gcm_ctx(ctx));
+#else
+    mbedtls_gcm_free(espz_aes_gcm_ctx(ctx));
+#endif
+}
+
+int espz_mbedtls_aes_gcm_state_encrypt(
+    espz_mbedtls_aes_gcm_context *ctx,
+    const unsigned char *nonce,
+    size_t nonce_len,
+    const unsigned char *ad,
+    size_t ad_len,
+    const unsigned char *input,
+    size_t input_len,
+    unsigned char *output,
+    unsigned char *tag,
+    size_t tag_len
+) {
+    if (tag_len > 16) {
+        return MBEDTLS_ERR_GCM_BAD_INPUT;
+    }
+    unsigned char empty_input = 0;
+    unsigned char empty_output = 0;
+    const unsigned char *safe_input = input_len == 0 && input == NULL ? &empty_input : input;
+    unsigned char *safe_output = input_len == 0 && output == NULL ? &empty_output : output;
+#if defined(ESP_PLATFORM)
+    const int64_t total_start = espz_crypto_now_us();
+    int64_t stage_start = total_start;
+    uint64_t starts_us = 0;
+    uint64_t update_ad_us = 0;
+    uint64_t update_us = 0;
+    uint64_t finish_us = 0;
+
+    esp_gcm_context *gcm = espz_aes_gcm_ctx(ctx);
+    int ret = esp_aes_gcm_starts(gcm, MBEDTLS_GCM_ENCRYPT, nonce, nonce_len);
+    starts_us = espz_crypto_elapsed_us(stage_start);
+    if (ret != 0) return ret;
+    stage_start = espz_crypto_now_us();
+    ret = esp_aes_gcm_update_ad(gcm, ad, ad_len);
+    update_ad_us = espz_crypto_elapsed_us(stage_start);
+    if (ret != 0) return ret;
+    size_t olen = 0;
+    stage_start = espz_crypto_now_us();
+    ret = esp_aes_gcm_update(gcm, safe_input, input_len, safe_output, 0, &olen);
+    update_us = espz_crypto_elapsed_us(stage_start);
+    if (ret != 0) return ret;
+    stage_start = espz_crypto_now_us();
+    ret = esp_aes_gcm_finish(gcm, safe_output, 0, &olen, tag, tag_len);
+    finish_us = espz_crypto_elapsed_us(stage_start);
+    if (ret != 0) return ret;
+    espz_aead_diag_add(&espz_aead_encrypt_diag, starts_us, update_ad_us, 0, update_us, 0, finish_us, espz_crypto_elapsed_us(total_start));
+    espz_aead_diag_log("state_encrypt", &espz_aead_encrypt_diag);
+    return ret;
+#else
+    return mbedtls_gcm_crypt_and_tag(
+        espz_aes_gcm_ctx(ctx),
+        MBEDTLS_GCM_ENCRYPT,
+        input_len,
+        nonce,
+        nonce_len,
+        ad,
+        ad_len,
+        safe_input,
+        safe_output,
+        tag_len,
+        tag
+    );
+#endif
+}
+
+int espz_mbedtls_aes_gcm_state_decrypt(
+    espz_mbedtls_aes_gcm_context *ctx,
+    const unsigned char *nonce,
+    size_t nonce_len,
+    const unsigned char *ad,
+    size_t ad_len,
+    const unsigned char *input,
+    size_t input_len,
+    unsigned char *output,
+    const unsigned char *tag,
+    size_t tag_len
+) {
+    if (tag_len > 16) {
+        return MBEDTLS_ERR_GCM_BAD_INPUT;
+    }
+    unsigned char empty_input = 0;
+    unsigned char empty_output = 0;
+    const unsigned char *safe_input = input_len == 0 && input == NULL ? &empty_input : input;
+    unsigned char *safe_output = input_len == 0 && output == NULL ? &empty_output : output;
+#if defined(ESP_PLATFORM)
+    const int64_t total_start = espz_crypto_now_us();
+    int64_t stage_start = total_start;
+    uint64_t starts_us = 0;
+    uint64_t update_ad_us = 0;
+    uint64_t update_us = 0;
+    uint64_t finish_us = 0;
+
+    esp_gcm_context *gcm = espz_aes_gcm_ctx(ctx);
+    int ret = esp_aes_gcm_starts(gcm, MBEDTLS_GCM_DECRYPT, nonce, nonce_len);
+    starts_us = espz_crypto_elapsed_us(stage_start);
+    if (ret != 0) return ret;
+    stage_start = espz_crypto_now_us();
+    ret = esp_aes_gcm_update_ad(gcm, ad, ad_len);
+    update_ad_us = espz_crypto_elapsed_us(stage_start);
+    if (ret != 0) return ret;
+    size_t olen = 0;
+    stage_start = espz_crypto_now_us();
+    ret = esp_aes_gcm_update(gcm, safe_input, input_len, safe_output, 0, &olen);
+    update_us = espz_crypto_elapsed_us(stage_start);
+    if (ret != 0) return ret;
+    unsigned char check_tag[16] = {0};
+    stage_start = espz_crypto_now_us();
+    ret = esp_aes_gcm_finish(gcm, safe_output, 0, &olen, check_tag, tag_len);
+    finish_us = espz_crypto_elapsed_us(stage_start);
+    if (ret != 0) return ret;
+    espz_aead_diag_add(&espz_aead_decrypt_diag, starts_us, update_ad_us, 0, update_us, 0, finish_us, espz_crypto_elapsed_us(total_start));
+    espz_aead_diag_log("state_decrypt", &espz_aead_decrypt_diag);
+    return mbedtls_ct_memcmp(check_tag, tag, tag_len) == 0 ? 0 : MBEDTLS_ERR_GCM_AUTH_FAILED;
+#else
+    return mbedtls_gcm_auth_decrypt(
+        espz_aes_gcm_ctx(ctx),
+        input_len,
+        nonce,
+        nonce_len,
+        ad,
+        ad_len,
+        tag,
+        tag_len,
+        safe_input,
+        safe_output
+    );
+#endif
 }
 
 int espz_mbedtls_chacha20poly1305_encrypt(

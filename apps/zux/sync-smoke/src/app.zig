@@ -26,7 +26,7 @@ pub fn make(comptime platform_ctx: type, comptime platform_grt: type) type {
             };
             errdefer self.zux_app.deinit();
 
-            try runSmoke(platform_ctx, platform_grt);
+            try runSmoke(platform_ctx, platform_grt, allocator);
             return self;
         }
 
@@ -60,9 +60,8 @@ pub fn testRunner(comptime platform_ctx: type, comptime platform_grt: type) glib
 
         pub fn run(self: *@This(), t: *glib.testing.T, allocator: platform_grt.std.mem.Allocator) bool {
             _ = self;
-            _ = allocator;
 
-            runSmoke(platform_ctx, platform_grt) catch |err| {
+            runSmoke(platform_ctx, platform_grt, allocator) catch |err| {
                 t.logErrorf("sync smoke failed: {s}", .{@errorName(err)});
                 return false;
             };
@@ -92,7 +91,7 @@ pub fn run(comptime platform_ctx: type, comptime platform_grt: type) !void {
     if (!t.wait()) return error.TestFailed;
 }
 
-fn runSmoke(comptime platform_ctx: type, comptime platform_grt: type) !void {
+fn runSmoke(comptime platform_ctx: type, comptime platform_grt: type, allocator: platform_grt.std.mem.Allocator) !void {
     _ = platform_ctx;
 
     const log = platform_grt.std.log.scoped(.zux_sync_smoke);
@@ -100,6 +99,7 @@ fn runSmoke(comptime platform_ctx: type, comptime platform_grt: type) !void {
     try smokeMutex(platform_grt);
     try smokeRwLock(platform_grt);
     try smokeCondition(platform_grt);
+    try smokeChannel(platform_grt, allocator);
 
     log.info("sync smoke passed", .{});
 }
@@ -163,6 +163,40 @@ fn smokeCondition(comptime platform_grt: type) !void {
     handle.join();
 
     if (!state.woke) return error.ConditionWaitFailed;
+}
+
+fn smokeChannel(comptime platform_grt: type, allocator: platform_grt.std.mem.Allocator) !void {
+    const Channel = platform_grt.sync.Channel(u32);
+
+    var buffered = try Channel.make(allocator, 2);
+    defer buffered.deinit();
+    const send_result = try buffered.send(0x33);
+    if (!send_result.ok) return error.BufferedChannelSendFailed;
+    const recv_result = try buffered.recv();
+    if (!recv_result.ok or recv_result.value != 0x33) return error.BufferedChannelRecvFailed;
+
+    var unbuffered = try Channel.make(allocator, 0);
+    defer unbuffered.deinit();
+
+    const SendState = struct {
+        channel: *Channel,
+        sent: bool = false,
+
+        pub fn run(self: *@This()) void {
+            const result = self.channel.send(0x44) catch return;
+            self.sent = result.ok;
+        }
+    };
+
+    var state: SendState = .{ .channel = &unbuffered };
+    const handle = try platform_grt.task.go("zux/sync_smoke/channel_send", .{
+        .min_stack_size = 4 * 1024,
+    }, glib.task.Routine.init(&state, SendState.run));
+    const recv_unbuffered = try unbuffered.recvTimeout(1 * glib.time.duration.Second);
+    handle.join();
+
+    if (!state.sent) return error.UnbufferedChannelSendFailed;
+    if (!recv_unbuffered.ok or recv_unbuffered.value != 0x44) return error.UnbufferedChannelRecvFailed;
 }
 
 fn conditionWaiter(comptime SyncState: type) type {

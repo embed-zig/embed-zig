@@ -10,6 +10,10 @@ pub const aes_context = extern struct {
     storage: [288]u8 align(8),
 };
 
+pub const aes_gcm_context = extern struct {
+    storage: [640]u8 align(8),
+};
+
 pub const CertificateInfo = extern struct {
     not_before: i64,
     not_after: i64,
@@ -70,6 +74,33 @@ pub extern fn espz_mbedtls_aes_gcm_encrypt(
 pub extern fn espz_mbedtls_aes_gcm_decrypt(
     key_bits: c_uint,
     key: [*]const u8,
+    nonce: [*]const u8,
+    nonce_len: usize,
+    ad: ?[*]const u8,
+    ad_len: usize,
+    input: ?[*]const u8,
+    input_len: usize,
+    output: ?[*]u8,
+    tag: [*]const u8,
+    tag_len: usize,
+) c_int;
+
+pub extern fn espz_mbedtls_aes_gcm_state_init(ctx: *aes_gcm_context, key_bits: c_uint, key: [*]const u8) c_int;
+pub extern fn espz_mbedtls_aes_gcm_state_free(ctx: *aes_gcm_context) void;
+pub extern fn espz_mbedtls_aes_gcm_state_encrypt(
+    ctx: *aes_gcm_context,
+    nonce: [*]const u8,
+    nonce_len: usize,
+    ad: ?[*]const u8,
+    ad_len: usize,
+    input: ?[*]const u8,
+    input_len: usize,
+    output: ?[*]u8,
+    tag: [*]u8,
+    tag_len: usize,
+) c_int;
+pub extern fn espz_mbedtls_aes_gcm_state_decrypt(
+    ctx: *aes_gcm_context,
     nonce: [*]const u8,
     nonce_len: usize,
     ad: ?[*]const u8,

@@ -3,6 +3,10 @@ const glib = @import("glib");
 pub const Handle = ?*anyopaque;
 pub const max_delay: u32 = glib.std.math.maxInt(u32);
 pub const pd_true: i32 = 1;
+pub const TaskRuntimeEntry = extern struct {
+    name: [16]u8,
+    runtime: u64,
+};
 
 pub extern fn espz_semaphore_create_mutex() Handle;
 pub extern fn espz_semaphore_create_binary() Handle;
@@ -67,3 +71,4 @@ pub extern fn espz_freertos_tick_rate_hz() u32;
 pub extern fn espz_freertos_cpu_count() u32;
 pub extern fn espz_freertos_current_task_handle() ?*anyopaque;
 pub extern fn espz_freertos_current_task_name() [*:0]const u8;
+pub extern fn espz_freertos_task_runtime_snapshot(entries: [*]TaskRuntimeEntry, max_entries: u32) u32;

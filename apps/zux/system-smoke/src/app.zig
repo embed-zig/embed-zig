@@ -99,5 +99,16 @@ fn runSmoke(comptime platform_ctx: type, comptime platform_grt: type) !void {
     const cpu_count = try platform_grt.system.cpuCount();
     if (cpu_count == 0) return error.InvalidCpuCount;
 
+    try smokeTaskRuntimeSnapshot(platform_grt);
+
     log.info("system smoke passed cpu_count={d}", .{cpu_count});
+}
+
+fn smokeTaskRuntimeSnapshot(comptime platform_grt: type) !void {
+    if (comptime !@hasDecl(platform_grt.system, "TaskRuntimeEntry")) return;
+    if (comptime !@hasDecl(platform_grt.system, "taskRuntimeSnapshot")) return;
+
+    var entries: [8]platform_grt.system.TaskRuntimeEntry = undefined;
+    const len = platform_grt.system.taskRuntimeSnapshot(entries[0..]);
+    if (len > entries.len) return error.InvalidTaskRuntimeSnapshot;
 }
