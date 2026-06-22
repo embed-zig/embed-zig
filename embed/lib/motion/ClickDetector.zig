@@ -25,6 +25,8 @@ pub const Sample = struct {
 
 pub const Config = struct {
     long_press: glib.time.duration.Duration = default_long_press,
+    /// Click actions are emitted on each release. During a multi-click sequence,
+    /// each release emits the current cumulative click count.
     multi_click_window: glib.time.duration.Duration = default_multi_click_window,
 };
 
@@ -108,6 +110,11 @@ pub fn update(self: *ClickDetector, sample: Sample) ?Action {
             }
             pending_clicks.last_click_at = sample.timestamp;
             pending_clicks.ctx = sample.ctx;
+            self.queueAction(.{
+                .gesture = .{ .click = pending_clicks.count },
+                .pressed_at = pending_clicks.pressed_at,
+                .ctx = pending_clicks.ctx,
+            });
             return self.nextAction();
         }
     }
@@ -118,6 +125,11 @@ pub fn update(self: *ClickDetector, sample: Sample) ?Action {
         .count = 1,
         .ctx = sample.ctx,
     };
+    self.queueAction(.{
+        .gesture = .{ .click = 1 },
+        .pressed_at = pending_press.pressed_at,
+        .ctx = sample.ctx,
+    });
     return self.nextAction();
 }
 
@@ -159,11 +171,6 @@ fn flushDue(self: *ClickDetector, timestamp: glib.time.instant.Time) void {
         const quiet = elapsed(pending_clicks.last_click_at, timestamp);
         if (quiet >= self.multi_click_window) {
             self.pending_clicks = null;
-            self.queueAction(.{
-                .gesture = .{ .click = pending_clicks.count },
-                .pressed_at = pending_clicks.pressed_at,
-                .ctx = pending_clicks.ctx,
-            });
         }
     }
 }
@@ -185,7 +192,7 @@ fn elapsed(start: glib.time.instant.Time, end: glib.time.instant.Time) glib.time
 
 pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn testClickEmitsAfterQuietWindow() !void {
+        fn testClickEmitsOnRelease() !void {
             var press_ctx_value: u8 = 1;
             var release_ctx_value: u8 = 2;
             var detector = ClickDetector.initDefault();
@@ -195,44 +202,43 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 .pressed = true,
                 .ctx = @ptrCast(&press_ctx_value),
             }) == null);
-            try grt.std.testing.expect(detector.update(.{
+            const action = detector.update(.{
                 .timestamp = 20,
                 .pressed = false,
                 .ctx = @ptrCast(&release_ctx_value),
-            }) == null);
-
-            const action = detector.flush(glib.time.instant.add(20, default_multi_click_window)).?;
+            }).?;
             switch (action.gesture) {
                 .click => |count| try grt.std.testing.expectEqual(@as(u16, 1), count),
                 else => try grt.std.testing.expect(false),
             }
             try grt.std.testing.expectEqual(@as(glib.time.instant.Time, 10), action.pressed_at);
             try grt.std.testing.expect(action.ctx == @as(Context, @ptrCast(&release_ctx_value)));
+            try grt.std.testing.expect(detector.flush(glib.time.instant.add(20, default_multi_click_window)) == null);
         }
 
-        fn testMultiClickAccumulatesWithinWindow() !void {
+        fn testMultiClickEmitsCumulativeCountsOnEachRelease() !void {
             var last_ctx_value: u8 = 3;
             var detector = ClickDetector.initDefault();
 
-            inline for ([_]glib.time.instant.Time{ 10, 30, 50, 70 }) |start| {
+            inline for ([_]glib.time.instant.Time{ 10, 30, 50, 70 }, 1..) |start, expected_count| {
                 try grt.std.testing.expect(detector.update(.{
                     .timestamp = start,
                     .pressed = true,
                 }) == null);
-                try grt.std.testing.expect(detector.update(.{
+                const action = detector.update(.{
                     .timestamp = glib.time.instant.add(start, 10),
                     .pressed = false,
                     .ctx = @ptrCast(&last_ctx_value),
-                }) == null);
+                }).?;
+                switch (action.gesture) {
+                    .click => |count| try grt.std.testing.expectEqual(@as(u16, @intCast(expected_count)), count),
+                    else => try grt.std.testing.expect(false),
+                }
+                try grt.std.testing.expectEqual(@as(glib.time.instant.Time, 10), action.pressed_at);
+                try grt.std.testing.expect(action.ctx == @as(Context, @ptrCast(&last_ctx_value)));
             }
 
-            const action = detector.flush(glib.time.instant.add(80, default_multi_click_window)).?;
-            switch (action.gesture) {
-                .click => |count| try grt.std.testing.expectEqual(@as(u16, 4), count),
-                else => try grt.std.testing.expect(false),
-            }
-            try grt.std.testing.expectEqual(@as(glib.time.instant.Time, 10), action.pressed_at);
-            try grt.std.testing.expect(action.ctx == @as(Context, @ptrCast(&last_ctx_value)));
+            try grt.std.testing.expect(detector.flush(glib.time.instant.add(80, default_multi_click_window)) == null);
         }
 
         fn testLongPressEmitsOnFlush() !void {
@@ -380,11 +386,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             _ = self;
             _ = allocator;
 
-            TestCase.testClickEmitsAfterQuietWindow() catch |err| {
+            TestCase.testClickEmitsOnRelease() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.testMultiClickAccumulatesWithinWindow() catch |err| {
+            TestCase.testMultiClickEmitsCumulativeCountsOnEachRelease() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
