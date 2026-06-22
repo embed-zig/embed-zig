@@ -28,6 +28,7 @@ export async function emitInputEvent(options: {
   ts: number;
   x?: number;
   y?: number;
+  buttonId?: number;
   metadata?: MetadataValue;
 }): Promise<EmitAck> {
   const result = await client.get({
@@ -37,6 +38,7 @@ export async function emitInputEvent(options: {
     },
     query: {
       metadata: options.metadata,
+      button_id: options.buttonId,
       ts: options.ts,
       x: options.x,
       y: options.y,

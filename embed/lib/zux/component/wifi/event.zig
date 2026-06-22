@@ -21,6 +21,12 @@ pub const StaScanResult = struct {
     }
 };
 
+pub const StaConnecting = struct {
+    pub const kind = .wifi_sta_connecting;
+
+    source_id: u32,
+};
+
 pub const StaConnected = struct {
     pub const kind = .wifi_sta_connected;
 

@@ -1,5 +1,7 @@
 const glib = @import("glib");
+const bt = @import("bt");
 const drivers = @import("drivers");
+const nfc_api = @import("nfc");
 const ledstrip = @import("ledstrip");
 const modem_api = @import("drivers");
 const component_audio_system = @import("component/audio_system.zig");
@@ -99,6 +101,9 @@ pub fn make(comptime Impl: type) type {
         if (!@hasDecl(Impl, "modem_network_signal_changed")) {
             @compileError("zux.App.make requires Impl.modem_network_signal_changed");
         }
+        if (!@hasDecl(Impl, "modem_identity_changed")) {
+            @compileError("zux.App.make requires Impl.modem_identity_changed");
+        }
         if (!@hasDecl(Impl, "modem_data_packet_state_changed")) {
             @compileError("zux.App.make requires Impl.modem_data_packet_state_changed");
         }
@@ -150,11 +155,35 @@ pub fn make(comptime Impl: type) type {
         if (!@hasDecl(Impl, "set_display")) {
             @compileError("zux.App.make requires Impl.set_display");
         }
+        if (!@hasDecl(Impl, "btHost")) {
+            @compileError("zux.App.make requires Impl.btHost");
+        }
+        if (!@hasDecl(Impl, "wifiSta")) {
+            @compileError("zux.App.make requires Impl.wifiSta");
+        }
+        if (!@hasDecl(Impl, "nfc")) {
+            @compileError("zux.App.make requires Impl.nfc");
+        }
         if (!@hasDecl(Impl, "nfc_found")) {
             @compileError("zux.App.make requires Impl.nfc_found");
         }
         if (!@hasDecl(Impl, "nfc_read")) {
             @compileError("zux.App.make requires Impl.nfc_read");
+        }
+        if (!@hasDecl(Impl, "start_nfc_scan")) {
+            @compileError("zux.App.make requires Impl.start_nfc_scan");
+        }
+        if (!@hasDecl(Impl, "stop_nfc_scan")) {
+            @compileError("zux.App.make requires Impl.stop_nfc_scan");
+        }
+        if (!@hasDecl(Impl, "start_wifi_sta_scan")) {
+            @compileError("zux.App.make requires Impl.start_wifi_sta_scan");
+        }
+        if (!@hasDecl(Impl, "stop_wifi_sta_scan")) {
+            @compileError("zux.App.make requires Impl.stop_wifi_sta_scan");
+        }
+        if (!@hasDecl(Impl, "connect_wifi_sta")) {
+            @compileError("zux.App.make requires Impl.connect_wifi_sta");
         }
         if (!@hasDecl(Impl, "wifi_sta_scan_result")) {
             @compileError("zux.App.make requires Impl.wifi_sta_scan_result");
@@ -200,7 +229,7 @@ pub fn make(comptime Impl: type) type {
         _ = @as(*const fn (*Impl) void, &Impl.deinit);
         _ = @as(*const fn (*Impl, root.StartConfig) anyerror!void, &Impl.start);
         _ = @as(*const fn (*Impl) anyerror!void, &Impl.stop);
-        _ = @as(*const fn (*Impl, MessageType) anyerror!void, &Impl.dispatch);
+        _ = @as(*const fn (*Impl, MessageType) anyerror!bool, &Impl.dispatch);
         _ = @as(*const fn (*Impl, impl_periph_label) anyerror!void, &Impl.press_single_button);
         _ = @as(*const fn (*Impl, impl_periph_label) anyerror!void, &Impl.release_single_button);
         _ = @as(*const fn (*Impl, impl_periph_label, u32) anyerror!void, &Impl.press_grouped_button);
@@ -210,6 +239,7 @@ pub fn make(comptime Impl: type) type {
         _ = @as(*const fn (*Impl, impl_periph_label, modem_api.Modem.SimState) anyerror!void, &Impl.modem_sim_state_changed);
         _ = @as(*const fn (*Impl, impl_periph_label, modem_api.Modem.RegistrationState) anyerror!void, &Impl.modem_network_registration_changed);
         _ = @as(*const fn (*Impl, impl_periph_label, modem_api.Modem.SignalInfo) anyerror!void, &Impl.modem_network_signal_changed);
+        _ = @as(*const fn (*Impl, impl_periph_label, []const u8, []const u8) anyerror!void, &Impl.modem_identity_changed);
         _ = @as(*const fn (*Impl, impl_periph_label, modem_api.Modem.PacketState) anyerror!void, &Impl.modem_data_packet_state_changed);
         _ = @as(*const fn (*Impl, impl_periph_label, []const u8) anyerror!void, &Impl.modem_data_apn_changed);
         _ = @as(*const fn (*Impl, impl_periph_label, modem_api.Modem.CallInfo) anyerror!void, &Impl.modem_call_incoming);
@@ -227,8 +257,15 @@ pub fn make(comptime Impl: type) type {
         _ = @as(*const fn (*Impl, impl_periph_label, bool, u32, drivers.Pwm.Duty) anyerror!void, &Impl.set_pwm);
         _ = @as(*const fn (*Impl, impl_periph_label, component_audio_system.State) anyerror!void, &Impl.set_audio_system);
         _ = @as(*const fn (*Impl, impl_periph_label, component_display.State) anyerror!void, &Impl.set_display);
-        _ = @as(*const fn (*Impl, impl_periph_label, []const u8, drivers.nfc.CardType) anyerror!void, &Impl.nfc_found);
-        _ = @as(*const fn (*Impl, impl_periph_label, []const u8, []const u8, drivers.nfc.CardType) anyerror!void, &Impl.nfc_read);
+        _ = @as(*const fn (*Impl, impl_periph_label) drivers.wifi.Sta, &Impl.wifiSta);
+        _ = @as(*const fn (*Impl, impl_periph_label) nfc_api.Reader, &Impl.nfc);
+        _ = @as(*const fn (*Impl, impl_periph_label, []const u8, nfc_api.CardType) anyerror!void, &Impl.nfc_found);
+        _ = @as(*const fn (*Impl, impl_periph_label, []const u8, []const u8, nfc_api.CardType) anyerror!void, &Impl.nfc_read);
+        _ = @as(*const fn (*Impl, impl_periph_label, nfc_api.ScanConfig) anyerror!void, &Impl.start_nfc_scan);
+        _ = @as(*const fn (*Impl, impl_periph_label) anyerror!void, &Impl.stop_nfc_scan);
+        _ = @as(*const fn (*Impl, impl_periph_label, drivers.wifi.Sta.ScanConfig) anyerror!void, &Impl.start_wifi_sta_scan);
+        _ = @as(*const fn (*Impl, impl_periph_label) anyerror!void, &Impl.stop_wifi_sta_scan);
+        _ = @as(*const fn (*Impl, impl_periph_label, drivers.wifi.Sta.ConnectConfig) anyerror!void, &Impl.connect_wifi_sta);
         _ = @as(*const fn (*Impl, impl_periph_label, drivers.wifi.Sta.ScanResult) anyerror!void, &Impl.wifi_sta_scan_result);
         _ = @as(*const fn (*Impl, impl_periph_label, drivers.wifi.Sta.LinkInfo) anyerror!void, &Impl.wifi_sta_connected);
         _ = @as(*const fn (*Impl, impl_periph_label, drivers.wifi.Sta.DisconnectInfo) anyerror!void, &Impl.wifi_sta_disconnected);
@@ -247,6 +284,7 @@ pub fn make(comptime Impl: type) type {
 
     const app = struct {
         const Self = @This();
+        const log = impl_lib.std.log.scoped(.zux_app);
 
         impl: Impl,
         store: if (impl_store_type == void) void else *impl_store_type,
@@ -268,7 +306,7 @@ pub fn make(comptime Impl: type) type {
         pub const Display = drivers.Display;
         pub const Imu = drivers.imu;
         pub const Modem = modem_api.Modem;
-        pub const Nfc = drivers.nfc;
+        pub const Nfc = nfc_api;
         pub const Wifi = drivers.wifi;
         pub const Label = if (@hasDecl(Impl, "Label")) Impl.Label else impl_periph_label;
         pub const PeriphLabel = impl_periph_label;
@@ -311,8 +349,19 @@ pub fn make(comptime Impl: type) type {
             try self.impl.stop();
         }
 
-        pub fn dispatch(self: *Self, message: Message) !void {
-            try self.impl.dispatch(message);
+        pub fn dispatch(self: *Self, message: Message) !bool {
+            const origin = message.origin;
+            const kind = message.kind();
+            const timestamp = message.timestamp;
+            const ok = try self.impl.dispatch(message);
+            if (!ok) {
+                log.warn("dispatch dropped origin={s} kind={s} timestamp={}", .{
+                    @tagName(origin),
+                    @tagName(kind),
+                    timestamp,
+                });
+            }
+            return ok;
         }
 
         pub fn initCustomEvent(self: *Self, comptime T: type, source_id: u32, payload: *T) event_mod.Custom {
@@ -321,6 +370,22 @@ pub fn make(comptime Impl: type) type {
 
         pub fn audioSystem(self: *Self, comptime label: PeriphLabel) AudioSystem(label) {
             return self.impl.audioSystem(label);
+        }
+
+        pub fn btHost(self: *Self, comptime label: PeriphLabel) bt.Host {
+            return self.impl.btHost(label);
+        }
+
+        pub fn wifiSta(self: *Self, label: PeriphLabel) drivers.wifi.Sta {
+            return self.impl.wifiSta(label);
+        }
+
+        pub fn modem(self: *Self, label: PeriphLabel) drivers.Modem {
+            return self.impl.modem(label);
+        }
+
+        pub fn nfc(self: *Self, label: PeriphLabel) nfc_api.Reader {
+            return self.impl.nfc(label);
         }
 
         pub fn display(self: *Self, label: PeriphLabel) Display {
@@ -385,6 +450,10 @@ pub fn make(comptime Impl: type) type {
 
         pub fn modem_network_signal_changed(self: *Self, label: PeriphLabel, signal: Modem.SignalInfo) !void {
             try self.impl.modem_network_signal_changed(label, signal);
+        }
+
+        pub fn modem_identity_changed(self: *Self, label: PeriphLabel, imei: []const u8, imsi: []const u8) !void {
+            try self.impl.modem_identity_changed(label, imei, imsi);
         }
 
         pub fn modem_data_packet_state_changed(self: *Self, label: PeriphLabel, packet: Modem.PacketState) !void {
@@ -483,11 +552,31 @@ pub fn make(comptime Impl: type) type {
             try self.impl.set_display(label, state);
         }
 
-        pub fn nfc_found(self: *Self, label: PeriphLabel, uid: []const u8, card_type: Nfc.CardType) !void {
+        pub fn start_wifi_sta_scan(self: *Self, label: PeriphLabel, config: Wifi.Sta.ScanConfig) !void {
+            try self.impl.start_wifi_sta_scan(label, config);
+        }
+
+        pub fn stop_wifi_sta_scan(self: *Self, label: PeriphLabel) !void {
+            try self.impl.stop_wifi_sta_scan(label);
+        }
+
+        pub fn start_nfc_scan(self: *Self, label: PeriphLabel, config: nfc_api.ScanConfig) !void {
+            try self.impl.start_nfc_scan(label, config);
+        }
+
+        pub fn stop_nfc_scan(self: *Self, label: PeriphLabel) !void {
+            try self.impl.stop_nfc_scan(label);
+        }
+
+        pub fn connect_wifi_sta(self: *Self, label: PeriphLabel, config: Wifi.Sta.ConnectConfig) !void {
+            try self.impl.connect_wifi_sta(label, config);
+        }
+
+        pub fn nfc_found(self: *Self, label: PeriphLabel, uid: []const u8, card_type: nfc_api.CardType) !void {
             try self.impl.nfc_found(label, uid, card_type);
         }
 
-        pub fn nfc_read(self: *Self, label: PeriphLabel, uid: []const u8, payload: []const u8, card_type: Nfc.CardType) !void {
+        pub fn nfc_read(self: *Self, label: PeriphLabel, uid: []const u8, payload: []const u8, card_type: nfc_api.CardType) !void {
             try self.impl.nfc_read(label, uid, payload, card_type);
         }
 

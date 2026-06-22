@@ -43,6 +43,7 @@ fn setEnabledFn(ptr: *anyopaque, enabled: bool) drivers.Display.Error!void {
     const self: *TestDisplay = @ptrCast(@alignCast(ptr));
     self.state.enabled = enabled;
     self.state.set_enabled_count += 1;
+    self.state.rendered = true;
 }
 
 fn enabledFn(ptr: *anyopaque) drivers.Display.Error!bool {
@@ -54,6 +55,7 @@ fn setBrightnessFn(ptr: *anyopaque, brightness: u8) drivers.Display.Error!void {
     const self: *TestDisplay = @ptrCast(@alignCast(ptr));
     self.state.brightness = brightness;
     self.state.set_brightness_count += 1;
+    self.state.rendered = true;
 }
 
 fn brightnessFn(ptr: *anyopaque) drivers.Display.Error!u8 {
@@ -61,7 +63,11 @@ fn brightnessFn(ptr: *anyopaque) drivers.Display.Error!u8 {
     return self.state.brightness;
 }
 
-fn drawBitmapFn(
+fn maxFlushPixelsFn(_: *anyopaque) drivers.Display.Error!usize {
+    return 96 * 64;
+}
+
+fn flushFn(
     ptr: *anyopaque,
     x: u16,
     y: u16,
@@ -92,5 +98,6 @@ const vtable = drivers.Display.VTable{
     .enabled = enabledFn,
     .setBrightness = setBrightnessFn,
     .brightness = brightnessFn,
-    .drawBitmap = drawBitmapFn,
+    .maxFlushPixels = maxFlushPixelsFn,
+    .flush = flushFn,
 };

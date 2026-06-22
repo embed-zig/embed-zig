@@ -1,5 +1,6 @@
 const std = @import("std");
 const embed = @import("embed");
+const glib = @import("glib");
 const gstd = @import("gstd");
 const codegen = @import("codegen");
 
@@ -41,12 +42,16 @@ pub fn make(comptime Launcher: type) type {
     const display_count = registries.display.len;
     const single_button_count = registries.single_button.len;
     const exposed_single_button_count = exposedButtonCount(registries.single_button);
+    const grouped_button_count = registries.adc_button.len;
+    const exposed_grouped_button_count = exposedButtonCount(registries.adc_button);
     const ledstrip_count = registries.ledstrip.len;
+    const modem_count = registries.modem.len;
+    const nfc_count = registries.nfc.len;
     const touch_count = registries.touch.len;
     const wifi_sta_count = registries.wifi_sta.len;
     const has_bt_host = @hasField(ZuxApp.InitConfig, "bt");
-    const topology_gear_count = exposed_single_button_count + ledstrip_count + display_count + touch_count + wifi_sta_count;
-    const state_gear_count = exposed_single_button_count + ledstrip_count + display_count + wifi_sta_count;
+    const topology_gear_count = exposed_single_button_count + exposed_grouped_button_count + ledstrip_count + display_count + modem_count + nfc_count + touch_count + wifi_sta_count;
+    const state_gear_count = exposed_single_button_count + exposed_grouped_button_count + ledstrip_count + display_count + wifi_sta_count;
 
     return struct {
         const Server = @This();
@@ -220,7 +225,10 @@ pub fn make(comptime Launcher: type) type {
             mutex: gstd.runtime.sync.Mutex = .{},
             audio_systems: [audio_system_count]device.audio_system.AudioSystem,
             buttons: [single_button_count]device.single_button.SingleButton,
+            grouped_buttons: [grouped_button_count]device.grouped_button.GroupedButton,
             displays: [display_count]device.display.Display,
+            modems: [modem_count]device.modem.Modem,
+            nfcs: [nfc_count]device.nfc.Nfc,
             strips: [ledstrip_count]device.ledstrip.LedStrip,
             touches: [touch_count]device.touch.Touch,
             wifi_stas: [wifi_sta_count]device.wifi_sta.WifiSta,
@@ -291,8 +299,11 @@ pub fn make(comptime Launcher: type) type {
                 self.audio_systems = try initAudioSystemDevices(allocator);
                 errdefer deinitAudioSystemDevices(&self.audio_systems);
                 self.buttons = [_]device.single_button.SingleButton{.{}} ** single_button_count;
+                self.grouped_buttons = [_]device.grouped_button.GroupedButton{.{}} ** grouped_button_count;
                 self.displays = try initDisplayDevices(allocator);
                 errdefer deinitDisplayDevices(&self.displays);
+                self.modems = [_]device.modem.Modem{.{}} ** modem_count;
+                self.nfcs = [_]device.nfc.Nfc{.{}} ** nfc_count;
                 self.strips = try initStripDevices(allocator);
                 errdefer deinitStripDevices(&self.strips);
                 self.touches = [_]device.touch.Touch{.{}} ** touch_count;
@@ -308,7 +319,10 @@ pub fn make(comptime Launcher: type) type {
                     allocator,
                     &self.audio_systems,
                     &self.buttons,
+                    &self.grouped_buttons,
                     &self.displays,
+                    &self.modems,
+                    &self.nfcs,
                     &self.strips,
                     &self.touches,
                     &self.wifi_stas,
@@ -328,6 +342,7 @@ pub fn make(comptime Launcher: type) type {
                 deinitWifiStaDevices(&self.wifi_stas);
                 deinitAudioSystemDevices(&self.audio_systems);
                 deinitDisplayDevices(&self.displays);
+                deinitModemDevices(&self.modems);
                 deinitStripDevices(&self.strips);
                 self.* = undefined;
             }
@@ -380,9 +395,27 @@ pub fn make(comptime Launcher: type) type {
                         .kind = "single_button",
                         .label = comptime labelText(periph.label),
                         .pixel_count = null,
+                        .button_count = null,
                         .width = null,
                         .height = null,
                         .target = null,
+                        .metadata = topologyMetadata(periphMetadata(periph)),
+                    };
+                    index += 1;
+                }
+
+                inline for (0..grouped_button_count) |i| {
+                    const periph = registries.adc_button.periphs[i];
+                    if (comptime isVirtualButton(periph)) continue;
+                    gears[index] = .{
+                        .kind = "grouped_button",
+                        .label = comptime labelText(periph.label),
+                        .pixel_count = null,
+                        .button_count = @intCast(periph.button_count),
+                        .width = null,
+                        .height = null,
+                        .target = null,
+                        .metadata = topologyMetadata(periphMetadata(periph)),
                     };
                     index += 1;
                 }
@@ -393,9 +426,11 @@ pub fn make(comptime Launcher: type) type {
                         .kind = "ledstrip",
                         .label = comptime labelText(periph.label),
                         .pixel_count = @intCast(periph.pixel_count),
+                        .button_count = null,
                         .width = null,
                         .height = null,
                         .target = null,
+                        .metadata = topologyMetadata(periphMetadata(periph)),
                     };
                     index += 1;
                 }
@@ -406,9 +441,41 @@ pub fn make(comptime Launcher: type) type {
                         .kind = "display",
                         .label = comptime labelText(periph.label),
                         .pixel_count = null,
-                        .width = device.display.Display.width_px,
-                        .height = device.display.Display.height_px,
+                        .button_count = null,
+                        .width = periph.width,
+                        .height = periph.height,
                         .target = null,
+                        .metadata = topologyMetadata(periphMetadata(periph)),
+                    };
+                    index += 1;
+                }
+
+                inline for (0..modem_count) |i| {
+                    const periph = registries.modem.periphs[i];
+                    gears[index] = .{
+                        .kind = "modem",
+                        .label = comptime labelText(periph.label),
+                        .pixel_count = null,
+                        .button_count = null,
+                        .width = null,
+                        .height = null,
+                        .target = null,
+                        .metadata = topologyMetadata(periphMetadata(periph)),
+                    };
+                    index += 1;
+                }
+
+                inline for (0..nfc_count) |i| {
+                    const periph = registries.nfc.periphs[i];
+                    gears[index] = .{
+                        .kind = "nfc",
+                        .label = comptime labelText(periph.label),
+                        .pixel_count = null,
+                        .button_count = null,
+                        .width = null,
+                        .height = null,
+                        .target = null,
+                        .metadata = topologyMetadata(periphMetadata(periph)),
                     };
                     index += 1;
                 }
@@ -419,9 +486,11 @@ pub fn make(comptime Launcher: type) type {
                         .kind = "touch",
                         .label = comptime labelText(periph.label),
                         .pixel_count = null,
+                        .button_count = null,
                         .width = null,
                         .height = null,
                         .target = periph.target,
+                        .metadata = topologyMetadata(periphMetadata(periph)),
                     };
                     index += 1;
                 }
@@ -432,9 +501,11 @@ pub fn make(comptime Launcher: type) type {
                         .kind = "wifi_sta",
                         .label = comptime labelText(periph.label),
                         .pixel_count = null,
+                        .button_count = null,
                         .width = null,
                         .height = null,
                         .target = null,
+                        .metadata = topologyMetadata(periphMetadata(periph)),
                     };
                     index += 1;
                 }
@@ -444,6 +515,20 @@ pub fn make(comptime Launcher: type) type {
                     .description = comptime appDescription(AppHost),
                     .gears = gears,
                 };
+            }
+
+            fn topologyMetadata(comptime metadata: embed.zux.Metadata) ?Models.GearMetadata {
+                if (metadata.label_text == null and metadata.item_label_texts.len == 0) return null;
+                return .{
+                    .label_text = metadata.label_text,
+                    .item_label_texts = if (metadata.item_label_texts.len == 0) null else metadata.item_label_texts,
+                };
+            }
+
+            fn periphMetadata(comptime periph: anytype) embed.zux.Metadata {
+                const PeriphType = @TypeOf(periph);
+                if (@hasField(PeriphType, "metadata")) return periph.metadata;
+                return .{};
             }
 
             fn makeStateResponse(self: *Self, allocator: gstd.runtime.std.mem.Allocator, ts_ms: i64) !Models.StateResponse {
@@ -474,6 +559,22 @@ pub fn make(comptime Launcher: type) type {
                         .kind = "single_button",
                         .label = comptime labelText(periph.label),
                         .pressed = try self.buttons[i].isPressed(),
+                    });
+                    index += 1;
+                }
+
+                inline for (0..grouped_button_count) |i| {
+                    const periph = registries.adc_button.periphs[i];
+                    const pressed_button_id = if (try self.grouped_buttons[i].pressedButtonId()) |button_id|
+                        @as(i64, @intCast(button_id))
+                    else
+                        null;
+                    if (comptime isVirtualButton(periph)) continue;
+                    gears[index] = @unionInit(Models.GearState, "GroupedButtonState", .{
+                        .kind = "grouped_button",
+                        .label = comptime labelText(periph.label),
+                        .button_count = @intCast(periph.button_count),
+                        .pressed_button_id = pressed_button_id,
                     });
                     index += 1;
                 }
@@ -543,13 +644,13 @@ pub fn make(comptime Launcher: type) type {
                 response.* = undefined;
             }
 
-            fn emit(self: *Self, gear_label: []const u8, event_name: []const u8, ts_ms: i64, metadata: ?[]const u8, touch_point: ?TouchPointQuery) EmitError!Models.EmitAck {
+            fn emit(self: *Self, gear_label: []const u8, event_name: []const u8, ts_ms: i64, metadata: ?[]const u8, touch_point: ?TouchPointQuery, button_id: ?u32) EmitError!Models.EmitAck {
                 self.mutex.lock();
                 defer self.mutex.unlock();
-                return self.emitLocked(gear_label, event_name, ts_ms, metadata, touch_point);
+                return self.emitLocked(gear_label, event_name, ts_ms, metadata, touch_point, button_id);
             }
 
-            fn emitLocked(self: *Self, gear_label: []const u8, event_name: []const u8, ts_ms: i64, metadata: ?[]const u8, touch_point: ?TouchPointQuery) EmitError!Models.EmitAck {
+            fn emitLocked(self: *Self, gear_label: []const u8, event_name: []const u8, ts_ms: i64, metadata: ?[]const u8, touch_point: ?TouchPointQuery, button_id: ?u32) EmitError!Models.EmitAck {
                 inline for (0..single_button_count) |i| {
                     const periph = registries.single_button.periphs[i];
                     if (comptime isVirtualButton(periph)) continue;
@@ -559,6 +660,32 @@ pub fn make(comptime Launcher: type) type {
                             self.buttons[i].press();
                         } else if (gstd.runtime.std.mem.eql(u8, event_name, "release")) {
                             self.buttons[i].release();
+                        } else {
+                            return error.InvalidEvent;
+                        }
+
+                        self.bumpRevision();
+                        return .{
+                            .accepted = true,
+                            .event = event_name,
+                            .gear_label = gear_label,
+                            .metadata = metadata,
+                            .ts = ts_ms,
+                        };
+                    }
+                }
+
+                inline for (0..grouped_button_count) |i| {
+                    const periph = registries.adc_button.periphs[i];
+                    if (comptime isVirtualButton(periph)) continue;
+                    const label_name = comptime labelText(periph.label);
+                    if (gstd.runtime.std.mem.eql(u8, gear_label, label_name)) {
+                        if (gstd.runtime.std.mem.eql(u8, event_name, "press")) {
+                            const id = button_id orelse return error.InvalidEvent;
+                            if (id >= periph.button_count) return error.InvalidEvent;
+                            self.grouped_buttons[i].press(id);
+                        } else if (gstd.runtime.std.mem.eql(u8, event_name, "release")) {
+                            self.grouped_buttons[i].release();
                         } else {
                             return error.InvalidEvent;
                         }
@@ -739,7 +866,8 @@ pub fn make(comptime Launcher: type) type {
                 const self: *Self = @ptrCast(@alignCast(ptr));
                 const metadata = if (@hasField(@TypeOf(args.query), "metadata")) args.query.metadata else null;
                 const touch_point = touchPointFromQuery(args.query);
-                const result = self.emit(args.path.gear_label, args.path.event, args.query.ts, metadata, touch_point) catch |err| {
+                const button_id = buttonIdFromQuery(args.query);
+                const result = self.emit(args.path.gear_label, args.path.event, args.query.ts, metadata, touch_point, button_id) catch |err| {
                     return switch (err) {
                         error.InvalidEvent => .{ .status_400 = makeErrorResponse("INVALID_EVENT", "Unsupported event.") },
                         error.UnknownGear => .{ .status_404 = makeErrorResponse("UNKNOWN_GEAR", "Unknown gear label.") },
@@ -819,7 +947,8 @@ pub fn make(comptime Launcher: type) type {
                 }
 
                 inline for (0..display_count) |i| {
-                    displays[i] = try device.display.Display.init(allocator);
+                    const periph = registries.display.periphs[i];
+                    displays[i] = try device.display.Display.init(allocator, periph.width, periph.height);
                     initialized += 1;
                 }
                 return displays;
@@ -828,6 +957,12 @@ pub fn make(comptime Launcher: type) type {
             fn deinitDisplayDevices(displays: *[display_count]device.display.Display) void {
                 inline for (0..display_count) |i| {
                     displays[i].deinit();
+                }
+            }
+
+            fn deinitModemDevices(modems: *[modem_count]device.modem.Modem) void {
+                inline for (0..modem_count) |i| {
+                    modems[i].deinit();
                 }
             }
 
@@ -855,7 +990,10 @@ pub fn make(comptime Launcher: type) type {
                 allocator: gstd.runtime.std.mem.Allocator,
                 audio_systems: *[audio_system_count]device.audio_system.AudioSystem,
                 buttons: *[single_button_count]device.single_button.SingleButton,
+                grouped_buttons: *[grouped_button_count]device.grouped_button.GroupedButton,
                 displays: *[display_count]device.display.Display,
+                modems: *[modem_count]device.modem.Modem,
+                nfcs: *[nfc_count]device.nfc.Nfc,
                 strips: *[ledstrip_count]device.ledstrip.LedStrip,
                 touches: *[touch_count]device.touch.Touch,
                 wifi_stas: *[wifi_sta_count]device.wifi_sta.WifiSta,
@@ -871,6 +1009,9 @@ pub fn make(comptime Launcher: type) type {
                 }
                 if (@hasField(ZuxApp.InitConfig, "poller_config")) {
                     init_config.poller_config = .{};
+                }
+                if (@hasField(ZuxApp.InitConfig, "initial_state")) {
+                    init_config.initial_state = defaultInitialState(@FieldType(ZuxApp.InitConfig, "initial_state"));
                 }
                 if (comptime has_bt_host) {
                     const BtHostType = @FieldType(ZuxApp.InitConfig, "bt");
@@ -894,6 +1035,19 @@ pub fn make(comptime Launcher: type) type {
                     }
                 }
 
+                inline for (0..grouped_button_count) |i| {
+                    const periph = registries.adc_button.periphs[i];
+                    const label_name = comptime labelText(periph.label);
+                    if (@hasField(ZuxApp.InitConfig, label_name)) {
+                        const ButtonType = @FieldType(ZuxApp.InitConfig, label_name);
+                        if (ButtonType == embed.drivers.button.Grouped) {
+                            @field(init_config, label_name) = embed.drivers.button.Grouped.init(device.grouped_button.GroupedButton, &grouped_buttons[i]);
+                        } else {
+                            @compileError("desktop ZuxServer button/grouped field must use drivers.button.Grouped");
+                        }
+                    }
+                }
+
                 inline for (0..ledstrip_count) |i| {
                     const periph = registries.ledstrip.periphs[i];
                     const label_name = comptime labelText(periph.label);
@@ -904,6 +1058,28 @@ pub fn make(comptime Launcher: type) type {
                     const periph = registries.display.periphs[i];
                     const label_name = comptime labelText(periph.label);
                     @field(init_config, label_name) = displays[i].handle();
+                }
+
+                inline for (0..modem_count) |i| {
+                    const periph = registries.modem.periphs[i];
+                    const label_name = comptime labelText(periph.label);
+                    const ModemType = @FieldType(ZuxApp.InitConfig, label_name);
+                    if (ModemType == embed.drivers.Modem) {
+                        @field(init_config, label_name) = modems[i].handle();
+                    } else {
+                        @compileError("desktop ZuxServer modem field must use drivers.Modem");
+                    }
+                }
+
+                inline for (0..nfc_count) |i| {
+                    const periph = registries.nfc.periphs[i];
+                    const label_name = comptime labelText(periph.label);
+                    const NfcType = @FieldType(ZuxApp.InitConfig, label_name);
+                    if (NfcType == embed.nfc.Reader) {
+                        @field(init_config, label_name) = nfcs[i].handle();
+                    } else {
+                        @compileError("desktop ZuxServer nfc field must use nfc.Reader");
+                    }
                 }
 
                 inline for (0..touch_count) |i| {
@@ -1113,12 +1289,11 @@ fn validateLauncher(comptime Launcher: type) void {
     _ = @as(*const fn (*ZuxApp) anyerror!void, &ZuxApp.stop);
     _ = @as(*const fn (*ZuxApp, ZuxApp.PeriphLabel) anyerror!void, &ZuxApp.press_single_button);
     _ = @as(*const fn (*ZuxApp, ZuxApp.PeriphLabel) anyerror!void, &ZuxApp.release_single_button);
+    _ = @as(*const fn (*ZuxApp, ZuxApp.PeriphLabel, u32) anyerror!void, &ZuxApp.press_grouped_button);
+    _ = @as(*const fn (*ZuxApp, ZuxApp.PeriphLabel) anyerror!void, &ZuxApp.release_grouped_button);
 
     const registries = ZuxApp.registries;
-    if (registries.adc_button.len != 0) @compileError("desktop ZuxServer does not support grouped buttons yet");
     if (registries.imu.len != 0) @compileError("desktop ZuxServer does not support imu yet");
-    if (registries.modem.len != 0) @compileError("desktop ZuxServer does not support modem yet");
-    if (registries.nfc.len != 0) @compileError("desktop ZuxServer does not support nfc yet");
     if (registries.wifi_ap.len != 0) @compileError("desktop ZuxServer does not support wifi ap yet");
 }
 
@@ -1209,6 +1384,15 @@ fn touchPointFromQuery(query: anytype) ?TouchPointQuery {
     };
 }
 
+fn buttonIdFromQuery(query: anytype) ?u32 {
+    if (comptime !@hasField(@TypeOf(query), "button_id")) {
+        return null;
+    }
+
+    const button_id = query.button_id orelse return null;
+    return std.math.cast(u32, button_id);
+}
+
 fn intToU16Saturated(value: anytype) u16 {
     if (value <= 0) return 0;
     if (value > std.math.maxInt(u16)) return std.math.maxInt(u16);
@@ -1269,6 +1453,205 @@ fn makeErrorResponse(code: []const u8, message: []const u8) api.Models.ErrorResp
     });
 }
 
+fn defaultInitialState(comptime InitialState: type) InitialState {
+    var initial_state: InitialState = undefined;
+    inline for (@typeInfo(InitialState).@"struct".fields) |field| {
+        @field(initial_state, field.name) = .{};
+    }
+    return initial_state;
+}
+
 fn nowMs() i64 {
     return std.time.milliTimestamp();
+}
+
+pub fn TestRunner(comptime std_api: type) glib.testing.TestRunner {
+    const testing_api = glib.testing;
+
+    const BuiltApp = comptime blk: {
+        const AssemblerType = embed.zux.assemble(gstd.runtime, .{
+            .max_adc_buttons = 1,
+            .max_displays = 1,
+            .max_modem = 1,
+            .max_nfc = 1,
+        });
+        var assembler = AssemblerType.init();
+        assembler.addGroupedButtonWithMetadata("buttons", 7, .{
+            .label_text = "Buttons",
+            .item_label_texts = &.{ "Red", "Green", "Blue" },
+        }, 3);
+        assembler.addDisplayWithMetadataAndSize("screen", 9, .{
+            .label_text = "Screen",
+        }, 128, 64);
+        assembler.addModemWithMetadata("modem", 11, .{
+            .label_text = "Cellular",
+        });
+        assembler.addNfcWithMetadata("nfc", 13, .{
+            .label_text = "NFC",
+        });
+
+        const BuildConfig = assembler.BuildConfig();
+        const build_config: BuildConfig = .{
+            .buttons = embed.drivers.button.Grouped,
+            .screen = embed.drivers.Display,
+            .modem = embed.drivers.Modem,
+            .nfc = embed.nfc.Reader,
+        };
+        break :blk assembler.build(build_config);
+    };
+
+    const TestLauncher = struct {
+        pub const ZuxApp = BuiltApp;
+        pub const InitConfig = ZuxApp.InitConfig;
+        pub const StartConfig = ZuxApp.StartConfig;
+        pub const Allocator = gstd.runtime.std.mem.Allocator;
+        pub const AppHost = struct {
+            pub const ZuxApp = BuiltApp;
+            pub const title = "topology test";
+            pub const description = "metadata topology test";
+        };
+
+        app_host: AppHost = .{},
+        zux_app: ZuxApp,
+
+        pub fn init(_: Allocator, init_config: InitConfig) !@This() {
+            return .{
+                .zux_app = try ZuxApp.init(init_config),
+            };
+        }
+
+        pub fn deinit(self: *@This()) void {
+            self.zux_app.deinit();
+        }
+
+        pub fn app(self: *@This()) *AppHost {
+            return &self.app_host;
+        }
+
+        pub fn zux(self: *@This()) *ZuxApp {
+            return &self.zux_app;
+        }
+    };
+
+    const Server = make(TestLauncher);
+
+    const TestCase = struct {
+        fn topologyIncludesComponentMetadata(allocator: std_api.mem.Allocator) !void {
+            var runtime: Server.RuntimeState = undefined;
+            try runtime.init(allocator, .{ .ticker = .manual });
+            defer runtime.deinit();
+
+            const topology = try runtime.makeTopologyResponse(allocator);
+            defer allocator.free(topology.gears);
+
+            try std_api.testing.expectEqualStrings("topology test", topology.title);
+            try std_api.testing.expectEqual(@as(usize, 4), topology.gears.len);
+            try expectGear(topology.gears[0], "grouped_button", "buttons", null, 3, null, null, null, "Buttons", &.{ "Red", "Green", "Blue" });
+            try expectGear(topology.gears[1], "display", "screen", null, null, 128, 64, null, "Screen", &.{});
+            try expectGear(topology.gears[2], "modem", "modem", null, null, null, null, null, "Cellular", &.{});
+            try expectGear(topology.gears[3], "nfc", "nfc", null, null, null, null, null, "NFC", &.{});
+        }
+
+        fn groupedButtonEmitUpdatesState(allocator: std_api.mem.Allocator) !void {
+            var runtime: Server.RuntimeState = undefined;
+            try runtime.init(allocator, .{ .ticker = .manual });
+            defer runtime.deinit();
+
+            _ = try runtime.emit("buttons", "press", 123, null, null, 2);
+            var pressed = try runtime.makeStateResponse(allocator, 124);
+            defer Server.RuntimeState.deinitStateResponse(allocator, &pressed);
+
+            try std_api.testing.expectEqual(@as(usize, 2), pressed.gears.len);
+            switch (pressed.gears[0]) {
+                .GroupedButtonState => |state| {
+                    try std_api.testing.expectEqualStrings("buttons", state.label);
+                    try std_api.testing.expectEqual(@as(i64, 2), state.pressed_button_id.?);
+                },
+                else => return error.ExpectedGroupedButtonState,
+            }
+
+            _ = try runtime.emit("buttons", "release", 125, null, null, null);
+            var released = try runtime.makeStateResponse(allocator, 126);
+            defer Server.RuntimeState.deinitStateResponse(allocator, &released);
+
+            switch (released.gears[0]) {
+                .GroupedButtonState => |state| {
+                    try std_api.testing.expect(state.pressed_button_id == null);
+                },
+                else => return error.ExpectedGroupedButtonState,
+            }
+
+            try std_api.testing.expectError(
+                Server.RuntimeState.EmitError.InvalidEvent,
+                runtime.emit("buttons", "press", 127, null, null, 3),
+            );
+        }
+
+        fn expectGear(
+            gear: api.Models.GearTopology,
+            expected_kind: []const u8,
+            expected_label: []const u8,
+            expected_pixel_count: ?i64,
+            expected_button_count: ?i64,
+            expected_width: ?i64,
+            expected_height: ?i64,
+            expected_target: ?[]const u8,
+            expected_label_text: ?[]const u8,
+            expected_item_labels: []const []const u8,
+        ) !void {
+            try std_api.testing.expectEqualStrings(expected_kind, gear.kind);
+            try std_api.testing.expectEqualStrings(expected_label, gear.label);
+            try std_api.testing.expectEqual(expected_pixel_count, gear.pixel_count);
+            try std_api.testing.expectEqual(expected_button_count, gear.button_count);
+            try std_api.testing.expectEqual(expected_width, gear.width);
+            try std_api.testing.expectEqual(expected_height, gear.height);
+            if (expected_target) |target| {
+                try std_api.testing.expectEqualStrings(target, gear.target.?);
+            } else {
+                try std_api.testing.expect(gear.target == null);
+            }
+            if (expected_label_text) |label_text| {
+                const metadata = gear.metadata.?;
+                try std_api.testing.expectEqualStrings(label_text, metadata.label_text.?);
+                const item_labels = metadata.item_label_texts orelse &.{};
+                try std_api.testing.expectEqual(expected_item_labels.len, item_labels.len);
+                for (expected_item_labels, item_labels) |expected, actual| {
+                    try std_api.testing.expectEqualStrings(expected, actual);
+                }
+            } else {
+                try std_api.testing.expect(gear.metadata == null);
+            }
+        }
+    };
+
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: std_api.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std_api.mem.Allocator) bool {
+            _ = self;
+
+            TestCase.topologyIncludesComponentMetadata(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.groupedButtonEmitUpdatesState(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: std_api.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

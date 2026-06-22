@@ -1,4 +1,5 @@
 const drivers = @import("drivers");
+const Metadata = @import("../../Metadata.zig");
 const registry_unique = @import("unique.zig");
 
 pub fn makeSwitch(comptime max_switches: usize) type {
@@ -16,6 +17,7 @@ fn make(comptime max_outputs: usize, comptime control_type: type, comptime name:
         pub const Periph = struct {
             label: []const u8,
             id: u32,
+            metadata: Metadata,
             control_type: type,
         };
 
@@ -30,6 +32,15 @@ fn make(comptime max_outputs: usize, comptime control_type: type, comptime name:
             self: *Self,
             comptime label: anytype,
             comptime id: u32,
+        ) void {
+            self.addWithMetadata(label, id, Metadata.empty);
+        }
+
+        pub fn addWithMetadata(
+            self: *Self,
+            comptime label: anytype,
+            comptime id: u32,
+            comptime metadata: Metadata,
         ) void {
             if (self.len >= max_outputs) {
                 @compileError("zux.Assembler exceeded max_" ++ name ++ "s");
@@ -47,6 +58,7 @@ fn make(comptime max_outputs: usize, comptime control_type: type, comptime name:
             self.periphs[self.len] = .{
                 .label = label_name,
                 .id = id,
+                .metadata = metadata,
                 .control_type = control_type,
             };
             self.len += 1;

@@ -3,6 +3,7 @@ const Config = @import("zux/assembler/Config.zig");
 
 pub const AssemblerConfig = Config;
 pub const Store = @import("zux/Store.zig");
+pub const Metadata = @import("zux/Metadata.zig");
 pub const ReducerFnType = Store.Reducer.ReducerFnType;
 pub const event = @import("zux/event.zig");
 pub const pipeline = struct {

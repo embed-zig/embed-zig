@@ -20,6 +20,7 @@ pub const SimState = event.SimState;
 pub const RegistrationState = event.RegistrationState;
 pub const PacketState = event.PacketState;
 pub const SignalInfo = event.SignalInfo;
+pub const IdentityChanged = event.IdentityChanged;
 pub const CallDirection = event.CallDirection;
 pub const CallState = event.CallState;
 pub const CallEndReason = event.CallEndReason;
@@ -443,6 +444,12 @@ const adapter_vtable = modem_api.Modem.VTable{
             const self: *TestCaseModem = @ptrCast(@alignCast(ptr));
             self.deinit();
         }
+    }.call,
+    .start = struct {
+        fn call(_: *anyopaque) modem_api.Modem.StartError!void {}
+    }.call,
+    .stop = struct {
+        fn call(_: *anyopaque) void {}
     }.call,
     .state = struct {
         fn call(ptr: *anyopaque) modem_api.Modem.State {

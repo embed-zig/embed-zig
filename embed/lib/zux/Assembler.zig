@@ -17,6 +17,7 @@ const registry_touch = @import("assembler/registry/touch.zig");
 const registry_wifi_ap = @import("assembler/registry/wifi_ap.zig");
 const registry_wifi_sta = @import("assembler/registry/wifi_sta.zig");
 const registry_unique = @import("assembler/registry/unique.zig");
+const Metadata = @import("Metadata.zig");
 const Store = @import("Store.zig");
 
 pub fn make(
@@ -156,6 +157,38 @@ pub fn make(
             self.adc_button_registry.add(label, id, button_count);
         }
 
+        pub fn addGroupedButtonWithMetadata(
+            self: *Self,
+            comptime label: []const u8,
+            comptime id: u32,
+            comptime metadata: Metadata,
+            comptime button_count: usize,
+        ) void {
+            ensureComponentUnique(self, label, id);
+            self.adc_button_registry.addWithMetadata(label, id, metadata, button_count);
+        }
+
+        pub fn addVirtualGroupedButton(
+            self: *Self,
+            comptime label: []const u8,
+            comptime id: u32,
+            comptime button_count: usize,
+        ) void {
+            ensureComponentUnique(self, label, id);
+            self.adc_button_registry.addVirtual(label, id, button_count);
+        }
+
+        pub fn addVirtualGroupedButtonWithMetadata(
+            self: *Self,
+            comptime label: []const u8,
+            comptime id: u32,
+            comptime metadata: Metadata,
+            comptime button_count: usize,
+        ) void {
+            ensureComponentUnique(self, label, id);
+            self.adc_button_registry.addVirtualWithMetadata(label, id, metadata, button_count);
+        }
+
         pub fn addSingleButton(
             self: *Self,
             comptime label: []const u8,
@@ -163,6 +196,16 @@ pub fn make(
         ) void {
             ensureComponentUnique(self, label, id);
             self.single_button_registry.add(label, id);
+        }
+
+        pub fn addSingleButtonWithMetadata(
+            self: *Self,
+            comptime label: []const u8,
+            comptime id: u32,
+            comptime metadata: Metadata,
+        ) void {
+            ensureComponentUnique(self, label, id);
+            self.single_button_registry.addWithMetadata(label, id, metadata);
         }
 
         pub fn addVirtualSingleButton(
@@ -174,6 +217,16 @@ pub fn make(
             self.single_button_registry.addVirtual(label, id);
         }
 
+        pub fn addVirtualSingleButtonWithMetadata(
+            self: *Self,
+            comptime label: []const u8,
+            comptime id: u32,
+            comptime metadata: Metadata,
+        ) void {
+            ensureComponentUnique(self, label, id);
+            self.single_button_registry.addVirtualWithMetadata(label, id, metadata);
+        }
+
         pub fn addAudioSystem(
             self: *Self,
             comptime label: []const u8,
@@ -181,6 +234,11 @@ pub fn make(
         ) void {
             ensureComponentUnique(self, label, id);
             self.audio_system_registry.add(label, id);
+        }
+
+        pub fn addAudioSystemWithMetadata(self: *Self, comptime label: []const u8, comptime id: u32, comptime metadata: Metadata) void {
+            ensureComponentUnique(self, label, id);
+            self.audio_system_registry.addWithMetadata(label, id, metadata);
         }
 
         pub fn addBt(
@@ -192,6 +250,11 @@ pub fn make(
             self.bt_registry.add(label, id);
         }
 
+        pub fn addBtWithMetadata(self: *Self, comptime label: []const u8, comptime id: u32, comptime metadata: Metadata) void {
+            ensureComponentUnique(self, label, id);
+            self.bt_registry.addWithMetadata(label, id, metadata);
+        }
+
         pub fn addDisplay(
             self: *Self,
             comptime label: []const u8,
@@ -201,6 +264,23 @@ pub fn make(
             self.display_registry.add(label, id);
         }
 
+        pub fn addDisplayWithMetadata(self: *Self, comptime label: []const u8, comptime id: u32, comptime metadata: Metadata) void {
+            ensureComponentUnique(self, label, id);
+            self.display_registry.addWithMetadata(label, id, metadata);
+        }
+
+        pub fn addDisplayWithMetadataAndSize(
+            self: *Self,
+            comptime label: []const u8,
+            comptime id: u32,
+            comptime metadata: Metadata,
+            comptime width: u16,
+            comptime height: u16,
+        ) void {
+            ensureComponentUnique(self, label, id);
+            self.display_registry.addWithMetadataAndSize(label, id, metadata, width, height);
+        }
+
         pub fn addImu(
             self: *Self,
             comptime label: []const u8,
@@ -208,6 +288,11 @@ pub fn make(
         ) void {
             ensureComponentUnique(self, label, id);
             self.imu_registry.add(label, id);
+        }
+
+        pub fn addImuWithMetadata(self: *Self, comptime label: []const u8, comptime id: u32, comptime metadata: Metadata) void {
+            ensureComponentUnique(self, label, id);
+            self.imu_registry.addWithMetadata(label, id, metadata);
         }
 
         pub fn addLedStrip(
@@ -220,6 +305,17 @@ pub fn make(
             self.ledstrip_registry.add(label, id, pixel_count);
         }
 
+        pub fn addLedStripWithMetadata(
+            self: *Self,
+            comptime label: []const u8,
+            comptime id: u32,
+            comptime metadata: Metadata,
+            comptime pixel_count: usize,
+        ) void {
+            ensureComponentUnique(self, label, id);
+            self.ledstrip_registry.addWithMetadata(label, id, metadata, pixel_count);
+        }
+
         pub fn addModem(
             self: *Self,
             comptime label: []const u8,
@@ -227,6 +323,11 @@ pub fn make(
         ) void {
             ensureComponentUnique(self, label, id);
             self.modem_registry.add(label, id);
+        }
+
+        pub fn addModemWithMetadata(self: *Self, comptime label: []const u8, comptime id: u32, comptime metadata: Metadata) void {
+            ensureComponentUnique(self, label, id);
+            self.modem_registry.addWithMetadata(label, id, metadata);
         }
 
         pub fn addNfc(
@@ -238,6 +339,11 @@ pub fn make(
             self.nfc_registry.add(label, id);
         }
 
+        pub fn addNfcWithMetadata(self: *Self, comptime label: []const u8, comptime id: u32, comptime metadata: Metadata) void {
+            ensureComponentUnique(self, label, id);
+            self.nfc_registry.addWithMetadata(label, id, metadata);
+        }
+
         pub fn addSwitch(
             self: *Self,
             comptime label: []const u8,
@@ -247,6 +353,11 @@ pub fn make(
             self.switch_registry.add(label, id);
         }
 
+        pub fn addSwitchWithMetadata(self: *Self, comptime label: []const u8, comptime id: u32, comptime metadata: Metadata) void {
+            ensureComponentUnique(self, label, id);
+            self.switch_registry.addWithMetadata(label, id, metadata);
+        }
+
         pub fn addPwm(
             self: *Self,
             comptime label: []const u8,
@@ -254,6 +365,11 @@ pub fn make(
         ) void {
             ensureComponentUnique(self, label, id);
             self.pwm_registry.add(label, id);
+        }
+
+        pub fn addPwmWithMetadata(self: *Self, comptime label: []const u8, comptime id: u32, comptime metadata: Metadata) void {
+            ensureComponentUnique(self, label, id);
+            self.pwm_registry.addWithMetadata(label, id, metadata);
         }
 
         pub fn addTouch(
@@ -266,6 +382,17 @@ pub fn make(
             self.touch_registry.add(label, id, target);
         }
 
+        pub fn addTouchWithMetadata(
+            self: *Self,
+            comptime label: []const u8,
+            comptime id: u32,
+            comptime metadata: Metadata,
+            comptime target: ?[]const u8,
+        ) void {
+            ensureComponentUnique(self, label, id);
+            self.touch_registry.addWithMetadata(label, id, metadata, target);
+        }
+
         pub fn addWifiSta(
             self: *Self,
             comptime label: []const u8,
@@ -275,6 +402,11 @@ pub fn make(
             self.wifi_sta_registry.add(label, id);
         }
 
+        pub fn addWifiStaWithMetadata(self: *Self, comptime label: []const u8, comptime id: u32, comptime metadata: Metadata) void {
+            ensureComponentUnique(self, label, id);
+            self.wifi_sta_registry.addWithMetadata(label, id, metadata);
+        }
+
         pub fn addWifiAp(
             self: *Self,
             comptime label: []const u8,
@@ -282,6 +414,11 @@ pub fn make(
         ) void {
             ensureComponentUnique(self, label, id);
             self.wifi_ap_registry.add(label, id);
+        }
+
+        pub fn addWifiApWithMetadata(self: *Self, comptime label: []const u8, comptime id: u32, comptime metadata: Metadata) void {
+            ensureComponentUnique(self, label, id);
+            self.wifi_ap_registry.addWithMetadata(label, id, metadata);
         }
 
         pub fn registerCustomEvent(self: *Self, comptime EventType: type) void {

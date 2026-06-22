@@ -155,7 +155,7 @@ fn makeNodeSubscriber(comptime grt: type) type {
             var current: ?*@This() = self;
             while (current) |node| : (current = node.parent) {
                 node.dirty.store(true, .release);
-                notifyNodeSubscribers(node, notification);
+                notifyNodeSubscribers(grt, node, notification);
             }
         }
     };
@@ -539,9 +539,13 @@ fn unsubscribeStatePath(comptime path: []const u8, state: anytype, subscriber: *
     return unsubscribeStatePath(part.tail, &@field(state.*, part.head), subscriber);
 }
 
-fn notifyNodeSubscribers(node: anytype, notification: Subscriber.Notification) void {
+fn notifyNodeSubscribers(comptime grt: type, node: anytype, notification: Subscriber.Notification) void {
     if (node.notifying.*) {
-        @panic("zux.store.State node subscribers cannot reenter notification on the same state node");
+        grt.std.log.scoped(.zux_store).warn(
+            "state node subscriber notification skipped because the previous notification is still running",
+            .{},
+        );
+        return;
     }
 
     node.notifying.* = true;

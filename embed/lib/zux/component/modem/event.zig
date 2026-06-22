@@ -1,6 +1,7 @@
 const modem_api = @import("drivers");
 
 pub const max_apn_len = modem_api.Modem.max_apn_len;
+pub const max_identity_len = modem_api.Modem.max_identity_len;
 pub const max_phone_number_len = modem_api.Modem.max_phone_number_len;
 pub const max_sms_text_len = modem_api.Modem.max_sms_text_len;
 
@@ -41,6 +42,24 @@ pub const NetworkSignalChanged = struct {
 
     source_id: u32,
     signal: SignalInfo,
+};
+
+pub const IdentityChanged = struct {
+    pub const kind = .modem_identity_changed;
+
+    source_id: u32,
+    imei_end: u8,
+    imei_buf: [max_identity_len]u8,
+    imsi_end: u8,
+    imsi_buf: [max_identity_len]u8,
+
+    pub fn imei(self: *const @This()) []const u8 {
+        return self.imei_buf[0..self.imei_end];
+    }
+
+    pub fn imsi(self: *const @This()) []const u8 {
+        return self.imsi_buf[0..self.imsi_end];
+    }
 };
 
 pub const DataPacketStateChanged = struct {
@@ -248,6 +267,19 @@ fn copyApnBuf(value: []const u8) ![max_apn_len]u8 {
     if (value.len > max_apn_len) return error.InvalidApnLength;
 
     var buf = [_]u8{0} ** max_apn_len;
+    @memcpy(buf[0..value.len], value);
+    return buf;
+}
+
+pub fn copyIdentityLen(value: []const u8) !u8 {
+    if (value.len > max_identity_len) return error.InvalidIdentityLength;
+    return @intCast(value.len);
+}
+
+pub fn copyIdentityBuf(value: []const u8) ![max_identity_len]u8 {
+    if (value.len > max_identity_len) return error.InvalidIdentityLength;
+
+    var buf = [_]u8{0} ** max_identity_len;
     @memcpy(buf[0..value.len], value);
     return buf;
 }

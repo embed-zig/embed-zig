@@ -1,4 +1,5 @@
 const nfc_api = @import("nfc");
+const Metadata = @import("../../Metadata.zig");
 const registry_unique = @import("unique.zig");
 
 pub fn make(comptime max_nfc: usize) type {
@@ -8,6 +9,7 @@ pub fn make(comptime max_nfc: usize) type {
         pub const Periph = struct {
             label: []const u8,
             id: u32,
+            metadata: Metadata,
             control_type: type,
         };
 
@@ -22,6 +24,15 @@ pub fn make(comptime max_nfc: usize) type {
             self: *Self,
             comptime label: anytype,
             comptime id: u32,
+        ) void {
+            self.addWithMetadata(label, id, Metadata.empty);
+        }
+
+        pub fn addWithMetadata(
+            self: *Self,
+            comptime label: anytype,
+            comptime id: u32,
+            comptime metadata: Metadata,
         ) void {
             if (self.len >= max_nfc) {
                 @compileError("zux.Assembler exceeded max_nfc");
@@ -39,6 +50,7 @@ pub fn make(comptime max_nfc: usize) type {
             self.periphs[self.len] = .{
                 .label = label_name,
                 .id = id,
+                .metadata = metadata,
                 .control_type = nfc_api.Reader,
             };
             self.len += 1;

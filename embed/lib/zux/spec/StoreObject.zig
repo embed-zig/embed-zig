@@ -294,6 +294,7 @@ fn typeFromName(comptime name: []const u8) type {
     if (comptimeEql(name, "f16")) return f16;
     if (comptimeEql(name, "f32")) return f32;
     if (comptimeEql(name, "f64")) return f64;
+    if (comptimeEql(name, "glib.time.instant.Time")) return glib.time.instant.Time;
     if (comptimeEql(name, "[]const u8")) return []const u8;
     if (comptimeEql(name, "string")) return []const u8;
     if (comptimeEql(name, "[32]u8")) return [32]u8;
@@ -373,6 +374,19 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expect(@FieldType(Spec.StateType, "pressed") == bool);
         }
 
+        fn parse_from_slice_generates_glib_instant_time_state_type() !void {
+            const Spec = parseSlice(
+                \\{
+                \\  "label": "connection",
+                \\  "state": {
+                \\    "connected_at": "glib.time.instant.Time"
+                \\  }
+                \\}
+            );
+
+            try grt.std.testing.expect(@FieldType(Spec.StateType, "connected_at") == glib.time.instant.Time);
+        }
+
         fn parse_from_slice_generates_nested_state_type() !void {
             const Spec = parseSlice(
                 \\{
@@ -440,6 +454,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             _ = allocator;
 
             TestCase.parse_from_slice_generates_store_object_type() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.parse_from_slice_generates_glib_instant_time_state_type() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

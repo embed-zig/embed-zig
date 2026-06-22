@@ -51,10 +51,43 @@
               "source_id": 31,
               "ssid_end": 8,
               "ssid_buf": "wifi-lab",
+              "status": "disconnected",
               "scanning": true,
               "connected": false,
               "has_ip": false,
               "last_rssi": -47,
+              "address": null
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "wifi_sta_connecting": {
+              "source_id": 31
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "sta",
+            "state": {
+              "source_id": 31,
+              "ssid_end": 8,
+              "ssid_buf": "wifi-lab",
+              "status": "connecting",
+              "scanning": false,
+              "connected": false,
+              "has_ip": false,
               "address": null
             }
           }
@@ -96,6 +129,7 @@
               "source_id": 31,
               "ssid_end": 8,
               "ssid_buf": "wifi-lab",
+              "status": "connected",
               "scanning": false,
               "connected": true,
               "has_ip": false,
@@ -233,6 +267,7 @@
               "source_id": 31,
               "ssid_end": 8,
               "ssid_buf": "wifi-lab",
+              "status": "online",
               "scanning": false,
               "connected": true,
               "has_ip": true,
@@ -305,6 +340,7 @@
               "source_id": 31,
               "ssid_end": 8,
               "ssid_buf": "wifi-lab",
+              "status": "connected",
               "scanning": false,
               "connected": true,
               "has_ip": false,
@@ -338,6 +374,7 @@
               "source_id": 31,
               "ssid_end": 8,
               "ssid_buf": "wifi-lab",
+              "status": "disconnected",
               "scanning": false,
               "connected": false,
               "has_ip": false,

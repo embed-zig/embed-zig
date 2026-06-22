@@ -11,6 +11,7 @@ ptr: *anyopaque,
 vtable: *const VTable,
 
 pub const max_apn_len: usize = 32;
+pub const max_identity_len: usize = 32;
 pub const max_phone_number_len: usize = 32;
 pub const max_sms_text_len: usize = 256;
 
@@ -247,10 +248,19 @@ pub const DataWriteError = error{
     Unexpected,
 };
 
+pub const StartError = error{
+    Busy,
+    TimedOut,
+    Unsupported,
+    Unexpected,
+};
+
 pub const CallbackFn = *const fn (ctx: *const anyopaque, source_id: u32, event: Event) void;
 
 pub const VTable = struct {
     deinit: *const fn (ptr: *anyopaque) void,
+    start: *const fn (ptr: *anyopaque) StartError!void,
+    stop: *const fn (ptr: *anyopaque) void,
     state: *const fn (ptr: *anyopaque) State,
     imei: *const fn (ptr: *anyopaque) ?[]const u8,
     imsi: *const fn (ptr: *anyopaque) ?[]const u8,
@@ -269,6 +279,14 @@ pub const VTable = struct {
 
 pub fn deinit(self: root) void {
     self.vtable.deinit(self.ptr);
+}
+
+pub fn start(self: root) StartError!void {
+    return self.vtable.start(self.ptr);
+}
+
+pub fn stop(self: root) void {
+    self.vtable.stop(self.ptr);
 }
 
 pub fn state(self: root) State {
@@ -363,6 +381,21 @@ pub fn make(comptime grt: type, comptime Impl: type) type {
             self.allocator.destroy(self);
         }
 
+        pub fn start(self: *@This()) StartError!void {
+            if (@hasDecl(Impl, "start")) {
+                self.impl.start() catch |err| return switch (err) {
+                    error.Busy => error.Busy,
+                    error.TimedOut => error.TimedOut,
+                    error.Unsupported => error.Unsupported,
+                    else => error.Unexpected,
+                };
+            }
+        }
+
+        pub fn stop(self: *@This()) void {
+            if (@hasDecl(Impl, "stop")) self.impl.stop();
+        }
+
         pub fn state(self: *@This()) State {
             return self.impl.state();
         }
@@ -427,6 +460,16 @@ pub fn make(comptime grt: type, comptime Impl: type) type {
         fn deinitFn(ptr: *anyopaque) void {
             const self: *Ctx = @ptrCast(@alignCast(ptr));
             self.deinit();
+        }
+
+        fn startFn(ptr: *anyopaque) StartError!void {
+            const self: *Ctx = @ptrCast(@alignCast(ptr));
+            return self.start();
+        }
+
+        fn stopFn(ptr: *anyopaque) void {
+            const self: *Ctx = @ptrCast(@alignCast(ptr));
+            self.stop();
         }
 
         fn stateFn(ptr: *anyopaque) State {
@@ -501,6 +544,8 @@ pub fn make(comptime grt: type, comptime Impl: type) type {
 
         const vtable = VTable{
             .deinit = deinitFn,
+            .start = startFn,
+            .stop = stopFn,
             .state = stateFn,
             .imei = imeiFn,
             .imsi = imsiFn,

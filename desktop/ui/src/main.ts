@@ -1,11 +1,12 @@
 import {
   createDesktopController,
   getDisplayStates,
+  getGroupedButtonStates,
   getLedStripState,
   getSingleButtonStates,
 } from './desktop-core.ts';
 import { getTopology } from './api/client.ts';
-import type { StateResponse } from './api/generated/types.gen';
+import type { GearTopology, StateResponse } from './api/generated/types.gen';
 
 const titleEl = getElement('app-title', HTMLHeadingElement);
 const descriptionEl = getElement('app-description', HTMLParagraphElement);
@@ -13,6 +14,7 @@ const gearsEl = getElement('gears', HTMLDivElement);
 
 let latestState: StateResponse | null = null;
 const buttonEls = new Map<string, HTMLButtonElement>();
+const groupedButtonEls = new Map<string, HTMLButtonElement[]>();
 const displayCanvases = new Map<string, HTMLCanvasElement>();
 
 function log(message: string, data?: unknown): void {
@@ -33,12 +35,20 @@ function subscribeBackendLogs(): void {
 function render(state: StateResponse): void {
   latestState = state;
   const buttons = getSingleButtonStates(state);
+  const groupedButtons = getGroupedButtonStates(state);
   const strip = getLedStripState(state);
   const displays = getDisplayStates(state);
 
   for (const button of buttons) {
     const node = buttonEls.get(button.label);
     node?.classList.toggle('pressed', button.pressed);
+  }
+
+  for (const group of groupedButtons) {
+    const nodes = groupedButtonEls.get(group.label) ?? [];
+    nodes.forEach((node, id) => {
+      node.classList.toggle('pressed', group.pressed_button_id === id);
+    });
   }
 
   const stripEl = document.getElementById('strip');
@@ -68,7 +78,11 @@ async function emitTouch(
   event: 'down' | 'move' | 'up',
   point?: { x: number; y: number },
 ): Promise<void> {
-  await controller.emit(gearLabel, event, point);
+  await controller.emit(gearLabel, event, { point });
+}
+
+async function emitGroupedButton(gearLabel: string, event: 'press' | 'release', buttonId: number): Promise<void> {
+  await controller.emit(gearLabel, event, { buttonId });
 }
 
 const controller = await createDesktopController({
@@ -106,6 +120,7 @@ function getElement<T extends typeof Element>(id: string, Ctor: T): InstanceType
 function buildGearUi(): void {
   gearsEl.innerHTML = '';
   buttonEls.clear();
+  groupedButtonEls.clear();
   displayCanvases.clear();
 
   for (const gear of topology.gears) {
@@ -113,7 +128,7 @@ function buildGearUi(): void {
       const button = document.createElement('button');
       button.className = 'button';
       button.type = 'button';
-      button.textContent = formatLabel(gear.label);
+      button.textContent = formatGearLabel(gear);
       button.addEventListener('pointerdown', () => {
         void emit(gear.label, 'press');
       });
@@ -128,6 +143,45 @@ function buildGearUi(): void {
       });
       buttonEls.set(gear.label, button);
       gearsEl.appendChild(wrapPanel(button));
+      continue;
+    }
+
+    if (gear.kind === 'grouped_button') {
+      const group = document.createElement('div');
+      group.className = 'grouped-button';
+
+      const label = document.createElement('div');
+      label.className = 'grouped-button-label';
+      label.textContent = formatGearLabel(gear);
+      group.appendChild(label);
+
+      const grid = document.createElement('div');
+      grid.className = 'grouped-button-grid';
+      const buttons: HTMLButtonElement[] = [];
+      for (let id = 0; id < (gear.button_count ?? 0); id += 1) {
+        const button = document.createElement('button');
+        button.className = 'button grouped-button-key';
+        button.type = 'button';
+        button.textContent = formatGroupedButtonLabel(gear, id);
+        button.title = `${gear.label}:${id}`;
+        button.addEventListener('pointerdown', () => {
+          void emitGroupedButton(gear.label, 'press', id);
+        });
+        button.addEventListener('pointerup', () => {
+          void emitGroupedButton(gear.label, 'release', id);
+        });
+        button.addEventListener('pointerleave', () => {
+          const pressed = latestState
+            ? getGroupedButtonStates(latestState).find((item) => item.label === gear.label)?.pressed_button_id === id
+            : false;
+          if (pressed) void emitGroupedButton(gear.label, 'release', id);
+        });
+        buttons.push(button);
+        grid.appendChild(button);
+      }
+      groupedButtonEls.set(gear.label, buttons);
+      group.appendChild(grid);
+      gearsEl.appendChild(wrapPanel(group));
       continue;
     }
 
@@ -148,6 +202,7 @@ function buildGearUi(): void {
       canvas.className = 'display';
       canvas.width = gear.width;
       canvas.height = gear.height;
+      syncDisplayCssSize(canvas);
       if (touchLabel) bindDisplayTouch(canvas, touchLabel);
       displayCanvases.set(gear.label, canvas);
       gearsEl.appendChild(wrapPanel(canvas));
@@ -169,11 +224,25 @@ function formatLabel(label: string): string {
     .join(' ');
 }
 
+function formatGearLabel(gear: GearTopology): string {
+  return gear.metadata?.label_text ?? formatLabel(gear.label);
+}
+
+function formatGroupedButtonLabel(gear: GearTopology, buttonId: number): string {
+  return gear.metadata?.item_label_texts?.[buttonId] ?? String(buttonId);
+}
+
 function drawDisplay(canvas: HTMLCanvasElement, display: ReturnType<typeof getDisplayStates>[number]): void {
   if (canvas.width !== display.width) canvas.width = display.width;
   if (canvas.height !== display.height) canvas.height = display.height;
+  syncDisplayCssSize(canvas);
 
   drawRgb888(canvas, 0, 0, display.width, display.height, display.pixels);
+}
+
+function syncDisplayCssSize(canvas: HTMLCanvasElement): void {
+  canvas.style.width = `${canvas.width}px`;
+  canvas.style.height = `${canvas.height}px`;
 }
 
 function drawDisplayUpdate(

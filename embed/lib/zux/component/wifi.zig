@@ -182,6 +182,10 @@ const DummySta = struct {
     pub fn stopScan(_: *@This()) void {}
     pub fn connect(_: *@This(), _: drivers.wifi.Sta.ConnectConfig) drivers.wifi.Sta.ConnectError!void {}
     pub fn disconnect(_: *@This()) void {}
+    pub fn setPowerSave(_: *@This(), _: drivers.wifi.Sta.PowerSave) drivers.wifi.Sta.PowerSaveError!void {}
+    pub fn getPowerSave(_: *@This()) drivers.wifi.Sta.PowerSaveError!drivers.wifi.Sta.PowerSave {
+        return .default;
+    }
     pub fn getState(_: *@This()) drivers.wifi.Sta.State {
         return .idle;
     }

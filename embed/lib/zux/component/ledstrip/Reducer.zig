@@ -33,7 +33,7 @@ pub fn make(comptime n: usize, comptime max_frames: usize) type {
         pub fn reduceState(state: *State, message: Message) bool {
             switch (message.body) {
                 .ledstrip_set => |event| {
-                    const frame = frameFromPixels(event.pixels);
+                    const frame = frameFromPixels(event.pixels.slice());
                     const target = frame.withBrightness(event.brightness);
                     resetPreservingCurrentControls(state);
                     state.frames[0] = frame;
@@ -53,7 +53,7 @@ pub fn make(comptime n: usize, comptime max_frames: usize) type {
                     return true;
                 },
                 .ledstrip_set_pixels => |event| {
-                    const frame = frameFromPixels(event.pixels);
+                    const frame = frameFromPixels(event.pixels.slice());
                     const target = frame.withBrightness(event.brightness);
                     resetPreservingCurrentControls(state);
                     state.frames[0] = frame;
@@ -68,7 +68,7 @@ pub fn make(comptime n: usize, comptime max_frames: usize) type {
                 },
                 .ledstrip_flash => |event| {
                     resetPreservingCurrentControls(state);
-                    state.frames[0] = frameFromPixels(event.pixels);
+                    state.frames[0] = frameFromPixels(event.pixels.slice());
                     if (max_frames > 1) {
                         state.frames[1] = .{};
                         state.total_frames = 2;
@@ -88,9 +88,9 @@ pub fn make(comptime n: usize, comptime max_frames: usize) type {
                 },
                 .ledstrip_pingpong => |event| {
                     resetPreservingCurrentControls(state);
-                    state.frames[0] = frameFromPixels(event.from_pixels);
+                    state.frames[0] = frameFromPixels(event.from_pixels.slice());
                     if (max_frames > 1) {
-                        state.frames[1] = frameFromPixels(event.to_pixels);
+                        state.frames[1] = frameFromPixels(event.to_pixels.slice());
                         state.total_frames = 2;
                     } else {
                         state.total_frames = 1;
@@ -111,7 +111,7 @@ pub fn make(comptime n: usize, comptime max_frames: usize) type {
                     const count = @min(n, max_frames);
                     if (count == 0) return false;
 
-                    state.frames[0] = frameFromPixels(event.pixels);
+                    state.frames[0] = frameFromPixels(event.pixels.slice());
                     for (1..count) |i| {
                         state.frames[i] = state.frames[i - 1].rotate();
                     }

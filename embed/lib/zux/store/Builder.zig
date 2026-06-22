@@ -17,6 +17,7 @@ pub const BuilderOptions = struct {
 
 const ValidationError = error{
     EmptyStoreLabel,
+    EmptyStateLabel,
     EmptyStatePath,
     EmptyStatePathSegment,
     DotSeparatedStatePath,
@@ -223,6 +224,7 @@ pub fn Builder(comptime options: BuilderOptions) type {
 fn validationErrorMessage(err: ValidationError) []const u8 {
     return switch (err) {
         error.EmptyStoreLabel => "zux.store.Builder store labels must not be empty",
+        error.EmptyStateLabel => "zux.store.Builder.setState labels must not be empty",
         error.EmptyStatePath => "zux.store.Builder.setState paths must not be empty",
         error.EmptyStatePathSegment => "zux.store.Builder.setState paths must not contain empty segments",
         error.DotSeparatedStatePath => "zux.store.Builder.setState paths must use '/' separators instead of '.'",
@@ -240,6 +242,17 @@ fn validationErrorMessage(err: ValidationError) []const u8 {
 fn normalizeStoreLabel(comptime raw_label: anytype) ValidationError![]const u8 {
     const label = labelText(raw_label) catch return error.UnsupportedStoreLabel;
     if (label.len == 0) return error.EmptyStoreLabel;
+    return label;
+}
+
+fn normalizeStateLabel(comptime raw_label: anytype) ValidationError![]const u8 {
+    const label = labelText(raw_label) catch return error.UnsupportedStateLabels;
+    if (label.len == 0) return error.EmptyStateLabel;
+    if (label[0] == '$') {
+        const periph_label = label[1..];
+        if (periph_label.len == 0) return error.EmptyStateLabel;
+        return periph_label;
+    }
     return label;
 }
 
@@ -329,11 +342,11 @@ fn collectLabels(
     comptime len: *usize,
 ) ValidationError!void {
     switch (@typeInfo(@TypeOf(labels))) {
-        .enum_literal => try appendUniqueLabel(out, len, try labelText(labels)),
+        .enum_literal => try appendUniqueLabel(out, len, try normalizeStateLabel(labels)),
         .pointer => |ptr| switch (ptr.size) {
             .slice => {
                 if (ptr.child == u8) {
-                    try appendUniqueLabel(out, len, try labelText(labels));
+                    try appendUniqueLabel(out, len, try normalizeStateLabel(labels));
                 } else {
                     inline for (labels) |item| {
                         try collectLabels(item, out, len);
@@ -343,7 +356,7 @@ fn collectLabels(
             .one => switch (@typeInfo(ptr.child)) {
                 .array => |arr| {
                     if (arr.child == u8) {
-                        try appendUniqueLabel(out, len, try labelText(labels));
+                        try appendUniqueLabel(out, len, try normalizeStateLabel(labels));
                     } else {
                         inline for (labels.*) |item| {
                             try collectLabels(item, out, len);
@@ -362,7 +375,7 @@ fn collectLabels(
         },
         .array => |arr| {
             if (arr.child == u8) {
-                try appendUniqueLabel(out, len, try labelText(labels));
+                try appendUniqueLabel(out, len, try normalizeStateLabel(labels));
             } else {
                 inline for (labels) |item| {
                     try collectLabels(item, out, len);
@@ -649,16 +662,17 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             const result = comptime blk: {
                 var labels: [4][]const u8 = undefined;
                 var len: usize = 0;
-                try collectLabels(.{ .wifi, "cellular", .wifi }, &labels, &len);
+                try collectLabels(.{ .wifi, "cellular", .wifi, "$audio" }, &labels, &len);
                 break :blk .{
                     .labels = labels,
                     .len = len,
                 };
             };
 
-            try grt.std.testing.expectEqual(@as(usize, 2), result.len);
+            try grt.std.testing.expectEqual(@as(usize, 3), result.len);
             try grt.std.testing.expectEqualStrings("wifi", result.labels[0]);
             try grt.std.testing.expectEqualStrings("cellular", result.labels[1]);
+            try grt.std.testing.expectEqualStrings("audio", result.labels[2]);
         }
 
         fn make_builds_generated_store_type(allocator: glib.std.mem.Allocator) !void {

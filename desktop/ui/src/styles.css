@@ -83,6 +83,52 @@ body {
     inset 0 -2px 6px rgba(255, 255, 255, 0.08);
 }
 
+.grouped-button {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 228px;
+}
+
+.grouped-button-label {
+  color: #cbd5e1;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.grouped-button-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 48px);
+  gap: 12px;
+}
+
+.grouped-button-key {
+  width: 48px;
+  height: 48px;
+  font-size: 14px;
+  box-shadow:
+    0 8px 16px rgba(0, 0, 0, 0.34),
+    0 0 0 5px rgba(15, 23, 42, 0.72),
+    0 0 0 6px rgba(148, 163, 184, 0.16),
+    inset 0 2px 5px rgba(255, 255, 255, 0.18),
+    inset 0 -7px 12px rgba(15, 23, 42, 0.4);
+}
+
+.grouped-button-key:hover {
+  box-shadow:
+    0 10px 18px rgba(0, 0, 0, 0.4),
+    0 0 0 5px rgba(15, 23, 42, 0.72),
+    0 0 0 6px rgba(148, 163, 184, 0.22),
+    inset 0 2px 6px rgba(255, 255, 255, 0.22),
+    inset 0 -7px 12px rgba(15, 23, 42, 0.38);
+}
+
+.grouped-button-key:focus-visible {
+  outline-offset: 5px;
+}
+
 .strip {
   display: flex;
   gap: 6px;
@@ -97,8 +143,10 @@ body {
 }
 
 .display {
-  width: min(720px, calc(100vw - 104px));
+  display: block;
+  width: auto;
   height: auto;
+  max-width: none;
   image-rendering: pixelated;
   background: #020617;
   border: 1px solid #313846;

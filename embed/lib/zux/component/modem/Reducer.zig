@@ -47,6 +47,17 @@ pub fn reduce(self: *Reducer, store: anytype, message: Message, emit: Emitter) !
                 }
             }.apply);
         },
+        .modem_identity_changed => |value| {
+            store.invoke(value, struct {
+                fn apply(state: *ModemState, event_value: modem_event.IdentityChanged) void {
+                    state.source_id = event_value.source_id;
+                    state.imei_end = event_value.imei_end;
+                    state.imei_buf = event_value.imei_buf;
+                    state.imsi_end = event_value.imsi_end;
+                    state.imsi_buf = event_value.imsi_buf;
+                }
+            }.apply);
+        },
         .modem_data_apn_changed => |value| {
             store.invoke(value, struct {
                 fn apply(state: *ModemState, event_value: modem_event.DataApnChanged) void {
@@ -215,6 +226,26 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
+                    .modem_identity_changed = .{
+                        .source_id = 51,
+                        .imei_end = 15,
+                        .imei_buf = blk: {
+                            var buf = [_]u8{0} ** modem_event.max_identity_len;
+                            @memcpy(buf[0..15], "860000000000001");
+                            break :blk buf;
+                        },
+                        .imsi_end = 15,
+                        .imsi_buf = blk: {
+                            var buf = [_]u8{0} ** modem_event.max_identity_len;
+                            @memcpy(buf[0..15], "460001234567890");
+                            break :blk buf;
+                        },
+                    },
+                },
+            }, emit);
+            try reducer.reduce(&store, .{
+                .origin = .source,
+                .body = .{
                     .modem_data_apn_changed = .{
                         .source_id = 51,
                         .apn_end = 8,
@@ -325,6 +356,8 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(modem_event.PacketState.connected, state.packet);
             try grt.std.testing.expectEqual(@as(?i16, -73), state.signal.?.rssi_dbm);
             try grt.std.testing.expectEqual(modem_event.Rat.lte, state.signal.?.rat);
+            try grt.std.testing.expectEqualStrings("860000000000001", state.imei());
+            try grt.std.testing.expectEqualStrings("460001234567890", state.imsi());
             try grt.std.testing.expectEqualStrings("internet", state.apn());
             try grt.std.testing.expectEqual(@as(?u8, 3), if (state.call) |call| call.call_id else null);
             try grt.std.testing.expectEqual(@as(?modem_event.CallEndReason, .remote_hangup), if (state.call) |call| call.end_reason else null);

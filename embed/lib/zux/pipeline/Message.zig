@@ -26,6 +26,14 @@ pub fn kind(self: Message) Kind {
 pub fn deinit(self: Message) void {
     switch (self.body) {
         .custom => |custom| custom.deinit(),
+        .ledstrip_set => |event_value| event_value.pixels.deinit(),
+        .ledstrip_set_pixels => |event_value| event_value.pixels.deinit(),
+        .ledstrip_flash => |event_value| event_value.pixels.deinit(),
+        .ledstrip_pingpong => |event_value| {
+            event_value.from_pixels.deinit();
+            event_value.to_pixels.deinit();
+        },
+        .ledstrip_rotate => |event_value| event_value.pixels.deinit(),
         else => {},
     }
 }

@@ -1,14 +1,13 @@
 const glib = @import("glib");
+const Metadata = @import("../Metadata.zig");
 const JsonParser = @import("JsonParser.zig");
 const Component = @This();
 
 pub const Kind = union(enum) {
-    grouped_button: struct {
-        button_count: usize,
-    },
+    grouped_button: GroupedButtonSpec,
     bt: void,
     audio_system: void,
-    display: void,
+    display: DisplaySpec,
     single_button: ButtonSpec,
     imu: void,
     led_strip: struct {
@@ -32,12 +31,23 @@ pub const ButtonSpec = struct {
     input_type: ButtonInputType = .poll,
 };
 
+pub const GroupedButtonSpec = struct {
+    button_count: usize,
+    input_type: ButtonInputType = .poll,
+};
+
+pub const DisplaySpec = struct {
+    width: u16 = 320,
+    height: u16 = 240,
+};
+
 pub const TouchSpec = struct {
     target: ?[]const u8 = null,
 };
 
 label: []const u8,
 id: u32,
+metadata: Metadata = .{},
 kind: Kind,
 
 pub fn parseSlice(comptime source: []const u8) Component {
@@ -62,6 +72,10 @@ pub fn parseSliceWithKindPath(
             .id = parseRequiredU32FieldFromObjectSlice(
                 source,
                 "id",
+                "zux.spec.Component.parseSlice component",
+            ),
+            .metadata = parseMetadataFieldFromObjectSlice(
+                source,
                 "zux.spec.Component.parseSlice component",
             ),
             .kind = parsePathKindSlice(kind_path, source),
@@ -103,6 +117,7 @@ pub fn parseAllocSliceWithKindPath(
 
 pub fn deinit(self: *Component, allocator: glib.std.mem.Allocator) void {
     allocator.free(self.label);
+    freeRuntimeMetadata(self.metadata, allocator);
     freeRuntimeKind(self.kind, allocator);
 }
 
@@ -111,6 +126,8 @@ fn parseFromParser(parser: *JsonParser) Component {
 
     var label: ?[]const u8 = null;
     var id: ?u32 = null;
+    var metadata: Metadata = .{};
+    var has_metadata = false;
     var kind: ?Kind = null;
 
     if (parser.consumeByte('}')) {
@@ -139,9 +156,15 @@ fn parseFromParser(parser: *JsonParser) Component {
                 @compileError("zux.spec.Component.parseSlice duplicate `kind` field");
             }
             kind = parseKindSlice(parser.parseValueSlice());
+        } else if (comptimeEql(key, "metadata")) {
+            if (has_metadata) {
+                @compileError("zux.spec.Component.parseSlice duplicate `metadata` field");
+            }
+            has_metadata = true;
+            metadata = parseMetadataSlice(parser.parseValueSlice(), "zux.spec.Component.parseSlice component metadata");
         } else {
             _ = parser.parseValueSlice();
-            @compileError("zux.spec.Component.parseSlice only supports `label`, `id`, and `kind` fields");
+            @compileError("zux.spec.Component.parseSlice only supports `label`, `id`, `metadata`, and `kind` fields");
         }
 
         if (parser.consumeByte(',')) continue;
@@ -152,6 +175,7 @@ fn parseFromParser(parser: *JsonParser) Component {
     return .{
         .label = label orelse @compileError("zux.spec.Component.parseSlice requires a `label` field"),
         .id = id orelse @compileError("zux.spec.Component.parseSlice requires an `id` field"),
+        .metadata = metadata,
         .kind = kind orelse @compileError("zux.spec.Component.parseSlice requires a `kind` field"),
     };
 }
@@ -177,6 +201,10 @@ pub fn parseJsonValue(
                 "id",
                 "zux.spec.Component.parseJsonValue component",
             ),
+            .metadata = parseMetadataComptime(
+                object.get("metadata"),
+                "zux.spec.Component.parseJsonValue component metadata",
+            ),
             .kind = parseKindValueComptime(
                 object.get("kind") orelse
                     @compileError("zux.spec.Component.parseJsonValue component requires a `kind` field"),
@@ -197,6 +225,7 @@ pub fn parseJsonValue(
     while (iterator.next()) |entry| {
         if (!glib.std.mem.eql(u8, entry.key_ptr.*, "label") and
             !glib.std.mem.eql(u8, entry.key_ptr.*, "id") and
+            !glib.std.mem.eql(u8, entry.key_ptr.*, "metadata") and
             !glib.std.mem.eql(u8, entry.key_ptr.*, "kind"))
         {
             return error.UnknownComponentField;
@@ -220,10 +249,16 @@ pub fn parseJsonValue(
     };
     const kind = try parseKindValue(allocator, kind_value);
     errdefer freeRuntimeKind(kind, allocator);
+    const metadata = if (object.get("metadata")) |metadata_value|
+        try parseMetadataValue(allocator, metadata_value)
+    else
+        Metadata.empty;
+    errdefer freeRuntimeMetadata(metadata, allocator);
 
     return .{
         .label = label,
         .id = id,
+        .metadata = metadata,
         .kind = kind,
     };
 }
@@ -257,12 +292,198 @@ pub fn parseJsonValueWithKindPath(
 
     const kind = try parsePathKindValue(allocator, kind_path, object);
     errdefer freeRuntimeKind(kind, allocator);
+    const metadata = if (object.get("metadata")) |metadata_value|
+        try parseMetadataValue(allocator, metadata_value)
+    else
+        Metadata.empty;
+    errdefer freeRuntimeMetadata(metadata, allocator);
 
     return .{
         .label = label,
         .id = id,
+        .metadata = metadata,
         .kind = kind,
     };
+}
+
+fn freeRuntimeMetadata(metadata: Metadata, allocator: glib.std.mem.Allocator) void {
+    if (metadata.label_text) |label_text| allocator.free(label_text);
+    for (metadata.item_label_texts) |text| allocator.free(text);
+    allocator.free(metadata.item_label_texts);
+}
+
+fn parseMetadataValue(allocator: glib.std.mem.Allocator, value: glib.std.json.Value) !Metadata {
+    const object = switch (value) {
+        .object => |object| object,
+        else => return error.ExpectedComponentMetadataObject,
+    };
+
+    var label_text: ?[]const u8 = null;
+    errdefer if (label_text) |text| allocator.free(text);
+    var item_label_texts: []const []const u8 = &.{};
+    errdefer freeRuntimeStringList(item_label_texts, allocator);
+
+    var iterator = object.iterator();
+    while (iterator.next()) |entry| {
+        if (glib.std.mem.eql(u8, entry.key_ptr.*, "label_text")) {
+            if (label_text != null) return error.DuplicateComponentMetadataField;
+            label_text = try parseNonEmptyStringValueAlloc(
+                allocator,
+                entry.value_ptr.*,
+                error.ExpectedComponentMetadataLabelTextString,
+                error.EmptyComponentMetadataLabelText,
+            );
+        } else if (glib.std.mem.eql(u8, entry.key_ptr.*, "item_label_texts")) {
+            if (item_label_texts.len != 0) return error.DuplicateComponentMetadataField;
+            item_label_texts = try parseStringListValue(allocator, entry.value_ptr.*);
+        } else {
+            return error.UnknownComponentMetadataField;
+        }
+    }
+
+    return .{
+        .label_text = label_text,
+        .item_label_texts = item_label_texts,
+    };
+}
+
+fn freeRuntimeStringList(items: []const []const u8, allocator: glib.std.mem.Allocator) void {
+    for (items) |text| allocator.free(text);
+    allocator.free(items);
+}
+
+fn parseNonEmptyStringValueAlloc(
+    allocator: glib.std.mem.Allocator,
+    value: glib.std.json.Value,
+    expected_err: anyerror,
+    empty_err: anyerror,
+) ![]const u8 {
+    return switch (value) {
+        .string => |text| blk: {
+            if (text.len == 0) return empty_err;
+            break :blk try allocator.dupe(u8, text);
+        },
+        else => expected_err,
+    };
+}
+
+fn parseStringListValue(allocator: glib.std.mem.Allocator, value: glib.std.json.Value) ![]const []const u8 {
+    const array = switch (value) {
+        .array => |array| array,
+        else => return error.ExpectedComponentMetadataItemLabelTextsArray,
+    };
+
+    const items = try allocator.alloc([]const u8, array.items.len);
+    errdefer allocator.free(items);
+    var len: usize = 0;
+    errdefer {
+        for (items[0..len]) |text| allocator.free(text);
+    }
+
+    for (array.items) |item| {
+        items[len] = try parseNonEmptyStringValueAlloc(
+            allocator,
+            item,
+            error.ExpectedComponentMetadataItemLabelTextString,
+            error.EmptyComponentMetadataItemLabelText,
+        );
+        len += 1;
+    }
+    return items;
+}
+
+fn parseMetadataFieldFromObjectSlice(comptime source: []const u8, comptime context: []const u8) Metadata {
+    var parser = JsonParser.init(source);
+    parser.expectByte('{');
+    if (parser.consumeByte('}')) return .{};
+
+    var metadata: Metadata = .{};
+    var found = false;
+    while (true) {
+        const key = parser.parseString();
+        parser.expectByte(':');
+        const value_source = parser.parseValueSlice();
+        if (comptimeEql(key, "metadata")) {
+            if (found) {
+                @compileError(context ++ " contains duplicate `metadata` field");
+            }
+            found = true;
+            metadata = parseMetadataSlice(value_source, context ++ " metadata");
+        }
+        if (parser.consumeByte(',')) continue;
+        parser.expectByte('}');
+        break;
+    }
+    parser.finish();
+    return metadata;
+}
+
+fn parseMetadataSlice(comptime source: []const u8, comptime context: []const u8) Metadata {
+    var parser = JsonParser.init(source);
+    parser.expectByte('{');
+    if (parser.consumeByte('}')) return .{};
+
+    var label_text: ?[]const u8 = null;
+    var item_label_texts: []const []const u8 = &.{};
+    var has_item_label_texts = false;
+    while (true) {
+        const key = parser.parseString();
+        parser.expectByte(':');
+        if (comptimeEql(key, "label_text")) {
+            if (label_text != null) {
+                @compileError(context ++ " contains duplicate `label_text` field");
+            }
+            label_text = parser.parseString();
+            if (label_text.?.len == 0) {
+                @compileError(context ++ " `label_text` must not be empty");
+            }
+        } else if (comptimeEql(key, "item_label_texts")) {
+            if (has_item_label_texts) {
+                @compileError(context ++ " contains duplicate `item_label_texts` field");
+            }
+            has_item_label_texts = true;
+            item_label_texts = parseStringListSlice(parser.parseValueSlice(), context ++ " `item_label_texts`");
+        } else {
+            _ = parser.parseValueSlice();
+            @compileError(context ++ " only supports `label_text` and `item_label_texts` fields");
+        }
+        if (parser.consumeByte(',')) continue;
+        parser.expectByte('}');
+        break;
+    }
+    parser.finish();
+
+    return .{
+        .label_text = label_text,
+        .item_label_texts = item_label_texts,
+    };
+}
+
+fn parseStringListSlice(comptime source: []const u8, comptime context: []const u8) []const []const u8 {
+    const parsed = comptime blk: {
+        var count_parser = JsonParser.init(source);
+        const item_count = count_parser.countArrayItems();
+
+        var parser = JsonParser.init(source);
+        parser.expectByte('[');
+        var items: [item_count][]const u8 = undefined;
+        var index: usize = 0;
+        if (!parser.consumeByte(']')) {
+            while (true) {
+                items[index] = parser.parseString();
+                if (items[index].len == 0) {
+                    @compileError(context ++ " entries must not be empty");
+                }
+                index += 1;
+                if (parser.consumeByte(',')) continue;
+                parser.expectByte(']');
+                break;
+            }
+        }
+        parser.finish();
+        break :blk items;
+    };
+    return parsed[0..];
 }
 
 fn freeRuntimeKind(kind: Kind, allocator: glib.std.mem.Allocator) void {
@@ -288,18 +509,7 @@ fn parseKindValue(
     if (iterator.next() != null) return error.InvalidComponentKindObject;
 
     if (glib.std.mem.eql(u8, entry.key_ptr.*, "grouped_button")) {
-        var payload = try glib.std.json.parseFromValue(
-            struct { button_count: usize },
-            allocator,
-            entry.value_ptr.*,
-            .{},
-        );
-        defer payload.deinit();
-        return .{
-            .grouped_button = .{
-                .button_count = payload.value.button_count,
-            },
-        };
+        return .{ .grouped_button = try parseGroupedButtonSpecValue(entry.value_ptr.*) };
     }
     if (glib.std.mem.eql(u8, entry.key_ptr.*, "single_button")) {
         return .{ .single_button = try parseButtonSpecValue(entry.value_ptr.*) };
@@ -313,8 +523,7 @@ fn parseKindValue(
         return .{ .bt = {} };
     }
     if (glib.std.mem.eql(u8, entry.key_ptr.*, "display")) {
-        try expectEmptyPayload(entry.value_ptr.*);
-        return .{ .display = {} };
+        return .{ .display = try parseDisplaySpecValue(entry.value_ptr.*) };
     }
     if (glib.std.mem.eql(u8, entry.key_ptr.*, "imu")) {
         try expectEmptyPayload(entry.value_ptr.*);
@@ -407,15 +616,10 @@ fn parseKindSlice(comptime source: []const u8) Kind {
     parser.finish();
 
     if (comptimeEql(kind_name, "grouped_button")) {
-        return .{
-            .grouped_button = .{
-                .button_count = parseRequiredUsizeFieldFromObjectSlice(
-                    payload_source,
-                    "button_count",
-                    "zux.spec.Component.parseSlice grouped_button payload",
-                ),
-            },
-        };
+        return .{ .grouped_button = parseGroupedButtonSpecSlice(
+            payload_source,
+            "zux.spec.Component.parseSlice grouped_button payload",
+        ) };
     }
     if (comptimeEql(kind_name, "single_button")) {
         return .{ .single_button = parseButtonSpecSlice(payload_source) };
@@ -435,11 +639,10 @@ fn parseKindSlice(comptime source: []const u8) Kind {
         return .{ .bt = {} };
     }
     if (comptimeEql(kind_name, "display")) {
-        expectEmptyPayloadSlice(
+        return .{ .display = parseDisplaySpecSlice(
             payload_source,
             "zux.spec.Component.parseSlice display payload",
-        );
-        return .{ .display = {} };
+        ) };
     }
     if (comptimeEql(kind_name, "imu")) {
         expectEmptyPayloadSlice(
@@ -509,15 +712,10 @@ fn parseKindSlice(comptime source: []const u8) Kind {
 
 fn parsePathKindSlice(comptime kind_path: []const u8, comptime source: []const u8) Kind {
     if (comptimeEql(kind_path, "button/grouped")) {
-        return .{
-            .grouped_button = .{
-                .button_count = parseRequiredUsizeFieldFromObjectSlice(
-                    source,
-                    "button_count",
-                    "zux.spec.Component.parseSlice Component/button/grouped",
-                ),
-            },
-        };
+        return .{ .grouped_button = parseGroupedButtonSpecSlice(
+            source,
+            "zux.spec.Component.parseSlice Component/button/grouped",
+        ) };
     }
     if (comptimeEql(kind_path, "button/single")) {
         return .{ .single_button = parseButtonSpecSlice(source) };
@@ -529,7 +727,10 @@ fn parsePathKindSlice(comptime kind_path: []const u8, comptime source: []const u
         return .{ .bt = {} };
     }
     if (comptimeEql(kind_path, "display")) {
-        return .{ .display = {} };
+        return .{ .display = parseDisplaySpecSlice(
+            source,
+            "zux.spec.Component.parseSlice Component/display",
+        ) };
     }
     if (comptimeEql(kind_path, "imu")) {
         return .{ .imu = {} };
@@ -575,16 +776,7 @@ fn parsePathKindValue(
     object: glib.std.json.ObjectMap,
 ) !Kind {
     if (glib.std.mem.eql(u8, kind_path, "button/grouped")) {
-        return .{
-            .grouped_button = .{
-                .button_count = try parseRequiredUsizeFieldValue(
-                    object,
-                    "button_count",
-                    error.MissingGroupedButtonCount,
-                    error.ExpectedGroupedButtonCountInteger,
-                ),
-            },
-        };
+        return .{ .grouped_button = try parseGroupedButtonSpecJsonObject(object) };
     }
     if (glib.std.mem.eql(u8, kind_path, "button/single")) {
         return .{ .single_button = try parseButtonSpecJsonObject(object) };
@@ -596,7 +788,7 @@ fn parsePathKindValue(
         return .{ .bt = {} };
     }
     if (glib.std.mem.eql(u8, kind_path, "display")) {
-        return .{ .display = {} };
+        return .{ .display = try parseDisplaySpecJsonObject(object) };
     }
     if (glib.std.mem.eql(u8, kind_path, "imu")) {
         return .{ .imu = {} };
@@ -693,6 +885,37 @@ fn parseRequiredU32FieldFromObjectSlice(
     return result orelse @compileError(context ++ " requires `" ++ field_name ++ "`");
 }
 
+fn parseOptionalU16FieldFromObjectSlice(
+    comptime source: []const u8,
+    comptime field_name: []const u8,
+    comptime default_value: u16,
+    comptime context: []const u8,
+) u16 {
+    var parser = JsonParser.init(source);
+    parser.expectByte('{');
+    if (parser.consumeByte('}')) return default_value;
+
+    var result: ?u16 = null;
+    while (true) {
+        const key = parser.parseString();
+        parser.expectByte(':');
+        if (comptimeEql(key, field_name)) {
+            const value = parser.parseU32();
+            if (value > glib.std.math.maxInt(u16)) {
+                @compileError(context ++ " `" ++ field_name ++ "` must fit in u16");
+            }
+            result = @intCast(value);
+        } else {
+            _ = parser.parseValueSlice();
+        }
+        if (parser.consumeByte(',')) continue;
+        parser.expectByte('}');
+        break;
+    }
+    parser.finish();
+    return result orelse default_value;
+}
+
 fn parseRequiredNonEmptyStringFieldFromObjectSlice(
     comptime source: []const u8,
     comptime field_name: []const u8,
@@ -769,6 +992,22 @@ fn parseRequiredNonEmptyStringFieldValue(
     };
 }
 
+fn parseOptionalU16FieldValue(
+    object: glib.std.json.ObjectMap,
+    field_name: []const u8,
+    default_value: u16,
+    expected_err: anyerror,
+) !u16 {
+    const value = object.get(field_name) orelse return default_value;
+    return switch (value) {
+        .integer => |int_value| blk: {
+            if (int_value < 0 or int_value > glib.std.math.maxInt(u16)) return expected_err;
+            break :blk @as(u16, @intCast(int_value));
+        },
+        else => expected_err,
+    };
+}
+
 fn parseOptionalNonEmptyStringFieldValue(
     allocator: glib.std.mem.Allocator,
     value: glib.std.json.Value,
@@ -798,6 +1037,98 @@ fn parseButtonSpecJsonObject(object: glib.std.json.ObjectMap) !ButtonSpec {
     else
         ButtonInputType.poll;
     return .{ .input_type = input_type };
+}
+
+fn parseGroupedButtonSpecValue(value: glib.std.json.Value) !GroupedButtonSpec {
+    const object = switch (value) {
+        .object => |object| object,
+        else => return error.ExpectedObject,
+    };
+    return try parseGroupedButtonSpecJsonObject(object);
+}
+
+fn parseGroupedButtonSpecJsonObject(object: glib.std.json.ObjectMap) !GroupedButtonSpec {
+    return .{
+        .button_count = try parseRequiredUsizeFieldValue(
+            object,
+            "button_count",
+            error.MissingGroupedButtonCount,
+            error.ExpectedGroupedButtonCountInteger,
+        ),
+        .input_type = if (object.get("type")) |value|
+            try parseButtonInputTypeValue(value)
+        else
+            ButtonInputType.poll,
+    };
+}
+
+fn parseGroupedButtonSpecSlice(comptime source: []const u8, comptime context: []const u8) GroupedButtonSpec {
+    return .{
+        .button_count = parseRequiredUsizeFieldFromObjectSlice(
+            source,
+            "button_count",
+            context,
+        ),
+        .input_type = parseButtonInputTypeSlice(source),
+    };
+}
+
+fn parseGroupedButtonSpecComptime(comptime value: glib.std.json.Value) GroupedButtonSpec {
+    const object = expectObjectComptime(
+        value,
+        "zux.spec.Component.parseJsonValue grouped_button payload",
+    );
+    return .{
+        .button_count = parseRequiredUsizeFieldComptime(
+            object,
+            "button_count",
+            "zux.spec.Component.parseJsonValue grouped_button payload",
+        ),
+        .input_type = parseButtonInputTypeComptime(object),
+    };
+}
+
+fn parseDisplaySpecValue(value: glib.std.json.Value) !DisplaySpec {
+    return switch (value) {
+        .null => .{},
+        .object => |object| try parseDisplaySpecJsonObject(object),
+        else => error.ExpectedDisplaySpecObject,
+    };
+}
+
+fn parseDisplaySpecJsonObject(object: glib.std.json.ObjectMap) !DisplaySpec {
+    return .{
+        .width = try parseOptionalU16FieldValue(
+            object,
+            "width",
+            320,
+            error.ExpectedDisplayWidthInteger,
+        ),
+        .height = try parseOptionalU16FieldValue(
+            object,
+            "height",
+            240,
+            error.ExpectedDisplayHeightInteger,
+        ),
+    };
+}
+
+fn parseDisplaySpecSlice(comptime source: []const u8, comptime context: []const u8) DisplaySpec {
+    return .{
+        .width = parseOptionalU16FieldFromObjectSlice(source, "width", 320, context),
+        .height = parseOptionalU16FieldFromObjectSlice(source, "height", 240, context),
+    };
+}
+
+fn parseDisplaySpecComptime(comptime value: glib.std.json.Value) DisplaySpec {
+    return switch (value) {
+        .null => .{},
+        .object => |object| .{
+            .width = parseOptionalU16FieldComptime(object, "width", 320, "zux.spec.Component.parseJsonValue display payload"),
+            .height = parseOptionalU16FieldComptime(object, "height", 240, "zux.spec.Component.parseJsonValue display payload"),
+        },
+        else => @compileError("zux.spec.Component display payload must be null or an object"),
+    };
 }
 
 fn parseButtonInputTypeValue(value: glib.std.json.Value) !ButtonInputType {
@@ -1064,19 +1395,7 @@ fn parseKindValueComptime(comptime value: glib.std.json.Value) Kind {
     const payload = entry.value_ptr.*;
 
     if (comptimeEql(kind_name, "grouped_button")) {
-        const payload_object = expectObjectComptime(
-            payload,
-            "zux.spec.Component.parseJsonValue grouped_button payload",
-        );
-        return .{
-            .grouped_button = .{
-                .button_count = parseRequiredUsizeFieldComptime(
-                    payload_object,
-                    "button_count",
-                    "zux.spec.Component.parseJsonValue grouped_button payload",
-                ),
-            },
-        };
+        return .{ .grouped_button = parseGroupedButtonSpecComptime(payload) };
     }
     if (comptimeEql(kind_name, "single_button")) {
         return .{ .single_button = parseButtonSpecComptime(payload) };
@@ -1089,11 +1408,7 @@ fn parseKindValueComptime(comptime value: glib.std.json.Value) Kind {
         return .{ .audio_system = {} };
     }
     if (comptimeEql(kind_name, "display")) {
-        expectEmptyPayloadComptime(
-            payload,
-            "zux.spec.Component.parseJsonValue display payload",
-        );
-        return .{ .display = {} };
+        return .{ .display = parseDisplaySpecComptime(payload) };
     }
     if (comptimeEql(kind_name, "imu")) {
         expectEmptyPayloadComptime(
@@ -1212,6 +1527,20 @@ fn parseRequiredUsizeFieldComptime(
     );
 }
 
+fn parseOptionalU16FieldComptime(
+    comptime object: glib.std.json.ObjectMap,
+    comptime field_name: []const u8,
+    comptime default_value: u16,
+    comptime context: []const u8,
+) u16 {
+    const value = object.get(field_name) orelse return default_value;
+    const parsed = parseU32ValueComptime(value, context ++ " `" ++ field_name ++ "`");
+    if (parsed > glib.std.math.maxInt(u16)) {
+        @compileError(context ++ " `" ++ field_name ++ "` must fit in u16");
+    }
+    return @intCast(parsed);
+}
+
 fn parseNonEmptyStringFieldComptime(
     comptime object: glib.std.json.ObjectMap,
     comptime field_name: []const u8,
@@ -1221,6 +1550,53 @@ fn parseNonEmptyStringFieldComptime(
         object.get(field_name) orelse @compileError(context ++ " requires `" ++ field_name ++ "`"),
         context ++ " `" ++ field_name ++ "`",
     );
+}
+
+fn parseMetadataComptime(
+    comptime value: ?glib.std.json.Value,
+    comptime context: []const u8,
+) Metadata {
+    const metadata_value = value orelse return .{};
+    const object = expectObjectComptime(metadata_value, context);
+
+    var iterator = object.iterator();
+    while (iterator.next()) |entry| {
+        if (!comptimeEql(entry.key_ptr.*, "label_text") and
+            !comptimeEql(entry.key_ptr.*, "item_label_texts"))
+        {
+            @compileError(context ++ " only supports `label_text` and `item_label_texts` fields");
+        }
+    }
+
+    return .{
+        .label_text = if (object.get("label_text")) |label_text|
+            parseNonEmptyStringValueComptime(label_text, context ++ " `label_text`")
+        else
+            null,
+        .item_label_texts = if (object.get("item_label_texts")) |item_label_texts|
+            parseStringListComptime(item_label_texts, context ++ " `item_label_texts`")
+        else
+            &.{},
+    };
+}
+
+fn parseStringListComptime(
+    comptime value: glib.std.json.Value,
+    comptime context: []const u8,
+) []const []const u8 {
+    const array = switch (value) {
+        .array => |array| array,
+        else => @compileError(context ++ " must be a JSON array"),
+    };
+
+    const parsed = comptime blk: {
+        var items: [array.items.len][]const u8 = undefined;
+        for (array.items, 0..) |item, i| {
+            items[i] = parseNonEmptyStringValueComptime(item, context ++ " entry");
+        }
+        break :blk items;
+    };
+    return parsed[0..];
 }
 
 fn parseStringValueComptime(
@@ -1310,6 +1686,30 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 else => return error.ExpectedSingleButtonComponent,
             }
         }
+
+        fn parses_virtual_grouped_button_json_slice(allocator: glib.std.mem.Allocator) !void {
+            const source =
+                \\{
+                \\  "label": "keys",
+                \\  "id": 9,
+                \\  "button_count": 7,
+                \\  "type": "virtual"
+                \\}
+            ;
+
+            var parsed = try parseAllocSliceWithKindPath(allocator, "button/grouped", source);
+            defer parsed.deinit(allocator);
+
+            try grt.std.testing.expectEqualStrings("keys", parsed.label);
+            try grt.std.testing.expectEqual(@as(u32, 9), parsed.id);
+            switch (parsed.kind) {
+                .grouped_button => |grouped| {
+                    try grt.std.testing.expectEqual(@as(usize, 7), grouped.button_count);
+                    try grt.std.testing.expectEqual(ButtonInputType.virtual, grouped.input_type);
+                },
+                else => return error.ExpectedGroupedButtonComponent,
+            }
+        }
     };
 
     const Runner = struct {
@@ -1322,6 +1722,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             _ = self;
 
             TestCase.parses_component_json_slice(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.parses_virtual_grouped_button_json_slice(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

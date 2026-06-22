@@ -1,4 +1,5 @@
 const drivers = @import("drivers");
+const Metadata = @import("../../Metadata.zig");
 const registry_unique = @import("unique.zig");
 
 pub fn make(comptime max_touch: usize) type {
@@ -8,6 +9,7 @@ pub fn make(comptime max_touch: usize) type {
         pub const Periph = struct {
             label: []const u8,
             id: u32,
+            metadata: Metadata,
             control_type: type,
             target: ?[]const u8,
         };
@@ -23,6 +25,16 @@ pub fn make(comptime max_touch: usize) type {
             self: *Self,
             comptime label: anytype,
             comptime id: u32,
+            comptime target: ?[]const u8,
+        ) void {
+            self.addWithMetadata(label, id, Metadata.empty, target);
+        }
+
+        pub fn addWithMetadata(
+            self: *Self,
+            comptime label: anytype,
+            comptime id: u32,
+            comptime metadata: Metadata,
             comptime target: ?[]const u8,
         ) void {
             if (self.len >= max_touch) {
@@ -41,6 +53,7 @@ pub fn make(comptime max_touch: usize) type {
             self.periphs[self.len] = .{
                 .label = label_name,
                 .id = id,
+                .metadata = metadata,
                 .control_type = drivers.Touch,
                 .target = target,
             };

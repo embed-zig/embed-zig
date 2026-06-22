@@ -5,14 +5,12 @@ const gstd = @import("gstd");
 const DisplayApi = embed.drivers.Display;
 
 pub const Display = struct {
-    pub const width_px: u16 = 320;
-    pub const height_px: u16 = 240;
-    const pixel_count = @as(usize, width_px) * @as(usize, height_px);
-
     allocator: glib.std.mem.Allocator,
     mutex: gstd.runtime.sync.Mutex = .{},
+    width_px: u16,
+    height_px: u16,
     pixels: []DisplayApi.Rgb,
-    enabled: bool = false,
+    enabled: bool = true,
     brightness: u8 = 0,
     refresh_count: usize = 0,
     refresh_ctx: ?*anyopaque = null,
@@ -34,11 +32,15 @@ pub const Display = struct {
         refresh_count: usize,
     };
 
-    pub fn init(allocator: glib.std.mem.Allocator) !Display {
+    pub fn init(allocator: glib.std.mem.Allocator, width_px: u16, height_px: u16) !Display {
+        if (width_px == 0 or height_px == 0) return error.InvalidDisplaySize;
+        const pixel_count = @as(usize, width_px) * @as(usize, height_px);
         const pixels = try allocator.alloc(DisplayApi.Rgb, pixel_count);
         for (pixels) |*pixel| pixel.* = DisplayApi.rgb(0, 0, 0);
         return .{
             .allocator = allocator,
+            .width_px = width_px,
+            .height_px = height_px,
             .pixels = pixels,
         };
     }
@@ -61,8 +63,8 @@ pub const Display = struct {
 
         const pixels = try allocator.dupe(DisplayApi.Rgb, self.pixels);
         return .{
-            .width = width_px,
-            .height = height_px,
+            .width = self.width_px,
+            .height = self.height_px,
             .pixels = pixels,
             .refresh_count = self.refresh_count,
         };
@@ -77,12 +79,14 @@ pub const Display = struct {
 
     fn deinitFn(_: *anyopaque) void {}
 
-    fn widthFn(_: *anyopaque) u16 {
-        return width_px;
+    fn widthFn(ptr: *anyopaque) u16 {
+        const self: *Display = @ptrCast(@alignCast(ptr));
+        return self.width_px;
     }
 
-    fn heightFn(_: *anyopaque) u16 {
-        return height_px;
+    fn heightFn(ptr: *anyopaque) u16 {
+        const self: *Display = @ptrCast(@alignCast(ptr));
+        return self.height_px;
     }
 
     fn setEnabledFn(ptr: *anyopaque, enabled: bool) DisplayApi.Error!void {
@@ -90,6 +94,10 @@ pub const Display = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
         self.enabled = enabled;
+        if (!enabled) {
+            for (self.pixels) |*pixel| pixel.* = DisplayApi.rgb(0, 0, 0);
+            self.refresh_count += 1;
+        }
     }
 
     fn enabledFn(ptr: *anyopaque) DisplayApi.Error!bool {
@@ -113,7 +121,12 @@ pub const Display = struct {
         return self.brightness;
     }
 
-    fn drawBitmapFn(
+    fn maxFlushPixelsFn(ptr: *anyopaque) DisplayApi.Error!usize {
+        const self: *Display = @ptrCast(@alignCast(ptr));
+        return @as(usize, self.width_px) * @as(usize, self.height_px);
+    }
+
+    fn flushFn(
         ptr: *anyopaque,
         x: u16,
         y: u16,
@@ -122,7 +135,7 @@ pub const Display = struct {
         pixels: []const DisplayApi.Rgb,
     ) DisplayApi.Error!void {
         const self: *Display = @ptrCast(@alignCast(ptr));
-        if (@as(u32, x) + w > width_px or @as(u32, y) + h > height_px) return error.OutOfBounds;
+        if (@as(u32, x) + w > self.width_px or @as(u32, y) + h > self.height_px) return error.OutOfBounds;
         if (pixels.len < @as(usize, w) * @as(usize, h)) return error.OutOfBounds;
 
         const count = @as(usize, w) * @as(usize, h);
@@ -130,8 +143,10 @@ pub const Display = struct {
             self.mutex.lock();
             defer self.mutex.unlock();
 
+            if (!self.enabled) return;
+
             for (0..h) |row| {
-                const dst_start = (@as(usize, y) + row) * width_px + x;
+                const dst_start = (@as(usize, y) + row) * self.width_px + x;
                 const src_start = row * w;
                 @memcpy(
                     self.pixels[dst_start .. dst_start + w],
@@ -168,7 +183,8 @@ pub const Display = struct {
         .enabled = enabledFn,
         .setBrightness = setBrightnessFn,
         .brightness = brightnessFn,
-        .drawBitmap = drawBitmapFn,
+        .maxFlushPixels = maxFlushPixelsFn,
+        .flush = flushFn,
     };
 };
 
@@ -181,7 +197,7 @@ pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
 
         pub fn run(self: *@This(), t: *glib.testing.T, allocator: std.mem.Allocator) bool {
             _ = self;
-            var display = Display.init(allocator) catch |err| {
+            var display = Display.init(allocator, 240, 240) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
@@ -207,7 +223,15 @@ pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            std.testing.expectEqual(DisplayApi.rgb(1, 2, 3), snapshot.pixels[@as(usize, Display.width_px) + 1]) catch |err| {
+            std.testing.expectEqual(@as(u16, 240), snapshot.width) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            std.testing.expectEqual(@as(u16, 240), snapshot.height) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            std.testing.expectEqual(DisplayApi.rgb(1, 2, 3), snapshot.pixels[@as(usize, snapshot.width) + 1]) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

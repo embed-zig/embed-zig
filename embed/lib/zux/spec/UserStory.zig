@@ -3,6 +3,7 @@ const JsonParser = @import("JsonParser.zig");
 const TestAudioSystem = @import("TestAudioSystem.zig");
 const TestDisplay = @import("TestDisplay.zig");
 const TestSwitch = @import("TestSwitch.zig");
+const ledstrip_event = @import("../component/ledstrip/event.zig");
 const UserStory = @This();
 
 pub const Step = struct {
@@ -117,7 +118,7 @@ pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *Zux
                     tick_seq.* +%= 1;
                     timestamp.* = glib.time.instant.add(timestamp.*, tick.interval);
 
-                    runner.app.dispatch(.{
+                    _ = try runner.app.dispatch(.{
                         .origin = .timer,
                         .timestamp = timestamp.*,
                         .body = .{
@@ -125,7 +126,7 @@ pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *Zux
                                 .seq = tick_seq.*,
                             },
                         },
-                    }) catch |err| return err;
+                    });
                     runner.app.store.tick();
                 }
             }
@@ -334,11 +335,6 @@ pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *Zux
                         ledStripFrame(value.pixels),
                         value.brightness,
                     );
-                    try runner.app.dispatch(.{
-                        .origin = .manual,
-                        .timestamp = timestamp,
-                        .body = event,
-                    });
                 },
                 .display_set => |value| {
                     try runner.app.set_display(
@@ -400,11 +396,11 @@ pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *Zux
                     );
                 },
                 else => {
-                    runner.app.dispatch(.{
+                    _ = try runner.app.dispatch(.{
                         .origin = .manual,
                         .timestamp = timestamp,
                         .body = event,
-                    }) catch |err| return err;
+                    });
                 },
             }
         }
@@ -466,9 +462,10 @@ pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *Zux
 
         fn ledStripFrame(pixels: anytype) ZuxApp.FrameType {
             var frame: ZuxApp.FrameType = .{};
-            const count = @min(frame.pixels.len, pixels.len);
+            const source = if (@hasDecl(@TypeOf(pixels), "slice")) pixels.slice() else pixels[0..];
+            const count = @min(frame.pixels.len, source.len);
             for (0..count) |i| {
-                frame.pixels[i] = pixels[i];
+                frame.pixels[i] = source[i];
             }
             return frame;
         }
@@ -752,7 +749,7 @@ fn validateCreateTestRunnerApp(comptime ZuxApp: type) void {
         if (!@hasDecl(ZuxApp.Store, "Stores")) {
             @compileError("zux.spec.UserStory.createTestRunner requires ZuxApp.Store.Stores");
         }
-        _ = @as(*const fn (*ZuxApp, ZuxApp.Message) anyerror!void, &ZuxApp.dispatch);
+        _ = @as(*const fn (*ZuxApp, ZuxApp.Message) anyerror!bool, &ZuxApp.dispatch);
         _ = @as(*const fn (*ZuxApp, ZuxApp.StartConfig) anyerror!void, &ZuxApp.start);
         _ = @as(*const fn (*ZuxApp) anyerror!void, &ZuxApp.stop);
     }
@@ -765,6 +762,10 @@ fn decodeJsonValue(
 ) !T {
     comptime {
         @setEvalBranchQuota(20_000);
+    }
+
+    if (T == ledstrip_event.OwnedPixels) {
+        return try decodeLedStripPixels(allocator, value);
     }
 
     return switch (@typeInfo(T)) {
@@ -928,6 +929,26 @@ fn decodeJsonValue(
         },
 
         else => error.UnsupportedJsonType,
+    };
+}
+
+fn decodeLedStripPixels(
+    allocator: glib.std.mem.Allocator,
+    value: glib.std.json.Value,
+) !ledstrip_event.OwnedPixels {
+    const array = switch (value) {
+        .array => |array| array,
+        else => return error.ExpectedArray,
+    };
+
+    var pixels = try allocator.alloc(ledstrip_event.OwnedPixels.Color, array.items.len);
+    errdefer allocator.free(pixels);
+    for (array.items, 0..) |item, i| {
+        pixels[i] = try decodeJsonValue(ledstrip_event.OwnedPixels.Color, allocator, item);
+    }
+    return .{
+        .allocator = allocator,
+        .items = pixels,
     };
 }
 
@@ -1100,6 +1121,11 @@ fn freeDecodedValue(
     allocator: glib.std.mem.Allocator,
     value: *const T,
 ) void {
+    if (T == ledstrip_event.OwnedPixels) {
+        value.*.deinit();
+        return;
+    }
+
     switch (@typeInfo(T)) {
         .void, .bool, .int, .float, .@"enum" => {},
 

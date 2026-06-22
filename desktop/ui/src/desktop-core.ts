@@ -3,18 +3,25 @@ import { openEvents, type RuntimeEvent } from './api/events.ts';
 import type {
   DisplayState,
   EmitAck,
+  GroupedButtonState,
   LedStripState,
   SingleButtonState,
   StateResponse,
 } from './api/generated/types.gen';
 
 export type DesktopInputEvent = 'press' | 'release' | 'down' | 'move' | 'up';
+export type DesktopEmitOptions = {
+  point?: { x: number; y: number };
+  buttonId?: number;
+};
 
 type GearState =
   | SingleButtonState
+  | GroupedButtonState
   | LedStripState
   | DisplayState
   | { SingleButtonState: SingleButtonState }
+  | { GroupedButtonState: GroupedButtonState }
   | { LedStripState: LedStripState }
   | { DisplayState: DisplayState };
 
@@ -24,7 +31,7 @@ export interface DesktopController {
   emit(
     gearLabel: string,
     event: DesktopInputEvent,
-    point?: { x: number; y: number },
+    options?: DesktopEmitOptions,
   ): Promise<EmitAck>;
   dispose(): void;
 }
@@ -42,6 +49,25 @@ export async function createDesktopController(
   const listeners = new Set<(state: StateResponse) => void>();
 
   let state = await getState();
+  let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+  async function refreshState(): Promise<void> {
+    state = await getState();
+    for (const listener of listeners) {
+      listener(state);
+    }
+  }
+
+  function scheduleRefresh(): void {
+    if (refreshTimer != null) {
+      clearTimeout(refreshTimer);
+    }
+    refreshTimer = setTimeout(() => {
+      refreshTimer = null;
+      void refreshState();
+    }, 120);
+  }
+
   const events = openEvents((event) => {
     options.onEvent?.(event);
     if (event.event !== 'state.snapshot') return;
@@ -61,16 +87,24 @@ export async function createDesktopController(
         listeners.delete(listener);
       };
     },
-    emit(gearLabel, event, point) {
-      return emitInputEvent({
+    async emit(gearLabel, event, options) {
+      const ack = await emitInputEvent({
         event,
         gearLabel,
         ts: now(),
-        x: point?.x,
-        y: point?.y,
+        buttonId: options?.buttonId,
+        x: options?.point?.x,
+        y: options?.point?.y,
       });
+      await refreshState();
+      scheduleRefresh();
+      return ack;
     },
     dispose() {
+      if (refreshTimer != null) {
+        clearTimeout(refreshTimer);
+        refreshTimer = null;
+      }
       listeners.clear();
       events.abort();
     },
@@ -91,6 +125,18 @@ export function getSingleButtonStates(state: StateResponse): SingleButtonState[]
 
 export function getSingleButtonState(state: StateResponse): SingleButtonState | undefined {
   return getSingleButtonStates(state)[0];
+}
+
+export function getGroupedButtonStates(state: StateResponse): GroupedButtonState[] {
+  const buttons: GroupedButtonState[] = [];
+  for (const gear of state.gears as GearState[]) {
+    if ('GroupedButtonState' in gear) {
+      buttons.push(gear.GroupedButtonState);
+    } else if ('kind' in gear && gear.kind === 'grouped_button') {
+      buttons.push(gear);
+    }
+  }
+  return buttons;
 }
 
 export function getLedStripState(state: StateResponse): LedStripState | undefined {

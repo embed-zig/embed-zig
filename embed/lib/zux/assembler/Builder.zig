@@ -1,6 +1,7 @@
 const glib = @import("glib");
 const bt = @import("bt");
 const drivers = @import("drivers");
+const nfc_api = @import("nfc");
 const ledstrip = @import("ledstrip");
 const modem_api = drivers;
 
@@ -177,7 +178,7 @@ pub fn build(builder: root, comptime context: anytype) type {
         pipeline: *BuiltPipeline,
 
         pub fn emit(self: *@This(), message: Message) !void {
-            try self.pipeline.inject(message);
+            _ = try self.pipeline.inject(message);
         }
     };
     const StoreReducerType = store.Reducer.make(StoreType);
@@ -277,6 +278,7 @@ pub fn build(builder: root, comptime context: anytype) type {
             switch (message.body) {
                 .nfc_found,
                 .nfc_read,
+                .nfc_lost,
                 => {
                     inline for (0..nfc_count) |i| {
                         const periph = nfc_registry.periphs[i];
@@ -286,6 +288,9 @@ pub fn build(builder: root, comptime context: anytype) type {
                                 message,
                                 emit,
                             );
+                            if (self.out) |out| {
+                                try out.emit(message);
+                            }
                             return;
                         }
                     }
@@ -328,6 +333,7 @@ pub fn build(builder: root, comptime context: anytype) type {
                 .modem_sim_state_changed,
                 .modem_network_registration_changed,
                 .modem_network_signal_changed,
+                .modem_identity_changed,
                 .modem_data_packet_state_changed,
                 .modem_data_apn_changed,
                 .modem_call_incoming,
@@ -385,6 +391,7 @@ pub fn build(builder: root, comptime context: anytype) type {
             const emit = self.out orelse Emitter.init(&noop);
             switch (message.body) {
                 .wifi_sta_scan_result,
+                .wifi_sta_connecting,
                 .wifi_sta_connected,
                 .wifi_sta_disconnected,
                 .wifi_sta_got_ip,
@@ -956,6 +963,7 @@ pub fn build(builder: root, comptime context: anytype) type {
 
                 inline for (0..adc_count) |i| {
                     const periph = adc_registry.periphs[i];
+                    if (comptime isVirtualPeriph(periph)) continue;
                     const label_name = comptime periphLabel(periph);
                     const ButtonType = @TypeOf(@field(runtime.grouped_buttons, label_name));
                     if (comptime ButtonType == drivers.button.Grouped) {
@@ -1122,8 +1130,11 @@ pub fn build(builder: root, comptime context: anytype) type {
                 var grouped_buttons: GroupedButtonInstances = undefined;
                 inline for (0..adc_count) |i| {
                     const periph = adc_registry.periphs[i];
+                    if (comptime isVirtualPeriph(periph)) continue;
                     const label_name = comptime periphLabel(periph);
-                    @field(grouped_buttons, label_name) = @field(init_config, label_name);
+                    if (@hasField(GroupedButtonInstances, label_name)) {
+                        @field(grouped_buttons, label_name) = @field(init_config, label_name);
+                    }
                 }
                 return grouped_buttons;
             }
@@ -1417,7 +1428,6 @@ pub fn build(builder: root, comptime context: anytype) type {
             fn reduce(stores: *StoreType.Stores, message: Message, emit: Emitter) !void {
                 switch (message.body) {
                     .ledstrip_set,
-                    .ledstrip_set_pixels,
                     .ledstrip_flash,
                     .ledstrip_pingpong,
                     .ledstrip_rotate,
@@ -1429,7 +1439,16 @@ pub fn build(builder: root, comptime context: anytype) type {
                                 return;
                             }
                         }
-                        try emit.emit(message);
+                        return;
+                    },
+                    .ledstrip_set_pixels => |event| {
+                        inline for (0..ledstrip_count) |i| {
+                            const periph = ledstrip_registry.periphs[i];
+                            if (event.source_id == periphIdForRecord(periph)) {
+                                try LedStripReducerType.reduce(&@field(stores, periphLabel(periph)), message, emit);
+                                return;
+                            }
+                        }
                         return;
                     },
                     .tick => {
@@ -1613,23 +1632,28 @@ pub fn build(builder: root, comptime context: anytype) type {
             self.closed = true;
         }
 
-        pub fn dispatch(self: *Self, message: Message) !void {
+        pub fn dispatch(self: *Self, message: Message) !bool {
             if (!self.started.load(.acquire)) {
                 message.deinit();
                 return error.NotStarted;
             }
 
-            if (message.body == .custom) {
-                self.last_event = null;
-            } else {
-                self.last_event = message.body;
-            }
+            self.last_event = switch (message.body) {
+                .custom,
+                .ledstrip_set,
+                .ledstrip_set_pixels,
+                .ledstrip_flash,
+                .ledstrip_pingpong,
+                .ledstrip_rotate,
+                => null,
+                else => message.body,
+            };
             if (self.manual_ticker) {
                 defer message.deinit();
                 try self.runtime.root.process(message);
-                return;
+                return true;
             }
-            try self.runtime.pipeline.inject(message);
+            return try self.runtime.pipeline.inject(message);
         }
 
         pub fn press_single_button(self: *Self, label: PeriphLabel) !void {
@@ -1768,6 +1792,19 @@ pub fn build(builder: root, comptime context: anytype) type {
             }));
         }
 
+        pub fn modem_identity_changed(self: *Self, label: PeriphLabel, imei: []const u8, imsi: []const u8) !void {
+            if (dispatchKind(label) != .modem) return error.InvalidPeriphKind;
+            try self.emitBody(.{
+                .modem_identity_changed = .{
+                    .source_id = periphId(label),
+                    .imei_end = try component_modem.event.copyIdentityLen(imei),
+                    .imei_buf = try component_modem.event.copyIdentityBuf(imei),
+                    .imsi_end = try component_modem.event.copyIdentityLen(imsi),
+                    .imsi_buf = try component_modem.event.copyIdentityBuf(imsi),
+                },
+            });
+        }
+
         pub fn modem_data_packet_state_changed(self: *Self, label: PeriphLabel, packet: modem_api.Modem.PacketState) !void {
             if (dispatchKind(label) != .modem) return error.InvalidPeriphKind;
             try self.emitBody(try component_modem.event.make(Message.Event, periphId(label), .{
@@ -1843,13 +1880,17 @@ pub fn build(builder: root, comptime context: anytype) type {
         pub fn set_led_strip_pixels(self: *Self, label: PeriphLabel, frame: FrameType, brightness: u8) !void {
             if (comptime periph_ids.len == 0) return error.InvalidPeriphKind;
             if (dispatchKind(label) != .led_strip) return error.InvalidPeriphKind;
+            var pixels = try ledstrip_component.event.OwnedPixels.fromFrame(self.runtime.allocator, frame);
+            var owns_pixels = true;
+            errdefer if (owns_pixels) pixels.deinit();
             try self.emitBody(.{
                 .ledstrip_set_pixels = .{
                     .source_id = periphId(label),
-                    .pixels = frame.pixels[0..],
+                    .pixels = pixels,
                     .brightness = brightness,
                 },
             });
+            owns_pixels = false;
         }
 
         pub fn flush_led_strip_pixels(self: *Self, label: PeriphLabel, frame: FrameType, brightness: u8) !void {
@@ -1877,14 +1918,18 @@ pub fn build(builder: root, comptime context: anytype) type {
         ) !void {
             if (comptime periph_ids.len == 0) return error.InvalidPeriphKind;
             if (dispatchKind(label) != .led_strip) return error.InvalidPeriphKind;
+            var pixels = try ledstrip_component.event.OwnedPixels.fromFrame(self.runtime.allocator, frame);
+            var owns_pixels = true;
+            errdefer if (owns_pixels) pixels.deinit();
             try self.emitBody(.{
                 .ledstrip_set = .{
                     .source_id = periphId(label),
-                    .pixels = frame.pixels[0..],
+                    .pixels = pixels,
                     .brightness = brightness,
                     .duration = duration,
                 },
             });
+            owns_pixels = false;
         }
 
         pub fn set_led_strip_flash(
@@ -1897,15 +1942,19 @@ pub fn build(builder: root, comptime context: anytype) type {
         ) !void {
             if (comptime periph_ids.len == 0) return error.InvalidPeriphKind;
             if (dispatchKind(label) != .led_strip) return error.InvalidPeriphKind;
+            var pixels = try ledstrip_component.event.OwnedPixels.fromFrame(self.runtime.allocator, frame);
+            var owns_pixels = true;
+            errdefer if (owns_pixels) pixels.deinit();
             try self.emitBody(.{
                 .ledstrip_flash = .{
                     .source_id = periphId(label),
-                    .pixels = frame.pixels[0..],
+                    .pixels = pixels,
                     .brightness = brightness,
                     .duration = duration,
                     .interval = interval,
                 },
             });
+            owns_pixels = false;
         }
 
         pub fn set_led_strip_pingpong(
@@ -1919,16 +1968,24 @@ pub fn build(builder: root, comptime context: anytype) type {
         ) !void {
             if (comptime periph_ids.len == 0) return error.InvalidPeriphKind;
             if (dispatchKind(label) != .led_strip) return error.InvalidPeriphKind;
+            var from_pixels = try ledstrip_component.event.OwnedPixels.fromFrame(self.runtime.allocator, from_frame);
+            var owns_from_pixels = true;
+            errdefer if (owns_from_pixels) from_pixels.deinit();
+            var to_pixels = try ledstrip_component.event.OwnedPixels.fromFrame(self.runtime.allocator, to_frame);
+            var owns_to_pixels = true;
+            errdefer if (owns_to_pixels) to_pixels.deinit();
             try self.emitBody(.{
                 .ledstrip_pingpong = .{
                     .source_id = periphId(label),
-                    .from_pixels = from_frame.pixels[0..],
-                    .to_pixels = to_frame.pixels[0..],
+                    .from_pixels = from_pixels,
+                    .to_pixels = to_pixels,
                     .brightness = brightness,
                     .duration = duration,
                     .interval = interval,
                 },
             });
+            owns_from_pixels = false;
+            owns_to_pixels = false;
         }
 
         pub fn set_led_strip_rotate(
@@ -1941,15 +1998,19 @@ pub fn build(builder: root, comptime context: anytype) type {
         ) !void {
             if (comptime periph_ids.len == 0) return error.InvalidPeriphKind;
             if (dispatchKind(label) != .led_strip) return error.InvalidPeriphKind;
+            var pixels = try ledstrip_component.event.OwnedPixels.fromFrame(self.runtime.allocator, frame);
+            var owns_pixels = true;
+            errdefer if (owns_pixels) pixels.deinit();
             try self.emitBody(.{
                 .ledstrip_rotate = .{
                     .source_id = periphId(label),
-                    .pixels = frame.pixels[0..],
+                    .pixels = pixels,
                     .brightness = brightness,
                     .duration = duration,
                     .interval = interval,
                 },
             });
+            owns_pixels = false;
         }
 
         pub fn set_switch(self: *Self, label: PeriphLabel, enabled: bool) !void {
@@ -2030,12 +2091,24 @@ pub fn build(builder: root, comptime context: anytype) type {
                 if (label == @field(PeriphLabel, periphLabel(periph))) {
                     const sta = @field(self.runtime.wifi_stas, periphLabel(periph));
                     try sta.connect(config);
-                    try self.wifi_sta_connected(label, .{
-                        .ssid = config.ssid,
-                    });
+                    try self.wifi_sta_connecting(label);
                     if (sta.getIpInfo()) |ip_info| {
                         try self.wifi_sta_got_ip(label, ip_info);
                     }
+                    return;
+                }
+            }
+            return error.InvalidPeriphKind;
+        }
+
+        pub fn set_wifi_sta_power_save(self: *Self, label: PeriphLabel, mode: drivers.wifi.Sta.PowerSave) !void {
+            if (comptime periph_ids.len == 0) return error.InvalidPeriphKind;
+            if (dispatchKind(label) != .wifi_sta) return error.InvalidPeriphKind;
+            inline for (0..wifi_sta_count) |i| {
+                const periph = wifi_sta_registry.periphs[i];
+                if (label == @field(PeriphLabel, periphLabel(periph))) {
+                    const sta = @field(self.runtime.wifi_stas, periphLabel(periph));
+                    try sta.setPowerSave(mode);
                     return;
                 }
             }
@@ -2058,7 +2131,63 @@ pub fn build(builder: root, comptime context: anytype) type {
             return error.InvalidPeriphKind;
         }
 
-        pub fn nfc_found(self: *Self, label: PeriphLabel, uid: []const u8, card_type: drivers.nfc.CardType) !void {
+        pub fn start_wifi_sta_scan(self: *Self, label: PeriphLabel, config: drivers.wifi.Sta.ScanConfig) !void {
+            if (comptime periph_ids.len == 0) return error.InvalidPeriphKind;
+            if (dispatchKind(label) != .wifi_sta) return error.InvalidPeriphKind;
+            inline for (0..wifi_sta_count) |i| {
+                const periph = wifi_sta_registry.periphs[i];
+                if (label == @field(PeriphLabel, periphLabel(periph))) {
+                    const sta = @field(self.runtime.wifi_stas, periphLabel(periph));
+                    try sta.startScan(config);
+                    return;
+                }
+            }
+            return error.InvalidPeriphKind;
+        }
+
+        pub fn stop_wifi_sta_scan(self: *Self, label: PeriphLabel) !void {
+            if (comptime periph_ids.len == 0) return error.InvalidPeriphKind;
+            if (dispatchKind(label) != .wifi_sta) return error.InvalidPeriphKind;
+            inline for (0..wifi_sta_count) |i| {
+                const periph = wifi_sta_registry.periphs[i];
+                if (label == @field(PeriphLabel, periphLabel(periph))) {
+                    const sta = @field(self.runtime.wifi_stas, periphLabel(periph));
+                    sta.stopScan();
+                    return;
+                }
+            }
+            return error.InvalidPeriphKind;
+        }
+
+        pub fn start_nfc_scan(self: *Self, label: PeriphLabel, config: nfc_api.ScanConfig) !void {
+            if (comptime periph_ids.len == 0) return error.InvalidPeriphKind;
+            if (dispatchKind(label) != .nfc) return error.InvalidPeriphKind;
+            inline for (0..nfc_count) |i| {
+                const periph = nfc_registry.periphs[i];
+                if (label == @field(PeriphLabel, periphLabel(periph))) {
+                    const reader = @field(self.runtime.nfcs, periphLabel(periph));
+                    try reader.startScan(config);
+                    return;
+                }
+            }
+            return error.InvalidPeriphKind;
+        }
+
+        pub fn stop_nfc_scan(self: *Self, label: PeriphLabel) !void {
+            if (comptime periph_ids.len == 0) return error.InvalidPeriphKind;
+            if (dispatchKind(label) != .nfc) return error.InvalidPeriphKind;
+            inline for (0..nfc_count) |i| {
+                const periph = nfc_registry.periphs[i];
+                if (label == @field(PeriphLabel, periphLabel(periph))) {
+                    const reader = @field(self.runtime.nfcs, periphLabel(periph));
+                    reader.stopScan();
+                    return;
+                }
+            }
+            return error.InvalidPeriphKind;
+        }
+
+        pub fn nfc_found(self: *Self, label: PeriphLabel, uid: []const u8, card_type: nfc_api.CardType) !void {
             if (dispatchKind(label) != .nfc) return error.InvalidPeriphKind;
             try self.emitBody(try component_nfc.event.make(Message.Event, .{
                 .source_id = periphId(label),
@@ -2073,7 +2202,7 @@ pub fn build(builder: root, comptime context: anytype) type {
             label: PeriphLabel,
             uid: []const u8,
             payload: []const u8,
-            card_type: drivers.nfc.CardType,
+            card_type: nfc_api.CardType,
         ) !void {
             if (dispatchKind(label) != .nfc) return error.InvalidPeriphKind;
             try self.emitBody(try component_nfc.event.make(Message.Event, .{
@@ -2091,6 +2220,15 @@ pub fn build(builder: root, comptime context: anytype) type {
                     .scan_result = report,
                 },
             }));
+        }
+
+        pub fn wifi_sta_connecting(self: *Self, label: PeriphLabel) !void {
+            if (dispatchKind(label) != .wifi_sta) return error.InvalidPeriphKind;
+            try self.emitBody(.{
+                .wifi_sta_connecting = .{
+                    .source_id = periphId(label),
+                },
+            });
         }
 
         pub fn wifi_sta_connected(self: *Self, label: PeriphLabel, info: drivers.wifi.Sta.LinkInfo) !void {
@@ -2207,6 +2345,36 @@ pub fn build(builder: root, comptime context: anytype) type {
             @panic("zux app has no bt host for label");
         }
 
+        pub fn wifiSta(self: *Self, label: PeriphLabel) drivers.wifi.Sta {
+            inline for (0..wifi_sta_count) |i| {
+                const wifi_record = wifi_sta_registry.periphs[i];
+                if (label == @field(PeriphLabel, periphLabel(wifi_record))) {
+                    return @field(self.runtime.wifi_stas, periphLabel(wifi_record));
+                }
+            }
+            @panic("zux app has no wifi sta for label");
+        }
+
+        pub fn modem(self: *Self, label: PeriphLabel) drivers.Modem {
+            inline for (0..modem_count) |i| {
+                const modem_record = modem_registry.periphs[i];
+                if (label == @field(PeriphLabel, periphLabel(modem_record))) {
+                    return @field(self.runtime.modems, periphLabel(modem_record));
+                }
+            }
+            @panic("zux app has no modem for label");
+        }
+
+        pub fn nfc(self: *Self, label: PeriphLabel) nfc_api.Reader {
+            inline for (0..nfc_count) |i| {
+                const nfc_record = nfc_registry.periphs[i];
+                if (label == @field(PeriphLabel, periphLabel(nfc_record))) {
+                    return @field(self.runtime.nfcs, periphLabel(nfc_record));
+                }
+            }
+            @panic("zux app has no nfc reader for label");
+        }
+
         pub fn display(self: *Self, label: PeriphLabel) drivers.Display {
             inline for (0..display_count) |i| {
                 const display_record = display_registry.periphs[i];
@@ -2248,7 +2416,7 @@ pub fn build(builder: root, comptime context: anytype) type {
         }
 
         fn emitBody(self: *Self, body: Message.Event) !void {
-            try self.dispatch(.{
+            _ = try self.dispatch(.{
                 .origin = .manual,
                 .timestamp = Lib.time.instant.now(),
                 .body = body,
@@ -3029,7 +3197,7 @@ fn dispatchKindForRecord(comptime periph: anytype) PeriphDispatchKind {
     if (ControlType == @import("drivers").imu) return .imu;
     if (ControlType == ledstrip.LedStrip) return .led_strip;
     if (ControlType == modem_api.Modem) return .modem;
-    if (ControlType == @import("drivers").nfc.Reader) return .nfc;
+    if (ControlType == @import("nfc").Reader) return .nfc;
     if (ControlType == @import("drivers").Switch) return .switch_output;
     if (ControlType == @import("drivers").Pwm) return .pwm;
     if (ControlType == @import("drivers").Touch) return .touch;
@@ -3082,6 +3250,7 @@ fn messageSourceId(message: Message) u32 {
         .modem_sim_state_changed => |event| event.source_id,
         .modem_network_registration_changed => |event| event.source_id,
         .modem_network_signal_changed => |event| event.source_id,
+        .modem_identity_changed => |event| event.source_id,
         .modem_data_packet_state_changed => |event| event.source_id,
         .modem_data_apn_changed => |event| event.source_id,
         .modem_call_incoming => |event| event.source_id,
@@ -3092,8 +3261,10 @@ fn messageSourceId(message: Message) u32 {
         .modem_gnss_fix_changed => |event| event.source_id,
         .nfc_found => |event| event.source_id,
         .nfc_read => |event| event.source_id,
+        .nfc_lost => |event| event.source_id,
         .raw_touch => |event| event.source_id,
         .wifi_sta_scan_result => |event| event.source_id,
+        .wifi_sta_connecting => |event| event.source_id,
         .wifi_sta_connected => |event| event.source_id,
         .wifi_sta_disconnected => |event| event.source_id,
         .wifi_sta_got_ip => |event| event.source_id,

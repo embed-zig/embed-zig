@@ -158,6 +158,15 @@ pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
                     self.strip.setPixel(0, embed.ledstrip.Color.green);
                     self.strip.refresh();
                 }
+
+                pub fn press_grouped_button(_: *@This(), label: PeriphLabel, button_id: u32) !void {
+                    if (label != .button) return error.InvalidPeriphKind;
+                    _ = button_id;
+                }
+
+                pub fn release_grouped_button(_: *@This(), label: PeriphLabel) !void {
+                    if (label != .button) return error.InvalidPeriphKind;
+                }
             };
 
             const FakeZuxAppHost = struct {

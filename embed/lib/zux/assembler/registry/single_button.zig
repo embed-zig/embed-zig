@@ -1,4 +1,5 @@
 const drivers = @import("drivers");
+const Metadata = @import("../../Metadata.zig");
 const registry_unique = @import("unique.zig");
 
 pub const InputType = enum {
@@ -13,6 +14,7 @@ pub fn make(comptime max_single_buttons: usize) type {
         pub const Periph = struct {
             label: []const u8,
             id: u32,
+            metadata: Metadata,
             control_type: type,
             input_type: InputType,
         };
@@ -29,7 +31,16 @@ pub fn make(comptime max_single_buttons: usize) type {
             comptime label: anytype,
             comptime id: u32,
         ) void {
-            self.addWithInputType(label, id, .poll);
+            self.addWithMetadata(label, id, Metadata.empty);
+        }
+
+        pub fn addWithMetadata(
+            self: *Self,
+            comptime label: anytype,
+            comptime id: u32,
+            comptime metadata: Metadata,
+        ) void {
+            self.addWithInputType(label, id, metadata, .poll);
         }
 
         pub fn addVirtual(
@@ -37,13 +48,23 @@ pub fn make(comptime max_single_buttons: usize) type {
             comptime label: anytype,
             comptime id: u32,
         ) void {
-            self.addWithInputType(label, id, .virtual);
+            self.addVirtualWithMetadata(label, id, Metadata.empty);
+        }
+
+        pub fn addVirtualWithMetadata(
+            self: *Self,
+            comptime label: anytype,
+            comptime id: u32,
+            comptime metadata: Metadata,
+        ) void {
+            self.addWithInputType(label, id, metadata, .virtual);
         }
 
         fn addWithInputType(
             self: *Self,
             comptime label: anytype,
             comptime id: u32,
+            comptime metadata: Metadata,
             comptime input_type: InputType,
         ) void {
             if (self.len >= max_single_buttons) {
@@ -62,6 +83,7 @@ pub fn make(comptime max_single_buttons: usize) type {
             self.periphs[self.len] = .{
                 .label = label_name,
                 .id = id,
+                .metadata = metadata,
                 .control_type = drivers.button.Single,
                 .input_type = input_type,
             };

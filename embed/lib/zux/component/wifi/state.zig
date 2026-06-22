@@ -1,10 +1,22 @@
 const wifi_event = @import("event.zig");
+const glib = @import("glib");
 
 pub const Sta = struct {
+    pub const Status = enum {
+        disconnected,
+        connecting,
+        connected,
+        online,
+    };
+
     source_id: u32 = 0,
+    status: Status = .disconnected,
     scanning: bool = false,
     connected: bool = false,
     has_ip: bool = false,
+    connected_at: glib.time.instant.Time = 0,
+    connect_timeout: bool = false,
+    reconnect_at: glib.time.instant.Time = 0,
     ssid_end: u8 = 0,
     ssid_buf: [wifi_event.max_ssid_len]u8 = [_]u8{0} ** wifi_event.max_ssid_len,
     bssid: ?wifi_event.MacAddr = null,

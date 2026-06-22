@@ -259,7 +259,7 @@ fn forward(self: *Reducer, message: Message) !void {
 
 pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn rawSingleButtonClickEmitsCountAfterTick() !void {
+        fn rawSingleButtonClickEmitsCountOnRelease() !void {
             const Collector = struct {
                 count: usize = 0,
                 last_click_count: u16 = 0,
@@ -303,6 +303,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             });
+            const before_release_count = collector.count;
             try detector.process(.{
                 .origin = .source,
                 .timestamp = 20,
@@ -313,6 +314,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             });
+            try grt.std.testing.expectEqual(before_release_count + 1, collector.count);
             try detector.process(.{
                 .origin = .timer,
                 .timestamp = glib.time.instant.add(20, default_multi_click_window),
@@ -326,13 +328,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(@as(glib.time.duration.Duration, 0), collector.last_long_press);
             try grt.std.testing.expectEqual(@as(?u32, null), collector.last_button_id);
             try grt.std.testing.expectEqual(@as(glib.time.instant.Time, 10), collector.last_pressed_at);
-            try grt.std.testing.expectEqual(
-                glib.time.instant.add(20, default_multi_click_window),
-                collector.last_timestamp,
-            );
+            try grt.std.testing.expectEqual(@as(glib.time.instant.Time, 20), collector.last_timestamp);
         }
 
-        fn rawGroupedButtonFourClicksEmitClickCount() !void {
+        fn rawGroupedButtonFourClicksEmitCumulativeClickCounts() !void {
             const Collector = struct {
                 last_click_count: u16 = 0,
                 last_button_id: ?u32 = null,
@@ -363,7 +362,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var detector = detector_impl.node();
             detector.bindOutput(Emitter.init(&collector));
 
-            inline for ([_]glib.time.instant.Time{ 10, 30, 50, 70 }) |start| {
+            inline for ([_]glib.time.instant.Time{ 10, 30, 50, 70 }, 1..) |start, expected_count| {
                 try detector.process(.{
                     .origin = .source,
                     .timestamp = start,
@@ -386,6 +385,8 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                         },
                     },
                 });
+                try grt.std.testing.expectEqual(@as(u16, @intCast(expected_count)), collector.last_click_count);
+                try grt.std.testing.expectEqual(@as(usize, expected_count), collector.count);
             }
             try detector.process(.{
                 .origin = .timer,
@@ -398,7 +399,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(@as(u16, 4), collector.last_click_count);
             try grt.std.testing.expectEqual(@as(?u32, 3), collector.last_button_id);
             try grt.std.testing.expectEqual(@as(glib.time.instant.Time, 10), collector.last_pressed_at);
-            try grt.std.testing.expectEqual(@as(usize, 1), collector.count);
+            try grt.std.testing.expectEqual(@as(usize, 4), collector.count);
         }
 
         fn longPressEmitsUpdatedDuration() !void {
@@ -697,11 +698,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             _ = self;
             _ = allocator;
 
-            TestCase.rawSingleButtonClickEmitsCountAfterTick() catch |err| {
+            TestCase.rawSingleButtonClickEmitsCountOnRelease() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.rawGroupedButtonFourClicksEmitClickCount() catch |err| {
+            TestCase.rawGroupedButtonFourClicksEmitCumulativeClickCounts() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

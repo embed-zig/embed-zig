@@ -1,5 +1,6 @@
 const audio = @import("audio");
 const component_audio_system = @import("../component/audio_system.zig");
+const glib = @import("glib");
 
 const TestAudioSystem = @This();
 
@@ -37,6 +38,7 @@ pub const Track = struct {
         self.owner.state.writes += 1;
         self.owner.state.last_write_rate = format.rate;
         self.owner.state.last_write_samples = samples.len;
+        _ = durationForSamples(samples.len, format.rate);
     }
 
     pub fn deinit(_: *@This()) void {}
@@ -92,4 +94,12 @@ pub fn setMicGains(self: *TestAudioSystem, gains_db: []const ?i8) !void {
 pub fn spkSampleRate(self: *TestAudioSystem) !u32 {
     self.state.sample_rate_requests += 1;
     return 16_000;
+}
+
+fn durationForSamples(sample_count: usize, sample_rate: u32) glib.time.duration.Duration {
+    if (sample_count == 0 or sample_rate == 0) return 0;
+
+    const duration_128 = (@as(u128, @intCast(sample_count)) * @as(u128, @intCast(glib.time.duration.Second))) /
+        @as(u128, sample_rate);
+    return @intCast(@min(duration_128, @as(u128, @intCast(glib.time.duration.Maximum))));
 }

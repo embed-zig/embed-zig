@@ -14,7 +14,6 @@ pub fn init() StaReducer {
 
 pub fn reduce(self: *StaReducer, store: anytype, message: Message, emit: Emitter) !void {
     _ = self;
-    _ = emit;
 
     switch (message.body) {
         .wifi_sta_scan_result => |value| {
@@ -31,13 +30,41 @@ pub fn reduce(self: *StaReducer, store: anytype, message: Message, emit: Emitter
                 }
             }.apply);
         },
-        .wifi_sta_connected => |value| {
+        .wifi_sta_connecting => |value| {
             store.invoke(value, struct {
-                fn apply(state: *StaState, event_value: wifi_event.StaConnected) void {
+                fn apply(state: *StaState, event_value: wifi_event.StaConnecting) void {
                     state.source_id = event_value.source_id;
+                    state.status = .connecting;
+                    state.scanning = false;
+                    state.connected = false;
+                    state.has_ip = false;
+                    state.connected_at = 0;
+                    state.connect_timeout = false;
+                    state.reconnect_at = 0;
+                    state.address = null;
+                    state.gateway = null;
+                    state.netmask = null;
+                    state.dns1 = null;
+                    state.dns2 = null;
+                }
+            }.apply);
+        },
+        .wifi_sta_connected => |value| {
+            const Input = struct {
+                event_value: wifi_event.StaConnected,
+                timestamp: glib.time.instant.Time,
+            };
+            store.invoke(Input{ .event_value = value, .timestamp = message.timestamp }, struct {
+                fn apply(state: *StaState, input: Input) void {
+                    const event_value = input.event_value;
+                    state.source_id = event_value.source_id;
+                    state.status = .connected;
                     state.scanning = false;
                     state.connected = true;
                     state.has_ip = false;
+                    state.connected_at = input.timestamp;
+                    state.connect_timeout = false;
+                    state.reconnect_at = 0;
                     state.ssid_end = event_value.ssid_end;
                     state.ssid_buf = event_value.ssid_buf;
                     state.bssid = event_value.bssid;
@@ -55,10 +82,17 @@ pub fn reduce(self: *StaReducer, store: anytype, message: Message, emit: Emitter
         .wifi_sta_disconnected => |value| {
             store.invoke(value, struct {
                 fn apply(state: *StaState, event_value: wifi_event.StaDisconnected) void {
+                    if (event_value.reason == 8 and state.status == .connected and !state.has_ip and !state.connect_timeout) {
+                        state.last_disconnect_reason = event_value.reason;
+                        return;
+                    }
                     state.source_id = event_value.source_id;
+                    state.status = .disconnected;
                     state.scanning = false;
                     state.connected = false;
                     state.has_ip = false;
+                    state.connected_at = 0;
+                    state.connect_timeout = false;
                     state.address = null;
                     state.gateway = null;
                     state.netmask = null;
@@ -72,8 +106,11 @@ pub fn reduce(self: *StaReducer, store: anytype, message: Message, emit: Emitter
             store.invoke(value, struct {
                 fn apply(state: *StaState, event_value: wifi_event.StaGotIp) void {
                     state.source_id = event_value.source_id;
+                    state.status = .online;
                     state.connected = true;
                     state.has_ip = true;
+                    state.connect_timeout = false;
+                    state.reconnect_at = 0;
                     state.address = event_value.address;
                     state.gateway = event_value.gateway;
                     state.netmask = event_value.netmask;
@@ -86,6 +123,7 @@ pub fn reduce(self: *StaReducer, store: anytype, message: Message, emit: Emitter
             store.invoke(value, struct {
                 fn apply(state: *StaState, event_value: wifi_event.StaLostIp) void {
                     state.source_id = event_value.source_id;
+                    if (state.status == .online) state.status = .connected;
                     state.has_ip = false;
                     state.address = null;
                     state.gateway = null;
@@ -97,6 +135,7 @@ pub fn reduce(self: *StaReducer, store: anytype, message: Message, emit: Emitter
         },
         else => return,
     }
+    try emit.emit(message);
 }
 
 pub fn deinit(self: *StaReducer) void {
@@ -123,6 +162,34 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
+                    .wifi_sta_connecting = .{
+                        .source_id = 31,
+                    },
+                },
+            }, emit);
+            store.tick();
+            const connecting = store.get();
+            try grt.std.testing.expectEqual(StaState.Status.connecting, connecting.status);
+            try grt.std.testing.expect(!connecting.connected);
+            try grt.std.testing.expect(!connecting.has_ip);
+
+            try reducer.reduce(&store, .{
+                .origin = .source,
+                .body = .{
+                    .wifi_sta_lost_ip = .{
+                        .source_id = 31,
+                    },
+                },
+            }, emit);
+            store.tick();
+            const connecting_lost_ip = store.get();
+            try grt.std.testing.expectEqual(StaState.Status.connecting, connecting_lost_ip.status);
+            try grt.std.testing.expect(!connecting_lost_ip.connected);
+            try grt.std.testing.expect(!connecting_lost_ip.has_ip);
+
+            try reducer.reduce(&store, .{
+                .origin = .source,
+                .body = .{
                     .wifi_sta_scan_result = .{
                         .source_id = 31,
                         .ssid_end = 8,
@@ -140,6 +207,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             }, emit);
             try reducer.reduce(&store, .{
                 .origin = .source,
+                .timestamp = 123,
                 .body = .{
                     .wifi_sta_connected = .{
                         .source_id = 31,
@@ -156,6 +224,36 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             }, emit);
+            store.tick();
+            const waiting_for_ip = store.get();
+            try grt.std.testing.expectEqual(StaState.Status.connected, waiting_for_ip.status);
+            try grt.std.testing.expect(waiting_for_ip.connected);
+            try grt.std.testing.expect(!waiting_for_ip.has_ip);
+            try grt.std.testing.expectEqual(@as(glib.time.instant.Time, 123), waiting_for_ip.connected_at);
+            try grt.std.testing.expect(!waiting_for_ip.connect_timeout);
+
+            try reducer.reduce(&store, .{
+                .origin = .source,
+                .body = .{
+                    .wifi_sta_disconnected = .{
+                        .source_id = 31,
+                        .reason = 8,
+                    },
+                },
+            }, emit);
+            store.tick();
+            const local_leave_waiting_for_ip = store.get();
+            try grt.std.testing.expectEqual(StaState.Status.connected, local_leave_waiting_for_ip.status);
+            try grt.std.testing.expect(local_leave_waiting_for_ip.connected);
+            try grt.std.testing.expect(!local_leave_waiting_for_ip.has_ip);
+            try grt.std.testing.expectEqual(@as(?u16, 8), local_leave_waiting_for_ip.last_disconnect_reason);
+
+            const ForceTimeout = struct {};
+            store.invoke(ForceTimeout{}, struct {
+                fn apply(state: *StaState, _: ForceTimeout) void {
+                    state.connect_timeout = true;
+                }
+            }.apply);
             try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
@@ -172,9 +270,12 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             store.tick();
             const connected = store.get();
+            try grt.std.testing.expectEqual(StaState.Status.online, connected.status);
             try grt.std.testing.expect(connected.connected);
             try grt.std.testing.expect(connected.has_ip);
             try grt.std.testing.expectEqual(@as(u32, 31), connected.source_id);
+            try grt.std.testing.expectEqual(@as(glib.time.instant.Time, 123), connected.connected_at);
+            try grt.std.testing.expect(!connected.connect_timeout);
             try grt.std.testing.expectEqualStrings("wifi-lab", connected.ssid());
             try grt.std.testing.expectEqual(@as(?i16, -41), connected.last_rssi);
             try grt.std.testing.expectEqual(Addr.from4(.{ 192, 168, 4, 2 }), connected.address.?);
@@ -188,6 +289,12 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             }, emit);
+            store.tick();
+            const lost_ip = store.get();
+            try grt.std.testing.expectEqual(StaState.Status.connected, lost_ip.status);
+            try grt.std.testing.expect(lost_ip.connected);
+            try grt.std.testing.expect(!lost_ip.has_ip);
+
             try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
@@ -199,6 +306,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             }, emit);
             store.tick();
             const disconnected = store.get();
+            try grt.std.testing.expectEqual(StaState.Status.disconnected, disconnected.status);
             try grt.std.testing.expect(!disconnected.connected);
             try grt.std.testing.expect(!disconnected.has_ip);
             try grt.std.testing.expectEqual(@as(?u16, 7), disconnected.last_disconnect_reason);

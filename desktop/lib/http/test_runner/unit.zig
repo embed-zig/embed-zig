@@ -1,5 +1,6 @@
 const glib = @import("glib");
 const Server = @import("../Server.zig");
+const ZuxServer = @import("../ZuxServer.zig");
 
 pub fn make(comptime std: type) glib.testing.TestRunner {
     const testing_api = glib.testing;
@@ -15,6 +16,7 @@ pub fn make(comptime std: type) glib.testing.TestRunner {
             _ = allocator;
 
             t.run("Server", Server.TestRunner(std));
+            t.run("ZuxServer", ZuxServer.TestRunner(std));
             return t.wait();
         }
 

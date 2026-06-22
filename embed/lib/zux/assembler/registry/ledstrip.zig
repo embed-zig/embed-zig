@@ -1,4 +1,5 @@
 const ledstrip = @import("ledstrip");
+const Metadata = @import("../../Metadata.zig");
 const registry_unique = @import("unique.zig");
 
 pub fn make(comptime max_led_strips: usize) type {
@@ -8,6 +9,7 @@ pub fn make(comptime max_led_strips: usize) type {
         pub const Periph = struct {
             label: []const u8,
             id: u32,
+            metadata: Metadata,
             pixel_count: usize,
             control_type: type,
         };
@@ -23,6 +25,16 @@ pub fn make(comptime max_led_strips: usize) type {
             self: *Self,
             comptime label: anytype,
             comptime id: u32,
+            comptime pixel_count: usize,
+        ) void {
+            self.addWithMetadata(label, id, Metadata.empty, pixel_count);
+        }
+
+        pub fn addWithMetadata(
+            self: *Self,
+            comptime label: anytype,
+            comptime id: u32,
+            comptime metadata: Metadata,
             comptime pixel_count: usize,
         ) void {
             if (pixel_count == 0) {
@@ -44,6 +56,7 @@ pub fn make(comptime max_led_strips: usize) type {
             self.periphs[self.len] = .{
                 .label = label_name,
                 .id = id,
+                .metadata = metadata,
                 .pixel_count = pixel_count,
                 .control_type = ledstrip.LedStrip,
             };

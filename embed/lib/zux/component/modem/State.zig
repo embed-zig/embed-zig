@@ -38,6 +38,10 @@ sim: modem_event.SimState = .unknown,
 registration: modem_event.RegistrationState = .offline,
 packet: modem_event.PacketState = .detached,
 signal: ?modem_event.SignalInfo = null,
+imei_end: u8 = 0,
+imei_buf: [modem_event.max_identity_len]u8 = [_]u8{0} ** modem_event.max_identity_len,
+imsi_end: u8 = 0,
+imsi_buf: [modem_event.max_identity_len]u8 = [_]u8{0} ** modem_event.max_identity_len,
 apn_end: u8 = 0,
 apn_buf: [modem_event.max_apn_len]u8 = [_]u8{0} ** modem_event.max_apn_len,
 call: ?Call = null,
@@ -47,4 +51,12 @@ gnss_fix: ?modem_event.GnssFix = null,
 
 pub fn apn(self: *const State) []const u8 {
     return self.apn_buf[0..self.apn_end];
+}
+
+pub fn imei(self: *const State) []const u8 {
+    return self.imei_buf[0..self.imei_end];
+}
+
+pub fn imsi(self: *const State) []const u8 {
+    return self.imsi_buf[0..self.imsi_end];
 }

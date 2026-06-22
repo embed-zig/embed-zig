@@ -80,7 +80,7 @@
           "emit"
         ],
         "summary": "Inject an input event",
-        "description": "Local-only input event endpoint. In the initial version this is intended for single-button gears using `press` and `release` events.",
+        "description": "Local-only input event endpoint for single buttons, grouped buttons, and touch devices.",
         "operationId": "emitInputEvent",
         "parameters": [
           {
@@ -125,6 +125,16 @@
             "description": "Optional runtime-defined metadata payload encoded as a base64url string. This can be used to attach extra context to an emitted input event.",
             "schema": {
               "$ref": "#/components/schemas/MetadataValue"
+            }
+          },
+          {
+            "name": "button_id",
+            "in": "query",
+            "required": false,
+            "description": "Grouped button id for grouped-button press events.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
             }
           },
           {
@@ -255,13 +265,20 @@
             "type": "string",
             "enum": [
               "single_button",
+              "grouped_button",
               "ledstrip",
               "display",
+              "modem",
+              "nfc",
               "touch",
               "wifi_sta"
             ]
           },
           "pixel_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "button_count": {
             "type": "integer",
             "minimum": 0
           },
@@ -275,6 +292,23 @@
           },
           "target": {
             "type": "string"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/GearMetadata"
+          }
+        }
+      },
+      "GearMetadata": {
+        "type": "object",
+        "properties": {
+          "label_text": {
+            "type": "string"
+          },
+          "item_label_texts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -301,6 +335,9 @@
         "oneOf": [
           {
             "$ref": "#/components/schemas/SingleButtonState"
+          },
+          {
+            "$ref": "#/components/schemas/GroupedButtonState"
           },
           {
             "$ref": "#/components/schemas/LedStripState"
@@ -330,6 +367,31 @@
           },
           "pressed": {
             "type": "boolean"
+          }
+        }
+      },
+      "GroupedButtonState": {
+        "type": "object",
+        "required": [
+          "label",
+          "kind",
+          "button_count"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "const": "grouped_button"
+          },
+          "button_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pressed_button_id": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       },

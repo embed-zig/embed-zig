@@ -1,6 +1,7 @@
 const glib = @import("glib");
 const bt = @import("bt");
 const drivers = @import("drivers");
+const nfc_api = @import("nfc");
 const ledstrip = @import("ledstrip");
 
 const Assembler = @import("Assembler.zig");
@@ -182,51 +183,55 @@ pub fn make(comptime spec_doc: anytype) type {
 
                 for (components) |component| {
                     const label = component.label;
+                    const metadata = component.metadata;
                     switch (component.kind) {
                         .grouped_button => |grouped_button| {
-                            next.addGroupedButton(label, component.id, grouped_button.button_count);
+                            switch (grouped_button.input_type) {
+                                .poll => next.addGroupedButtonWithMetadata(label, component.id, metadata, grouped_button.button_count),
+                                .virtual => next.addVirtualGroupedButtonWithMetadata(label, component.id, metadata, grouped_button.button_count),
+                            }
                         },
                         .single_button => |button_spec| {
                             switch (button_spec.input_type) {
-                                .poll => next.addSingleButton(label, component.id),
-                                .virtual => next.addVirtualSingleButton(label, component.id),
+                                .poll => next.addSingleButtonWithMetadata(label, component.id, metadata),
+                                .virtual => next.addVirtualSingleButtonWithMetadata(label, component.id, metadata),
                             }
                         },
                         .audio_system => {
-                            next.addAudioSystem(label, component.id);
+                            next.addAudioSystemWithMetadata(label, component.id, metadata);
                         },
                         .bt => {
-                            next.addBt(label, component.id);
+                            next.addBtWithMetadata(label, component.id, metadata);
                         },
-                        .display => {
-                            next.addDisplay(label, component.id);
+                        .display => |display| {
+                            next.addDisplayWithMetadataAndSize(label, component.id, metadata, display.width, display.height);
                         },
                         .imu => {
-                            next.addImu(label, component.id);
+                            next.addImuWithMetadata(label, component.id, metadata);
                         },
                         .led_strip => |led_strip| {
-                            next.addLedStrip(label, component.id, led_strip.pixel_count);
+                            next.addLedStripWithMetadata(label, component.id, metadata, led_strip.pixel_count);
                         },
                         .modem => {
-                            next.addModem(label, component.id);
+                            next.addModemWithMetadata(label, component.id, metadata);
                         },
                         .nfc => {
-                            next.addNfc(label, component.id);
+                            next.addNfcWithMetadata(label, component.id, metadata);
                         },
                         .switch_output => {
-                            next.addSwitch(label, component.id);
+                            next.addSwitchWithMetadata(label, component.id, metadata);
                         },
                         .pwm => {
-                            next.addPwm(label, component.id);
+                            next.addPwmWithMetadata(label, component.id, metadata);
                         },
                         .touch => |touch| {
-                            next.addTouch(label, component.id, touch.target);
+                            next.addTouchWithMetadata(label, component.id, metadata, touch.target);
                         },
                         .wifi_sta => {
-                            next.addWifiSta(label, component.id);
+                            next.addWifiStaWithMetadata(label, component.id, metadata);
                         },
                         .wifi_ap => {
-                            next.addWifiAp(label, component.id);
+                            next.addWifiApWithMetadata(label, component.id, metadata);
                         },
                     }
                 }
@@ -274,6 +279,7 @@ pub fn make(comptime spec_doc: anytype) type {
                 const StoryInitialState = InitialState;
 
                 user_story_config_factory: UserStoryConfigFactoryImpl = .{},
+                task_options: glib.task.Options = .{ .min_stack_size = 1024 * 1024 },
 
                 pub fn init(self_runner: *@This(), allocator: glib.std.mem.Allocator) !void {
                     _ = self_runner;
@@ -314,6 +320,7 @@ pub fn make(comptime spec_doc: anytype) type {
                             story_ref: *const @TypeOf(story),
                             app_ref: *AppType,
                             config_instance: UserStoryConfigFactoryType.Instance,
+                            task_options: glib.task.Options = .{ .min_stack_size = 1024 * 1024 },
 
                             pub fn init(self_story_runner: *@This(), runner_allocator: glib.std.mem.Allocator) !void {
                                 _ = self_story_runner;
@@ -414,7 +421,7 @@ pub fn make(comptime spec_doc: anytype) type {
                 .imu => drivers.imu,
                 .led_strip => ledstrip.LedStrip,
                 .modem => drivers.Modem,
-                .nfc => drivers.nfc.Reader,
+                .nfc => nfc_api.Reader,
                 .switch_output => drivers.Switch,
                 .pwm => drivers.Pwm,
                 .touch => drivers.Touch,
@@ -456,7 +463,7 @@ pub fn make(comptime spec_doc: anytype) type {
             if (PeriphType == drivers.Modem) {
                 return makeTestModem();
             }
-            if (PeriphType == drivers.nfc.Reader) {
+            if (PeriphType == nfc_api.Reader) {
                 return makeTestNfcReader();
             }
             if (PeriphType == drivers.Switch) {
@@ -828,6 +835,16 @@ pub fn make(comptime spec_doc: anytype) type {
                     impl.deinit();
                 }
 
+                fn startFn(ptr: *anyopaque) drivers.Modem.StartError!void {
+                    const impl: *Impl = @ptrCast(@alignCast(ptr));
+                    if (@hasDecl(Impl, "start")) impl.start() catch return error.Unexpected;
+                }
+
+                fn stopFn(ptr: *anyopaque) void {
+                    const impl: *Impl = @ptrCast(@alignCast(ptr));
+                    if (@hasDecl(Impl, "stop")) impl.stop();
+                }
+
                 fn stateFn(ptr: *anyopaque) drivers.Modem.State {
                     const impl: *Impl = @ptrCast(@alignCast(ptr));
                     return impl.state();
@@ -900,6 +917,8 @@ pub fn make(comptime spec_doc: anytype) type {
 
                 const vtable = drivers.Modem.VTable{
                     .deinit = deinitFn,
+                    .start = startFn,
+                    .stop = stopFn,
                     .state = stateFn,
                     .imei = imeiFn,
                     .imsi = imsiFn,
@@ -923,16 +942,20 @@ pub fn make(comptime spec_doc: anytype) type {
             };
         }
 
-        fn makeTestNfcReader() drivers.nfc.Reader {
+        fn makeTestNfcReader() nfc_api.Reader {
             const Impl = struct {
-                pub fn setEventCallback(_: *@This(), _: *const anyopaque, _: drivers.nfc.CallbackFn) void {}
+                pub fn startScan(_: *@This(), _: nfc_api.ScanConfig) nfc_api.ScanError!void {}
+
+                pub fn stopScan(_: *@This()) void {}
+
+                pub fn setEventCallback(_: *@This(), _: *const anyopaque, _: nfc_api.CallbackFn) void {}
 
                 pub fn clearEventCallback(_: *@This()) void {}
             };
             const Holder = struct {
                 var impl = Impl{};
             };
-            return drivers.nfc.Reader.init(&Holder.impl);
+            return nfc_api.Reader.init(&Holder.impl);
         }
 
         fn makeTestTouch() drivers.Touch {
@@ -956,6 +979,12 @@ pub fn make(comptime spec_doc: anytype) type {
                 pub fn connect(_: *@This(), _: drivers.wifi.Sta.ConnectConfig) drivers.wifi.Sta.ConnectError!void {}
 
                 pub fn disconnect(_: *@This()) void {}
+
+                pub fn setPowerSave(_: *@This(), _: drivers.wifi.Sta.PowerSave) drivers.wifi.Sta.PowerSaveError!void {}
+
+                pub fn getPowerSave(_: *@This()) drivers.wifi.Sta.PowerSaveError!drivers.wifi.Sta.PowerSave {
+                    return .default;
+                }
 
                 pub fn getState(_: *@This()) drivers.wifi.Sta.State {
                     return .idle;

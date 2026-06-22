@@ -300,7 +300,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                     grt.time.sleep(3 * grt.time.duration.MilliSecond);
                     try grt.std.testing.expectEqual(@as(usize, 0), app.store.stores.counter.get().ticks);
 
-                    try app.dispatch(.{
+                    _ = try app.dispatch(.{
                         .origin = .timer,
                         .timestamp = 0,
                         .body = .{
@@ -311,7 +311,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                     });
                     try grt.std.testing.expectEqual(@as(usize, 1), app.store.stores.counter.get().ticks);
 
-                    try app.dispatch(.{
+                    _ = try app.dispatch(.{
                         .origin = .manual,
                         .timestamp = 0,
                         .body = .{
@@ -329,7 +329,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                         else => return error.UnexpectedMessage,
                     }
 
-                    try app.dispatch(.{
+                    _ = try app.dispatch(.{
                         .origin = .timer,
                         .timestamp = 1,
                         .body = .{
@@ -620,7 +620,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                         .buttons = drivers.button.Grouped.init(MockGrouped, &mock_grouped),
                         .strip = dummy_strip.handle(),
                     });
-                    try app.start(.{});
+                    try app.start(.{ .ticker = .manual });
                     try grt.std.testing.expectError(error.InvalidPeriphKind, app.press_single_button(.buttons));
                     try grt.std.testing.expectError(error.InvalidPeriphKind, app.release_single_button(.buttons));
                     try grt.std.testing.expectError(error.InvalidPeriphKind, app.set_led_strip_pixels(.buttons, Built.FrameType{}, 1));
@@ -645,55 +645,34 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                     var immediate_frame = Built.FrameType{};
                     immediate_frame.pixels[0] = ledstrip_mod.Color.red;
                     try app.set_led_strip_pixels(.strip, immediate_frame, 200);
-                    switch (app.impl.last_event.?) {
-                        .ledstrip_set_pixels => |event_value| {
-                            try grt.std.testing.expectEqual(@as(u32, 11), event_value.source_id);
-                            try grt.std.testing.expectEqual(@as(u8, 200), event_value.brightness);
-                            try grt.std.testing.expectEqual(ledstrip_mod.Color.red, event_value.pixels[0]);
-                        },
-                        else => return error.UnexpectedMessage,
-                    }
+                    app.store.tick();
+                    try grt.std.testing.expect(app.impl.last_event == null);
+                    try grt.std.testing.expectEqual(@as(u8, 200), app.store.stores.strip.get().brightness);
+                    try grt.std.testing.expectEqual(ledstrip_mod.Color.red, app.store.stores.strip.get().frames[0].pixels[0]);
                     try app.impl.flush_led_strip_pixels(.strip, immediate_frame, 200);
                     try grt.std.testing.expectEqual(ledstrip_mod.Color.rgb(200, 0, 0), dummy_strip.pixels[0]);
                     try app.set_led_strip_animated(.strip, Built.FrameType{}, 128, 42);
-                    switch (app.impl.last_event.?) {
-                        .ledstrip_set => |event_value| {
-                            try grt.std.testing.expectEqual(@as(u32, 11), event_value.source_id);
-                            try grt.std.testing.expectEqual(@as(u8, 128), event_value.brightness);
-                            try grt.std.testing.expectEqual(@as(u32, 42), event_value.duration);
-                        },
-                        else => return error.UnexpectedMessage,
-                    }
+                    app.store.tick();
+                    try grt.std.testing.expect(app.impl.last_event == null);
+                    try grt.std.testing.expectEqual(@as(u8, 128), app.store.stores.strip.get().brightness);
                     try app.set_led_strip_flash(.strip, Built.FrameType{}, 111, 5 * glib.time.duration.MilliSecond, 12 * glib.time.duration.MilliSecond);
-                    switch (app.impl.last_event.?) {
-                        .ledstrip_flash => |event_value| {
-                            try grt.std.testing.expectEqual(@as(u32, 11), event_value.source_id);
-                            try grt.std.testing.expectEqual(@as(u8, 111), event_value.brightness);
-                            try grt.std.testing.expectEqual(@as(glib.time.duration.Duration, 5 * glib.time.duration.MilliSecond), event_value.duration);
-                            try grt.std.testing.expectEqual(@as(glib.time.duration.Duration, 12 * glib.time.duration.MilliSecond), event_value.interval);
-                        },
-                        else => return error.UnexpectedMessage,
-                    }
+                    app.store.tick();
+                    try grt.std.testing.expect(app.impl.last_event == null);
+                    try grt.std.testing.expectEqual(@as(u8, 111), app.store.stores.strip.get().brightness);
+                    try grt.std.testing.expectEqual(@as(glib.time.duration.Duration, 5 * glib.time.duration.MilliSecond), app.store.stores.strip.get().duration);
+                    try grt.std.testing.expectEqual(@as(glib.time.duration.Duration, 12 * glib.time.duration.MilliSecond), app.store.stores.strip.get().interval);
                     try app.set_led_strip_pingpong(.strip, Built.FrameType{}, Built.FrameType{}, 99, 9 * glib.time.duration.MilliSecond, 21 * glib.time.duration.MilliSecond);
-                    switch (app.impl.last_event.?) {
-                        .ledstrip_pingpong => |event_value| {
-                            try grt.std.testing.expectEqual(@as(u32, 11), event_value.source_id);
-                            try grt.std.testing.expectEqual(@as(u8, 99), event_value.brightness);
-                            try grt.std.testing.expectEqual(@as(glib.time.duration.Duration, 9 * glib.time.duration.MilliSecond), event_value.duration);
-                            try grt.std.testing.expectEqual(@as(glib.time.duration.Duration, 21 * glib.time.duration.MilliSecond), event_value.interval);
-                        },
-                        else => return error.UnexpectedMessage,
-                    }
+                    app.store.tick();
+                    try grt.std.testing.expect(app.impl.last_event == null);
+                    try grt.std.testing.expectEqual(@as(u8, 99), app.store.stores.strip.get().brightness);
+                    try grt.std.testing.expectEqual(@as(glib.time.duration.Duration, 9 * glib.time.duration.MilliSecond), app.store.stores.strip.get().duration);
+                    try grt.std.testing.expectEqual(@as(glib.time.duration.Duration, 21 * glib.time.duration.MilliSecond), app.store.stores.strip.get().interval);
                     try app.set_led_strip_rotate(.strip, Built.FrameType{}, 77, 3 * glib.time.duration.MilliSecond, 7 * glib.time.duration.MilliSecond);
-                    switch (app.impl.last_event.?) {
-                        .ledstrip_rotate => |event_value| {
-                            try grt.std.testing.expectEqual(@as(u32, 11), event_value.source_id);
-                            try grt.std.testing.expectEqual(@as(u8, 77), event_value.brightness);
-                            try grt.std.testing.expectEqual(@as(glib.time.duration.Duration, 3 * glib.time.duration.MilliSecond), event_value.duration);
-                            try grt.std.testing.expectEqual(@as(glib.time.duration.Duration, 7 * glib.time.duration.MilliSecond), event_value.interval);
-                        },
-                        else => return error.UnexpectedMessage,
-                    }
+                    app.store.tick();
+                    try grt.std.testing.expect(app.impl.last_event == null);
+                    try grt.std.testing.expectEqual(@as(u8, 77), app.store.stores.strip.get().brightness);
+                    try grt.std.testing.expectEqual(@as(glib.time.duration.Duration, 3 * glib.time.duration.MilliSecond), app.store.stores.strip.get().duration);
+                    try grt.std.testing.expectEqual(@as(glib.time.duration.Duration, 7 * glib.time.duration.MilliSecond), app.store.stores.strip.get().interval);
                     try app.stop();
                     try grt.std.testing.expectError(error.NotStarted, app.release_grouped_button(.buttons));
                     app.deinit();
@@ -730,6 +709,52 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                         .raw_single_button => |event_value| {
                             try grt.std.testing.expectEqual(@as(u32, 7), event_value.source_id);
                             try grt.std.testing.expect(event_value.pressed);
+                        },
+                        else => return error.UnexpectedMessage,
+                    }
+                }
+
+                fn virtual_grouped_button_requires_no_build_config_field() !void {
+                    const Built = comptime blk: {
+                        const AssemblerType = Assembler.make(grt, .{
+                            .max_adc_buttons = 1,
+                        });
+                        var next = AssemblerType.init();
+                        next.addVirtualGroupedButton("buttons", 7, 3);
+
+                        const BuildConfig = next.BuildConfig();
+                        const build_config: BuildConfig = .{};
+                        break :blk next.build(build_config);
+                    };
+
+                    try grt.std.testing.expect(!@hasField(Built.InitConfig, "buttons"));
+                    try grt.std.testing.expectEqual(@as(usize, 0), Built.poller_count);
+                    try grt.std.testing.expect(@hasField(Built.Store.Stores, "buttons"));
+
+                    var app = try Built.init(.{
+                        .allocator = grt.std.testing.allocator,
+                        .initial_state = .{
+                            .buttons = .{},
+                        },
+                    });
+                    defer app.deinit();
+
+                    try app.start(.{});
+                    try app.press_grouped_button(.buttons, 2);
+                    switch (app.impl.last_event.?) {
+                        .raw_grouped_button => |event_value| {
+                            try grt.std.testing.expectEqual(@as(u32, 7), event_value.source_id);
+                            try grt.std.testing.expectEqual(@as(?u32, 2), event_value.button_id);
+                            try grt.std.testing.expect(event_value.pressed);
+                        },
+                        else => return error.UnexpectedMessage,
+                    }
+                    try app.release_grouped_button(.buttons);
+                    switch (app.impl.last_event.?) {
+                        .raw_grouped_button => |event_value| {
+                            try grt.std.testing.expectEqual(@as(u32, 7), event_value.source_id);
+                            try grt.std.testing.expectEqual(@as(?u32, 2), event_value.button_id);
+                            try grt.std.testing.expect(!event_value.pressed);
                         },
                         else => return error.UnexpectedMessage,
                     }
@@ -875,6 +900,10 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                 return false;
             };
             TestCase.virtual_single_button_requires_no_build_config_field() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.virtual_grouped_button_requires_no_build_config_field() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

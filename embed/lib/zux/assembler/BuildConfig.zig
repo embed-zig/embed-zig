@@ -1,6 +1,7 @@
 const glib = @import("glib");
 const bt = @import("bt");
 const drivers = @import("drivers");
+const nfc_api = @import("nfc");
 const ledstrip = @import("ledstrip");
 const modem_api = @import("drivers");
 
@@ -111,7 +112,7 @@ fn periphBuildType(comptime periph: anytype) type {
     if (ControlType == drivers.button.Grouped) return drivers.button.Grouped;
     if (ControlType == drivers.imu) return drivers.imu;
     if (ControlType == modem_api.Modem) return modem_api.Modem;
-    if (ControlType == drivers.nfc.Reader) return drivers.nfc.Reader;
+    if (ControlType == nfc_api.Reader) return nfc_api.Reader;
     if (ControlType == drivers.Switch) return drivers.Switch;
     if (ControlType == drivers.Pwm) return drivers.Pwm;
     if (ControlType == drivers.Touch) return drivers.Touch;

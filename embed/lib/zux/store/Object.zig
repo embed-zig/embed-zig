@@ -3,7 +3,7 @@ const Subscriber = @import("Subscriber.zig");
 
 pub fn make(comptime grt: type, comptime T: type, comptime label: anytype) type {
     const Allocator = glib.std.mem.Allocator;
-    const AtomicU64 = grt.std.atomic.Value(u64);
+    const AtomicTick = grt.std.atomic.Value(u32);
     const SubscriberList = grt.std.ArrayList(*Subscriber);
     const Mutex = grt.sync.Mutex;
     const RwLock = grt.sync.RwLock;
@@ -31,7 +31,7 @@ pub fn make(comptime grt: type, comptime T: type, comptime label: anytype) type 
         subscribers: SubscriberList = .empty,
         subscribers_notifying: bool = false,
 
-        tick_count: AtomicU64 = AtomicU64.init(0),
+        tick_count: AtomicTick = AtomicTick.init(0),
 
         pub fn init(allocator: Allocator, initial: T) Self {
             return .{
@@ -97,7 +97,7 @@ pub fn make(comptime grt: type, comptime T: type, comptime label: anytype) type 
         }
 
         pub fn tick(self: *Self) void {
-            const tick_count = self.tick_count.fetchAdd(1, .acq_rel) + 1;
+            const tick_count: u64 = @as(u64, self.tick_count.fetchAdd(1, .acq_rel)) + 1;
             self.running_mu.lock();
             self.released_mu.lock();
 
@@ -114,7 +114,11 @@ pub fn make(comptime grt: type, comptime T: type, comptime label: anytype) type 
             self.subscribers_mu.lock();
             if (self.subscribers_notifying) {
                 self.subscribers_mu.unlock();
-                @panic("zux.store.Object.tick cannot reenter subscriber notification on the same object");
+                grt.std.log.scoped(.zux_store).warn(
+                    "store object subscriber notification skipped because the previous notification is still running",
+                    .{},
+                );
+                return;
             }
             self.subscribers_notifying = true;
             const subscribers = self.subscribers.items;
@@ -601,14 +605,14 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             state.tick();
 
-            try grt.std.testing.expectEqual(@as(u64, 1), state.tick_count.load(.acquire));
+            try grt.std.testing.expectEqual(@as(u32, 1), state.tick_count.load(.acquire));
             try grt.std.testing.expect(!impl.called);
             try grt.std.testing.expectEqual(@as(u64, 0), impl.tick_count);
 
             state.set(.{ .value = 2 });
             state.tick();
 
-            try grt.std.testing.expectEqual(@as(u64, 2), state.tick_count.load(.acquire));
+            try grt.std.testing.expectEqual(@as(u32, 2), state.tick_count.load(.acquire));
             try grt.std.testing.expect(impl.called);
             try grt.std.testing.expectEqual(@as(u64, 2), impl.tick_count);
         }

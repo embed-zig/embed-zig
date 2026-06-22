@@ -1,4 +1,5 @@
 const bt = @import("bt");
+const Metadata = @import("../../Metadata.zig");
 const registry_unique = @import("unique.zig");
 
 pub fn make(comptime max_bt_hosts: usize) type {
@@ -8,6 +9,7 @@ pub fn make(comptime max_bt_hosts: usize) type {
         pub const Periph = struct {
             label: []const u8,
             id: u32,
+            metadata: Metadata,
             control_type: type,
         };
 
@@ -19,6 +21,15 @@ pub fn make(comptime max_bt_hosts: usize) type {
         }
 
         pub fn add(self: *Self, comptime label: anytype, comptime id: u32) void {
+            self.addWithMetadata(label, id, Metadata.empty);
+        }
+
+        pub fn addWithMetadata(
+            self: *Self,
+            comptime label: anytype,
+            comptime id: u32,
+            comptime metadata: Metadata,
+        ) void {
             if (self.len >= max_bt_hosts) {
                 @compileError("zux.Assembler exceeded max_bt_hosts");
             }
@@ -35,6 +46,7 @@ pub fn make(comptime max_bt_hosts: usize) type {
             self.periphs[self.len] = .{
                 .label = label_name,
                 .id = id,
+                .metadata = metadata,
                 .control_type = bt.Host,
             };
             self.len += 1;
