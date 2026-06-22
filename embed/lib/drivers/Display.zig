@@ -17,6 +17,7 @@ pub const Dbi = @import("display/Dbi.zig");
 pub const Flush = @import("display/Flush.zig");
 pub const St7701 = @import("display/st7701.zig");
 pub const St7789 = @import("display/st7789.zig");
+pub const St77903 = @import("display/st77903.zig");
 pub const Sh8601 = @import("display/sh8601.zig");
 
 ptr: *anyopaque,
@@ -77,6 +78,10 @@ pub fn brightness(self: root) Error!u8 {
     return brightness_fn(self.ptr);
 }
 
+pub fn maxFlushPixels(self: root) Error!usize {
+    return self.vtable.maxFlushPixels(self.ptr);
+}
+
 /// `pixels` is a contiguous row-major RGB buffer with at least `w * h` entries.
 pub fn drawBitmap(
     self: root,
@@ -101,8 +106,8 @@ pub fn drawBitmap(
     var offset: usize = 0;
     while (row < h) {
         const remaining_rows = h - row;
-        const capacity_rows: u16 = @intCast(max_flush_pixels / @as(usize, w));
-        const rows = if (remaining_rows > capacity_rows) capacity_rows else remaining_rows;
+        const capacity_rows = max_flush_pixels / @as(usize, w);
+        const rows: u16 = @intCast(@min(@as(usize, remaining_rows), capacity_rows));
         const count = @as(usize, w) * @as(usize, rows);
         try self.vtable.flush(self.ptr, x, y + row, w, rows, pixels[offset..][0..count]);
         row += rows;
@@ -539,6 +544,49 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(@as(u16, 2), state.heights[0]);
             try grt.std.testing.expectEqual(@as(u16, 2), state.heights[1]);
         }
+
+        fn rejectsFlushCapacitySmallerThanOneRow(allocator: glib.std.mem.Allocator) !void {
+            const Impl = struct {
+                pub const Config = struct {
+                    allocator: glib.std.mem.Allocator,
+                };
+
+                pub fn init(_: Config) !@This() {
+                    return .{};
+                }
+
+                pub fn deinit(_: *@This()) void {}
+
+                pub fn width(_: *@This()) u16 {
+                    return 8;
+                }
+
+                pub fn height(_: *@This()) u16 {
+                    return 8;
+                }
+
+                pub fn maxFlushPixels(_: *@This()) Error!usize {
+                    return 1;
+                }
+
+                pub fn flush(
+                    _: *@This(),
+                    _: u16,
+                    _: u16,
+                    _: u16,
+                    _: u16,
+                    _: []const Rgb,
+                ) Error!void {}
+            };
+
+            var display = try make(grt, Impl).init(.{
+                .allocator = allocator,
+            });
+            defer display.deinit();
+
+            const pixels = [_]Rgb{rgb(255, 0, 0)} ** 4;
+            try grt.std.testing.expectError(error.DisplayError, display.drawBitmap(0, 0, 2, 2, &pixels));
+        }
     };
 
     const Runner = struct {
@@ -559,6 +607,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 return false;
             };
             TestCase.chunksDrawsByBackendCapacity(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.rejectsFlushCapacitySmallerThanOneRow(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

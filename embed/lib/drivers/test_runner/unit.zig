@@ -24,6 +24,7 @@ const Rgb = @import("../display/Rgb.zig");
 const SpiDbi = @import("../display/dbi/Spi.zig");
 const St7701 = @import("../display/st7701.zig");
 const St7789 = @import("../display/st7789.zig");
+const St77903 = @import("../display/st77903.zig");
 const Sh8601 = @import("../display/sh8601.zig");
 const Pca9557 = @import("../gpio/pca9557.zig");
 const Tca9554 = @import("../gpio/tca9554.zig");
@@ -69,6 +70,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
             t.run("Display/Dbi/Spi", SpiDbi.TestRunner(grt));
             t.run("Display/St7701", St7701.TestRunner(grt));
             t.run("Display/St7789", St7789.TestRunner(grt));
+            t.run("Display/St77903", St77903.TestRunner(grt));
             t.run("Display/Sh8601", Sh8601.TestRunner(grt));
             t.run("Pca9557", Pca9557.TestRunner(grt));
             t.run("Tca9554", Tca9554.TestRunner(grt));

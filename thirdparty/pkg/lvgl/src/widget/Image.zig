@@ -33,6 +33,10 @@ pub fn setDescriptor(self: *const Self, descriptor: *const Descriptor) void {
     binding.lv_image_set_src(self.handle, @ptrCast(descriptor));
 }
 
+pub fn setScale(self: *const Self, zoom: u32) void {
+    binding.lv_image_set_scale(self.handle, zoom);
+}
+
 pub fn source(self: *const Self) ?*const anyopaque {
     return binding.lv_image_get_src(self.handle);
 }

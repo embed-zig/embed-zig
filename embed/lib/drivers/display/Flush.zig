@@ -16,6 +16,11 @@ pub const Rgb565ByteOrder = enum {
     swapped,
 };
 
+pub const NativePixelFormat = enum {
+    rgb565,
+    rgb444_packed,
+};
+
 pub const Rect = struct {
     x: u16,
     y: u16,
@@ -43,6 +48,14 @@ pub fn height(config: Config) u16 {
 
 pub fn maxChunkPixels(config: Config) usize {
     return @as(usize, config.logical_width) * @as(usize, normalizedRows(config));
+}
+
+pub fn maxChunkBytes(config: Config, pixel_format: NativePixelFormat) usize {
+    const pixels = maxChunkPixels(config);
+    return switch (pixel_format) {
+        .rgb565 => pixels * @sizeOf(u16),
+        .rgb444_packed => packedRgb444ByteLen(pixels),
+    };
 }
 
 pub fn validate(
@@ -101,6 +114,92 @@ pub fn encodeChunk(
     return dst[0..count];
 }
 
+pub fn encodeChunkBytes(
+    config: Config,
+    pixel_format: NativePixelFormat,
+    dst: []u8,
+    src: []const Rgb,
+    src_offset: usize,
+    w: u16,
+    rows: u16,
+) Error![]const u8 {
+    return switch (pixel_format) {
+        .rgb565 => {
+            const count = @as(usize, w) * @as(usize, rows);
+            const byte_count = count * @sizeOf(u16);
+            if (dst.len < byte_count or src.len < src_offset + count) return error.OutOfBounds;
+            switch (config.orientation) {
+                .normal => {
+                    for (0..count) |index| {
+                        writeNativeRgb565(dst, index, src[src_offset + index], config.rgb565_byte_order);
+                    }
+                },
+                .rotate_cw => {
+                    var out_index: usize = 0;
+                    for (0..w) |dst_y| {
+                        const src_x = @as(usize, w) - 1 - dst_y;
+                        for (0..rows) |dst_x| {
+                            const src_y = dst_x;
+                            writeNativeRgb565(
+                                dst,
+                                out_index,
+                                src[src_offset + src_y * @as(usize, w) + src_x],
+                                config.rgb565_byte_order,
+                            );
+                            out_index += 1;
+                        }
+                    }
+                },
+            }
+            return dst[0..byte_count];
+        },
+        .rgb444_packed => encodeChunkRgb444(config, dst, src, src_offset, w, rows),
+    };
+}
+
+pub fn encodeChunkRgb444(
+    config: Config,
+    dst: []u8,
+    src: []const Rgb,
+    src_offset: usize,
+    w: u16,
+    rows: u16,
+) Error![]const u8 {
+    const count = @as(usize, w) * @as(usize, rows);
+    const byte_count = packedRgb444ByteLen(count);
+    if (dst.len < byte_count or src.len < src_offset + count) return error.OutOfBounds;
+
+    var out_index: usize = 0;
+    var pending_low_nibble: ?u4 = null;
+
+    switch (config.orientation) {
+        .normal => {
+            for (0..count) |index| {
+                packRgb444Nibbles(dst, &out_index, &pending_low_nibble, src[src_offset + index]);
+            }
+        },
+        .rotate_cw => {
+            for (0..w) |dst_y| {
+                const src_x = @as(usize, w) - 1 - dst_y;
+                for (0..rows) |dst_x| {
+                    const src_y = dst_x;
+                    packRgb444Nibbles(
+                        dst,
+                        &out_index,
+                        &pending_low_nibble,
+                        src[src_offset + src_y * @as(usize, w) + src_x],
+                    );
+                }
+            }
+        },
+    }
+    if (pending_low_nibble) |high| {
+        dst[out_index] = @as(u8, high) << 4;
+        out_index += 1;
+    }
+    return dst[0..out_index];
+}
+
 pub fn nativeArea(config: Config, x: u16, y: u16, w: u16, row: u16, rows: u16) Rect {
     return switch (config.orientation) {
         .normal => .{
@@ -132,6 +231,33 @@ fn encodeForBus(color: Rgb, byte_order: Rgb565ByteOrder) u16 {
 
 fn swap565(value: u16) u16 {
     return (value << 8) | (value >> 8);
+}
+
+fn writeNativeRgb565(dst: []u8, index: usize, color: Rgb, byte_order: Rgb565ByteOrder) void {
+    const value = encodeForBus(color, byte_order);
+    const offset = index * @sizeOf(u16);
+    dst[offset] = @intCast(value & 0x00ff);
+    dst[offset + 1] = @intCast(value >> 8);
+}
+
+fn packedRgb444ByteLen(pixel_count: usize) usize {
+    return (pixel_count * 3 + 1) / 2;
+}
+
+fn packRgb444Nibbles(dst: []u8, out_index: *usize, pending_low_nibble: *?u4, color: Rgb) void {
+    packNibble(dst, out_index, pending_low_nibble, @intCast(color.r >> 4));
+    packNibble(dst, out_index, pending_low_nibble, @intCast(color.g >> 4));
+    packNibble(dst, out_index, pending_low_nibble, @intCast(color.b >> 4));
+}
+
+fn packNibble(dst: []u8, out_index: *usize, pending_low_nibble: *?u4, nibble: u4) void {
+    if (pending_low_nibble.*) |high| {
+        dst[out_index.*] = (@as(u8, high) << 4) | @as(u8, nibble);
+        out_index.* += 1;
+        pending_low_nibble.* = null;
+    } else {
+        pending_low_nibble.* = nibble;
+    }
 }
 
 pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
@@ -168,6 +294,20 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             const encoded = try encodeChunk(config, &out, &pixels, 0, 1, 1);
 
             try grt.std.testing.expectEqual(@as(u16, 0x00f8), encoded[0]);
+        }
+
+        fn encodesPackedRgb444Chunks() !void {
+            const config = testConfig(.normal, .native);
+            const pixels = [_]Rgb{
+                rgb(255, 0, 0),
+                rgb(0, 255, 0),
+                rgb(0, 0, 255),
+            };
+            var out: [5]u8 = undefined;
+
+            const encoded = try encodeChunkRgb444(config, &out, &pixels, 0, 3, 1);
+
+            try grt.std.testing.expectEqualSlices(u8, &.{ 0xf0, 0x00, 0xf0, 0x00, 0xf0 }, encoded);
         }
 
         fn rotatesChunksClockwiseAndMapsNativeArea() !void {
@@ -208,6 +348,8 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             try grt.std.testing.expectEqual(@as(usize, 4), maxChunkPixels(config));
             try grt.std.testing.expectEqual(@as(u16, 1), chunkRows(config, 3, 0));
+            try grt.std.testing.expectEqual(@as(usize, 8), maxChunkBytes(config, .rgb565));
+            try grt.std.testing.expectEqual(@as(usize, 6), maxChunkBytes(config, .rgb444_packed));
         }
 
         fn testConfig(orientation: Orientation, byte_order: Rgb565ByteOrder) Config {
@@ -246,6 +388,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 return false;
             };
             TestCase.appliesSwappedRgb565ByteOrder() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.encodesPackedRgb444Chunks() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

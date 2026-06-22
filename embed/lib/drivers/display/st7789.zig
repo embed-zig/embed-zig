@@ -14,7 +14,7 @@ const Rgb = @import("Rgb.zig");
 
 const st7789 = @This();
 
-pub const Register = enum(u8) {
+const Register = enum(u8) {
     software_reset = 0x01,
     sleep_in = 0x10,
     sleep_out = 0x11,
@@ -48,8 +48,17 @@ pub const RgbOrder = enum {
 };
 
 pub const PixelFormat = enum(u8) {
+    rgb444 = 0x03,
     rgb565 = 0x55,
     rgb666 = 0x66,
+
+    pub fn nativeFlushFormat(self: PixelFormat) ?Flush.NativePixelFormat {
+        return switch (self) {
+            .rgb444 => .rgb444_packed,
+            .rgb565 => .rgb565,
+            .rgb666 => null,
+        };
+    }
 };
 
 pub const Orientation = struct {
@@ -245,13 +254,14 @@ pub const Display = struct {
     allocator: glib.std.mem.Allocator,
     controller: st7789,
     flush_config: Flush.Config,
-    rgb565_buffer: []u16,
+    encoded_buffer: []u8,
     set_brightness: ?BrightnessFn,
     brightness_level: u8,
     is_enabled: bool = true,
 
     fn init(config: Display.Config) !*Display {
-        const buffer = try config.allocator.alloc(u16, Flush.maxChunkPixels(config.flush));
+        const native_pixel_format = config.controller.pixel_format.nativeFlushFormat() orelse return error.DisplayError;
+        const buffer = try config.allocator.alloc(u8, Flush.maxChunkBytes(config.flush, native_pixel_format));
         var buffer_owned = true;
         errdefer if (buffer_owned) config.allocator.free(buffer);
 
@@ -263,7 +273,7 @@ pub const Display = struct {
             .allocator = config.allocator,
             .controller = st7789.init(config.dbi, config.delay, config.controller),
             .flush_config = config.flush,
-            .rgb565_buffer = buffer,
+            .encoded_buffer = buffer,
             .set_brightness = config.set_brightness,
             .brightness_level = config.initial_brightness,
         };
@@ -281,7 +291,7 @@ pub const Display = struct {
     }
 
     fn deinit(self: *Display) void {
-        self.allocator.free(self.rgb565_buffer);
+        self.allocator.free(self.encoded_buffer);
         const allocator = self.allocator;
         allocator.destroy(self);
     }
@@ -323,7 +333,7 @@ pub const Display = struct {
     }
 
     fn maxFlushPixels(self: *Display) Error!usize {
-        return self.rgb565_buffer.len;
+        return Flush.maxChunkPixels(self.flush_config);
     }
 
     fn flush(
@@ -336,11 +346,20 @@ pub const Display = struct {
     ) Error!void {
         if (w == 0 or h == 0) return;
         try Flush.validate(self.flush_config, x, y, w, h, pixels);
+        const native_pixel_format = self.controller.config.pixel_format.nativeFlushFormat() orelse return error.DisplayError;
 
-        const chunk = Flush.encodeChunk(self.flush_config, self.rgb565_buffer, pixels, 0, w, h) catch return error.OutOfBounds;
+        const chunk = Flush.encodeChunkBytes(
+            self.flush_config,
+            native_pixel_format,
+            self.encoded_buffer,
+            pixels,
+            0,
+            w,
+            h,
+        ) catch return error.OutOfBounds;
         const area = Flush.nativeArea(self.flush_config, x, y, w, 0, h);
         self.controller.setAddressWindow(area.x, area.y, area.x + area.w - 1, area.y + area.h - 1) catch return error.DisplayError;
-        self.controller.writeMemoryData(glib.std.mem.sliceAsBytes(chunk)) catch return error.DisplayError;
+        self.controller.writeMemoryData(chunk) catch return error.DisplayError;
     }
 
     fn deinitFn(ptr: *anyopaque) void {
@@ -493,6 +512,37 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(@as(usize, 1), fake_delay.calls);
         }
 
+        fn rejectsUnsupportedDisplayPixelFormat() !void {
+            const FakeBus = struct {
+                pub fn writeCommand(_: *@This(), _: u8, _: []const u8) Dbi.Error!void {}
+                pub fn writeData(_: *@This(), _: []const u8) Dbi.Error!void {}
+                pub fn writeCommandData(_: *@This(), _: u8, _: []const u8) Dbi.Error!void {}
+            };
+            const FakeDelay = struct {
+                pub fn sleep(_: *@This(), _: glib.time.duration.Duration) void {}
+            };
+
+            var fake_bus = FakeBus{};
+            var fake_delay = FakeDelay{};
+            var config = panelConfig();
+            config.pixel_format = .rgb666;
+
+            try grt.std.testing.expectError(error.DisplayError, display(.{
+                .allocator = grt.std.testing.allocator,
+                .dbi = Dbi.init(&fake_bus),
+                .delay = Delay.init(&fake_delay),
+                .controller = config,
+                .flush = .{
+                    .native_width = config.width,
+                    .native_height = config.height,
+                    .logical_width = config.width,
+                    .logical_height = config.height,
+                    .max_flush_rows = 10,
+                    .rgb565_byte_order = .native,
+                },
+            }));
+        }
+
         fn panelConfig() Config {
             return .{
                 .width = 320,
@@ -526,6 +576,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 return false;
             };
             TestCase.openEmitsInitializationCommands() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.rejectsUnsupportedDisplayPixelFormat() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
