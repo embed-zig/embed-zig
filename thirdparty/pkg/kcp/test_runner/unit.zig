@@ -1,8 +1,5 @@
 const glib = @import("glib");
-const BytesRingBuf = @import("../BytesRingBuf.zig");
-const PacketRingBuf = @import("../PacketRingBuf.zig");
 const SegmentPool = @import("../SegmentPool.zig");
-const Session = @import("../Session.zig");
 const protocol = @import("../PerfProtocol.zig");
 
 pub fn make(comptime grt: type) glib.testing.TestRunner {
@@ -18,9 +15,6 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
 
             t.run("PerfProtocol", protocol.TestRunner(grt.std));
             t.run("SegmentPool", SegmentPool.TestRunner(grt));
-            t.run("BytesRingBuf", BytesRingBuf.TestRunner(grt));
-            t.run("PacketRingBuf", PacketRingBuf.TestRunner(grt));
-            t.run("Session", Session.TestRunner(grt));
             return t.wait();
         }
 

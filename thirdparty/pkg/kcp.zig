@@ -1,4 +1,4 @@
-//! KCP bindings and session helpers backed by the local C KCP implementation.
+//! KCP bindings backed by the local C KCP implementation.
 
 pub const c = @cImport({
     @cInclude("ikcp.h");
@@ -26,28 +26,7 @@ pub const nodelay = c.ikcp_nodelay;
 pub const allocator = c.ikcp_allocator;
 
 pub const SegmentPool = @import("kcp/SegmentPool.zig");
-pub const BytesRingBuf = @import("kcp/BytesRingBuf.zig");
-pub const PacketRingBuf = @import("kcp/PacketRingBuf.zig");
-pub const Session = @import("kcp/Session.zig");
 pub const PerfProtocol = @import("kcp/PerfProtocol.zig");
-pub const PerfServer = @import("kcp/PerfServer.zig");
-pub const PerfClient = @import("kcp/PerfClient.zig");
-pub const Config = Session.Config;
-pub const Stats = Session.Stats;
-pub const DebugState = Session.DebugState;
-pub const make = Session.make;
-
-pub fn KcpSession(comptime grt: type) type {
-    return Session.make(grt);
-}
-
-pub fn NetperfServer(comptime grt: type) type {
-    return PerfServer.make(grt);
-}
-
-pub fn NetperfClient(comptime grt: type) type {
-    return PerfClient.make(grt);
-}
 
 pub const test_runner = struct {
     pub const unit = @import("kcp/test_runner/unit.zig");
