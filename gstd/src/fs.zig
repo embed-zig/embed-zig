@@ -3,24 +3,35 @@ const glib = @import("glib");
 
 const fs = glib.fs;
 const host_allocator = builtin_std.heap.page_allocator;
+const log = builtin_std.log.scoped(.gstd_fs);
 
 const HostMount = struct {
     prefix: []const u8,
     host_root: []const u8,
 };
 
-var host_mount: ?HostMount = null;
+const max_host_mounts = 8;
+var host_mounts: [max_host_mounts]HostMount = undefined;
+var host_mount_count: usize = 0;
 
 pub fn setHostMount(prefix: []const u8, host_root: []const u8) void {
-    host_mount = .{
-        .prefix = prefix,
-        .host_root = host_root,
-    };
+    for (host_mounts[0..host_mount_count]) |*mount| {
+        if (builtin_std.mem.eql(u8, mount.prefix, prefix)) {
+            mount.host_root = host_root;
+            return;
+        }
+    }
+    if (host_mount_count >= max_host_mounts) {
+        log.warn("host mount table full; ignoring mount {s} -> {s}", .{ prefix, host_root });
+        return;
+    }
+    host_mounts[host_mount_count] = .{ .prefix = prefix, .host_root = host_root };
+    host_mount_count += 1;
 }
 
 pub const impl = struct {
     pub fn openFile(path: []const u8, options: fs.OpenOptions) fs.OpenFileError!fs.File {
-        const resolved = resolvePath(path) catch return error.OutOfMemory;
+        const resolved = resolvePath(path) catch |err| return resolveOpenCreateError(err);
         defer resolved.deinit();
 
         const file = openHostFile(resolved.path, .{
@@ -37,7 +48,7 @@ pub const impl = struct {
     }
 
     pub fn createFile(path: []const u8, options: fs.CreateOptions) fs.CreateFileError!fs.File {
-        const resolved = resolvePath(path) catch return error.OutOfMemory;
+        const resolved = resolvePath(path) catch |err| return resolveOpenCreateError(err);
         defer resolved.deinit();
 
         const file = createHostFile(resolved.path, .{
@@ -52,21 +63,21 @@ pub const impl = struct {
     }
 
     pub fn deleteFile(path: []const u8) fs.DeleteFileError!void {
-        const resolved = resolvePath(path) catch return error.Unexpected;
+        const resolved = resolvePath(path) catch |err| return resolveBasicError(err);
         defer resolved.deinit();
 
         deleteHostFile(resolved.path) catch |err| return mapDeleteError(err);
     }
 
     pub fn makeDir(path: []const u8) fs.MakeDirError!void {
-        const resolved = resolvePath(path) catch return error.Unexpected;
+        const resolved = resolvePath(path) catch |err| return resolveBasicError(err);
         defer resolved.deinit();
 
         makeHostDir(resolved.path) catch |err| return mapMakeDirError(err);
     }
 
     pub fn stat(path: []const u8) fs.StatError!fs.Stat {
-        const resolved = resolvePath(path) catch return error.Unexpected;
+        const resolved = resolvePath(path) catch |err| return resolveBasicError(err);
         defer resolved.deinit();
 
         const file_stat = statHostFile(resolved.path) catch |err| return mapStatError(err);
@@ -90,22 +101,30 @@ const ResolvedPath = struct {
     }
 };
 
-fn resolvePath(path: []const u8) error{OutOfMemory}!ResolvedPath {
-    if (host_mount) |mount| {
+fn resolvePath(path: []const u8) error{ AccessDenied, OutOfMemory }!ResolvedPath {
+    var best_mount: ?HostMount = null;
+    for (host_mounts[0..host_mount_count]) |mount| {
         if (mountMatches(path, mount.prefix)) {
-            const suffix = if (path.len == mount.prefix.len)
-                ""
-            else
-                path[mount.prefix.len + 1 ..];
-            const resolved = if (suffix.len == 0)
-                try host_allocator.dupe(u8, mount.host_root)
-            else
-                try builtin_std.fs.path.join(host_allocator, &.{ mount.host_root, suffix });
-            return .{
-                .path = resolved,
-                .owned = resolved,
-            };
+            if (best_mount == null or mount.prefix.len > best_mount.?.prefix.len) {
+                best_mount = mount;
+            }
         }
+    }
+    if (best_mount) |mount| {
+        const suffix = if (path.len == mount.prefix.len)
+            ""
+        else
+            path[mount.prefix.len + 1 ..];
+        if (suffix.len > 0 and suffix[0] == '/') return error.AccessDenied;
+        if (hasParentComponent(suffix)) return error.AccessDenied;
+        const resolved = if (suffix.len == 0)
+            try host_allocator.dupe(u8, mount.host_root)
+        else
+            try builtin_std.fs.path.join(host_allocator, &.{ mount.host_root, suffix });
+        return .{
+            .path = resolved,
+            .owned = resolved,
+        };
     }
 
     return .{ .path = path };
@@ -114,6 +133,31 @@ fn resolvePath(path: []const u8) error{OutOfMemory}!ResolvedPath {
 fn mountMatches(path: []const u8, prefix: []const u8) bool {
     if (!builtin_std.mem.startsWith(u8, path, prefix)) return false;
     return path.len == prefix.len or path[prefix.len] == '/';
+}
+
+fn hasParentComponent(path: []const u8) bool {
+    var rest = path;
+    while (rest.len > 0) {
+        const slash = builtin_std.mem.indexOfScalar(u8, rest, '/') orelse rest.len;
+        if (builtin_std.mem.eql(u8, rest[0..slash], "..")) return true;
+        if (slash == rest.len) return false;
+        rest = rest[slash + 1 ..];
+    }
+    return false;
+}
+
+fn resolveOpenCreateError(err: error{ AccessDenied, OutOfMemory }) error{ AccessDenied, OutOfMemory } {
+    return switch (err) {
+        error.AccessDenied => error.AccessDenied,
+        error.OutOfMemory => error.OutOfMemory,
+    };
+}
+
+fn resolveBasicError(err: error{ AccessDenied, OutOfMemory }) error{ AccessDenied, Unexpected } {
+    return switch (err) {
+        error.AccessDenied => error.AccessDenied,
+        error.OutOfMemory => error.Unexpected,
+    };
 }
 
 fn openHostFile(path: []const u8, flags: builtin_std.fs.File.OpenFlags) !builtin_std.fs.File {
@@ -199,6 +243,87 @@ const HostFile = struct {
         builtin_std.heap.page_allocator.destroy(self);
     }
 };
+
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
+    const TestCase = struct {
+        fn replacesExistingHostMount() !void {
+            resetHostMountsForTest();
+            defer resetHostMountsForTest();
+
+            setHostMount("/storage", "/tmp/first");
+            setHostMount("/storage", "/tmp/second");
+
+            const resolved = try resolvePath("/storage/app.db");
+            defer resolved.deinit();
+
+            try grt.std.testing.expectEqualStrings("/tmp/second/app.db", resolved.path);
+        }
+
+        fn prefersLongestMatchingHostMount() !void {
+            resetHostMountsForTest();
+            defer resetHostMountsForTest();
+
+            setHostMount("/storage", "/tmp/storage");
+            setHostMount("/storage/cache", "/tmp/cache");
+
+            const resolved = try resolvePath("/storage/cache/image.bin");
+            defer resolved.deinit();
+
+            try grt.std.testing.expectEqualStrings("/tmp/cache/image.bin", resolved.path);
+        }
+
+        fn rejectsParentTraversalInsideHostMount() !void {
+            resetHostMountsForTest();
+            defer resetHostMountsForTest();
+
+            setHostMount("/storage", "/tmp/storage");
+
+            try grt.std.testing.expectError(error.AccessDenied, resolvePath("/storage/../outside"));
+            try grt.std.testing.expectError(error.AccessDenied, resolvePath("/storage/nested/../outside"));
+            try grt.std.testing.expectError(error.AccessDenied, resolvePath("/storage//outside"));
+        }
+
+        fn resetHostMountsForTest() void {
+            host_mount_count = 0;
+        }
+    };
+
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            TestCase.replacesExistingHostMount() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.prefersLongestMatchingHostMount() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.rejectsParentTraversalInsideHostMount() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
+}
 
 fn mapOpenError(err: anyerror) fs.OpenFileError {
     return switch (err) {
