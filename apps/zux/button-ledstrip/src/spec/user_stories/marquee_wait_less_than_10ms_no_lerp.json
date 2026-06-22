@@ -4,7 +4,7 @@
     "name": "marquee wait less than 10ms no lerp",
     "description": "Waiting less than 10ms in marquee does not lerp.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "marquee",

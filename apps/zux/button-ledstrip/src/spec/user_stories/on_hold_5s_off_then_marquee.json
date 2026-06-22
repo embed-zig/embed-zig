@@ -4,7 +4,7 @@
     "name": "on hold 5s off then marquee",
     "description": "Holding Power for 5s while on turns off at 3s and enters marquee at 5s.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "solid",

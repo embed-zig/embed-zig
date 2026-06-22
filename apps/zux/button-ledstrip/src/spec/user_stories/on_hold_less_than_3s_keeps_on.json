@@ -4,7 +4,7 @@
     "name": "on hold less than 3s keeps on",
     "description": "Holding Power for less than 3s while on does not turn the strip off.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "solid",

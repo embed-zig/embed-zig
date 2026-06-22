@@ -4,7 +4,7 @@
     "name": "marquee hold after 5s keeps progress",
     "description": "Repeated long-press events from the same hold that entered marquee keep the in-flight color progress.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "solid",

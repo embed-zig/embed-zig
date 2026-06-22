@@ -4,7 +4,7 @@
     "name": "off hold between 3s and 5s turns white not marquee",
     "description": "Holding Power longer than 3s but less than 5s while off turns white without marquee.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "off",

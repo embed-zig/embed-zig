@@ -4,7 +4,7 @@
     "name": "color stable when target reached",
     "description": "When visible color already equals target color, later ticks keep it stable.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "solid",

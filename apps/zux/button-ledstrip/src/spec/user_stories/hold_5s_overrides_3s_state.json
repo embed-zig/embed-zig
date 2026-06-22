@@ -4,7 +4,7 @@
     "name": "hold 5s overrides 3s state",
     "description": "At 5s marquee overrides the 3s off or white intermediate state.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "solid",

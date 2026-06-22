@@ -4,7 +4,7 @@
     "name": "blue click does not target other colors",
     "description": "Given target blue, a Power click targets green and not another color.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "solid",

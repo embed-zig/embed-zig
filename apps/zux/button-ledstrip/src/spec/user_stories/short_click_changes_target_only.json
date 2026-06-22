@@ -4,7 +4,7 @@
     "name": "short click changes target only",
     "description": "A short Power click changes only the target color; visible color waits for later ticks.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "solid",

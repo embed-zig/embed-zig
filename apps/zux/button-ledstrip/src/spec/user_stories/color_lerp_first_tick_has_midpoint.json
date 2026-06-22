@@ -4,7 +4,7 @@
     "name": "color lerp first tick has midpoint",
     "description": "The first 10ms tick from red toward blue produces a midpoint instead of an endpoint.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "solid",

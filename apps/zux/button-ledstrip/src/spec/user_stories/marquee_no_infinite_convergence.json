@@ -4,7 +4,7 @@
     "name": "marquee no infinite convergence",
     "description": "Repeated marquee ticks expose every red-channel step and do not get stuck before switching target colors.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "marquee",

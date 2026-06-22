@@ -4,7 +4,7 @@
     "name": "color does not jump before threshold",
     "description": "Before the close-enough threshold, visible color does not jump directly to target.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "solid",

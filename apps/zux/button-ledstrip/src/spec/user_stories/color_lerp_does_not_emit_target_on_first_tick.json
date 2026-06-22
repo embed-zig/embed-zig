@@ -4,7 +4,7 @@
     "name": "color lerp does not emit target on first tick",
     "description": "The first 10ms tick from red toward blue does not show blue immediately.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "solid",

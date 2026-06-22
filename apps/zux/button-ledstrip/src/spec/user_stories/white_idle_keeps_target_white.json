@@ -4,7 +4,7 @@
     "name": "white idle keeps target white",
     "description": "Given target white, waiting without Power keeps the target white.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "solid",

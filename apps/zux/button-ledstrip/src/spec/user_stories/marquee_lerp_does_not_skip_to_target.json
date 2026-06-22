@@ -4,7 +4,7 @@
     "name": "marquee lerp does not skip to target",
     "description": "The first marquee render from black toward red does not skip directly to red.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "marquee",

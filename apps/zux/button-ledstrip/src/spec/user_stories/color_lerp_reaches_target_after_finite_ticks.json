@@ -4,7 +4,7 @@
     "name": "color lerp reaches target after finite ticks",
     "description": "Repeated 10ms ticks from red toward blue eventually reach blue.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "solid",

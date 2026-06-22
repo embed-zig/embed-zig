@@ -4,7 +4,7 @@
     "name": "marquee short click keeps marquee",
     "description": "A short Power click in marquee does not exit marquee or return to normal color cycle.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "marquee",

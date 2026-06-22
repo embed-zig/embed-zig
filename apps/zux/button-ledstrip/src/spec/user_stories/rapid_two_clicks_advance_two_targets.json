@@ -4,7 +4,7 @@
     "name": "rapid two clicks advance two targets",
     "description": "Two rapid Power clicks advance target red through blue and end at green.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "solid",

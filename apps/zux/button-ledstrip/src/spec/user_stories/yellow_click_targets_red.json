@@ -4,7 +4,7 @@
     "name": "yellow click targets red",
     "description": "Given target yellow, a Power click changes the target to red.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "solid",

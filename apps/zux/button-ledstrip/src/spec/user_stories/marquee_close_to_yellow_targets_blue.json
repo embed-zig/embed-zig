@@ -4,7 +4,7 @@
     "name": "marquee close to yellow targets blue",
     "description": "When marquee reaches yellow, the next 10ms tick targets blue.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "marquee",

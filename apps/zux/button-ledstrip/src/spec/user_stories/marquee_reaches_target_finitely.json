@@ -4,7 +4,7 @@
     "name": "marquee reaches target finitely",
     "description": "A marquee tick that reaches the current target switches to the next target color immediately.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "marquee",

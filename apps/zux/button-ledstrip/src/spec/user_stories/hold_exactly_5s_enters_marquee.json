@@ -4,7 +4,7 @@
     "name": "hold exactly 5s enters marquee",
     "description": "Holding Power exactly 5s enters marquee.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "solid",

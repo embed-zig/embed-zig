@@ -4,7 +4,7 @@
     "name": "off idle ticks keep off",
     "description": "Ticks alone keep an off LED strip off.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "off",

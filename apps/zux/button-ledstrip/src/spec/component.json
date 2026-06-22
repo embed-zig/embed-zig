@@ -4,7 +4,7 @@
     {
       "kind": "Component/button/single",
       "spec": {
-        "label": "button",
+        "label": "boot",
         "id": 1
       }
     },

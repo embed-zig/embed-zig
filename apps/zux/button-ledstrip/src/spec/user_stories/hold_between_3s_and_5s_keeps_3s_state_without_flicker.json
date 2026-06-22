@@ -4,7 +4,7 @@
     "name": "hold between 3s and 5s keeps 3s state without flicker",
     "description": "Continuing to hold between 3s and 5s keeps the 3s state instead of toggling repeatedly.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "off",

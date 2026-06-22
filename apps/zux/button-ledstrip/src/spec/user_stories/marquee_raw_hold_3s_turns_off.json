@@ -4,7 +4,7 @@
     "name": "marquee raw hold 3s turns off",
     "description": "Holding the raw Power button while marquee is active emits a 3s long press and turns the strip off.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "marquee",
@@ -46,7 +46,7 @@
         },
         "outputs": [
           {
-            "label": "button",
+            "label": "boot",
             "state": {
               "source_id": 1,
               "button_id": null,

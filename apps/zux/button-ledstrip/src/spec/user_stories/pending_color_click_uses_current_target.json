@@ -4,7 +4,7 @@
     "name": "pending color click uses current target",
     "description": "When a transition toward blue is pending, another Power click advances the target to green.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "solid",

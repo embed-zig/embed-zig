@@ -4,7 +4,7 @@
     "name": "marquee lerp first tick has midpoint",
     "description": "The first marquee 10ms tick from black toward red produces a midpoint.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "marquee",

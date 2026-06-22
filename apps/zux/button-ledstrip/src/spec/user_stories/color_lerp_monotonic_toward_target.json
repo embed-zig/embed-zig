@@ -4,7 +4,7 @@
     "name": "color lerp monotonic toward target",
     "description": "Several 10ms ticks from red toward blue keep decreasing red and increasing blue.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "solid",

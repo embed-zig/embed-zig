@@ -4,7 +4,7 @@
     "name": "marquee not close keeps target",
     "description": "If marquee is not close to the current target, the next 10ms tick keeps the same target.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "marquee",

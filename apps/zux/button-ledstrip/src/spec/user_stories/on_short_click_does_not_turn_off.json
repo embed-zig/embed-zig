@@ -4,7 +4,7 @@
     "name": "on short click does not turn off",
     "description": "A short Power click while on changes target color but does not turn off.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "solid",

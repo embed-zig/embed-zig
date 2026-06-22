@@ -4,7 +4,7 @@
     "name": "on hold between 3s and 5s turns off not marquee",
     "description": "Holding Power longer than 3s but less than 5s turns off without marquee.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "solid",

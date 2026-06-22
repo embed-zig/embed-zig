@@ -4,7 +4,7 @@
     "name": "hold less than 5s not marquee",
     "description": "Holding Power less than 5s does not enter marquee.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "solid",

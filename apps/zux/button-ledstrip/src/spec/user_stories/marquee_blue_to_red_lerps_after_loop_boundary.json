@@ -4,7 +4,7 @@
     "name": "marquee blue to red lerps after loop boundary",
     "description": "After marquee retargets from blue to red, the next 10ms tick lerps through a purple midpoint instead of jumping to red.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "marquee",

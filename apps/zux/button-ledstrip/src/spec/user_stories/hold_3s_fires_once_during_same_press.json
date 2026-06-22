@@ -4,7 +4,7 @@
     "name": "hold 3s fires once during same press",
     "description": "The 3s hold action fires only once while the same press remains held before 5s.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "solid",

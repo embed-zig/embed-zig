@@ -4,7 +4,7 @@
     "name": "color lerp render outputs midpoint to strip",
     "description": "Render writes the first interpolation midpoint to the actual LED strip pixel.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "solid",

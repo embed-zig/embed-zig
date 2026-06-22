@@ -4,7 +4,7 @@
     "name": "off short click keeps off",
     "description": "A short Power click while off does not turn on, enter color cycle, or enter marquee.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "off",

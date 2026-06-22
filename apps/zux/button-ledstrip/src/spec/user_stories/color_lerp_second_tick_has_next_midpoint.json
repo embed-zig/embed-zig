@@ -4,7 +4,7 @@
     "name": "color lerp second tick has next midpoint",
     "description": "The second 10ms tick from red toward blue advances to a new midpoint closer to blue.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "solid",

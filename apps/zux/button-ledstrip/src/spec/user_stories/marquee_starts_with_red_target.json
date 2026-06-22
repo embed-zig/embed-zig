@@ -4,7 +4,7 @@
     "name": "marquee starts with red target",
     "description": "Entering marquee starts with red as the first target color.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "off",

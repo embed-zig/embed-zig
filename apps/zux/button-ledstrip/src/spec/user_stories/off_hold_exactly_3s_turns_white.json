@@ -4,7 +4,7 @@
     "name": "off hold exactly 3s turns white",
     "description": "Holding Power for exactly 3s while off turns the strip white.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "off",

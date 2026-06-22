@@ -4,7 +4,7 @@
     "name": "on hold exactly 3s turns off",
     "description": "Holding Power for exactly 3s while on turns the strip off.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "solid",

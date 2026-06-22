@@ -4,7 +4,7 @@
     "name": "marquee tick lerps to target",
     "description": "A 10ms tick in marquee lerps visible color toward the current target.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "marquee",

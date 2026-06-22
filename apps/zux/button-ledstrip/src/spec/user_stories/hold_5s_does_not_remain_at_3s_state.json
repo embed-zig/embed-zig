@@ -4,7 +4,7 @@
     "name": "hold 5s does not remain at 3s state",
     "description": "After a 5s hold the strip does not remain in the 3s intermediate state.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "off",

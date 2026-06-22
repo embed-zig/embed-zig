@@ -4,7 +4,7 @@
     "name": "marquee hold 5s stays off after 3s",
     "description": "A hold that starts while marquee is already active turns off at 3s and does not re-enter marquee at 5s.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "marquee",

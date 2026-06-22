@@ -113,7 +113,7 @@ pub fn make(comptime platform_ctx: type, comptime platform_grt: type) type {
             var init_config = base_config;
             init_config.allocator = allocator;
             init_config.initial_state = .{
-                .button = .{},
+                .boot = .{},
                 .strip = .{},
                 .scene = .{
                     .mode = .off,

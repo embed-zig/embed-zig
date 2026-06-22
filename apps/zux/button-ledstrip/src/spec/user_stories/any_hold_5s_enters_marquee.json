@@ -4,7 +4,7 @@
     "name": "any hold 5s enters marquee",
     "description": "Holding Power for 5s from any state enters marquee.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "solid",

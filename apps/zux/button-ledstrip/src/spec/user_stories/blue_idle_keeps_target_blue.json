@@ -4,7 +4,7 @@
     "name": "blue idle keeps target blue",
     "description": "Given target blue, waiting without Power keeps the target blue.",
     "initial_state": {
-      "button": {},
+      "boot": {},
       "strip": {},
       "scene": {
         "mode": "solid",
