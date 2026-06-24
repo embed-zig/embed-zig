@@ -1,6 +1,6 @@
 const glib = @import("glib");
 const Protocol = @import("PerfProtocol.zig");
-const MuxEndpointFile = @import("MuxEndpoint.zig");
+const PerfEndpointFile = @import("PerfEndpoint.zig");
 
 const AddrPort = glib.net.netip.AddrPort;
 const transfer_timeout = 180 * glib.time.duration.Second;
@@ -19,7 +19,7 @@ pub fn make(comptime grt: type) type {
     const Net = grt.net;
     const Conn = Net.Conn;
     const PacketConn = Net.PacketConn;
-    const MuxEndpoint = MuxEndpointFile.make(grt);
+    const PerfEndpoint = PerfEndpointFile.make(grt);
 
     return struct {
         const Self = @This();
@@ -171,7 +171,7 @@ pub fn make(comptime grt: type) type {
             });
 
             const remote = try waitHello(pc, request.conv, self.config.idle_timeout);
-            var endpoint: MuxEndpoint = undefined;
+            var endpoint: PerfEndpoint = undefined;
             try endpoint.init(self.allocator, pc, remote, request.conv, request, protocolMode(request.protocol));
             defer endpoint.deinit();
 
@@ -655,7 +655,7 @@ pub fn make(comptime grt: type) type {
             for (buf, 0..) |*b, i| b.* = @truncate(i);
         }
 
-        fn protocolMode(protocol: Protocol.Protocol) MuxEndpointFile.Mode {
+        fn protocolMode(protocol: Protocol.Protocol) PerfEndpointFile.Mode {
             return switch (protocol) {
                 .ikcp_packet => .packet,
                 .ikcp_stream => .stream,

@@ -1,12 +1,10 @@
 //! Netconn-like owner around ikcp.
 //!
-//! Public read/write and packet input only touch mux-owned rings. A single mux
-//! task owns the ikcp control block and serializes every ikcp_* call.
+//! Public read/write and packet input serialize ikcp through one mutex. The session
+//! task only drives ikcp's timer.
 
 const glib = @import("glib");
 const kcp = @import("../kcp.zig");
-const BytesRingFile = @import("BytesRing.zig");
-const PacketRingFile = @import("PacketRing.zig");
 
 pub const Mode = enum {
     packet,
@@ -36,22 +34,13 @@ pub const PacketBearer = struct {
 
 pub const Output = PacketBearer;
 
-const default_tx_bytes_capacity: usize = 32 * 1024;
-const default_rx_bytes_capacity: usize = 64 * 1024;
 const default_task_options: glib.task.Options = .{ .min_stack_size = 96 * 1024 };
-const drive_packet_buf_capacity: usize = 2048;
-const drive_send_buf_capacity: usize = 8192;
-const drive_recv_buf_capacity: usize = 8192;
-const cooperative_sleep_interval: usize = 32;
-const cooperative_sleep_duration = 1 * glib.time.duration.MilliSecond;
 
 pub fn make(comptime grt: type) type {
     const std = grt.std;
     const Mutex = grt.sync.Mutex;
     const Condition = grt.sync.Condition;
     const SegmentPool = kcp.SegmentPool.make(grt);
-    const PacketRing = PacketRingFile.make(grt);
-    const BytesRing = BytesRingFile.make(grt);
 
     return struct {
         const Self = @This();
@@ -59,16 +48,14 @@ pub fn make(comptime grt: type) type {
         allocator: std.mem.Allocator,
         inst: *kcp.Kcp,
         segment_pool: SegmentPool,
-        input_packets: PacketRing,
-        tx_bytes: BytesRing,
-        rx_bytes: BytesRing,
         bearer: PacketBearer,
         output_ctx: OutputContext,
         output_err: ?anyerror = null,
         start_at: glib.time.instant.Time,
-        wake_mutex: Mutex = .{},
-        wake_cond: Condition = .{},
-        wake_pending: bool = false,
+        kcp_mutex: Mutex = .{},
+        read_cond: Condition = .{},
+        write_cond: Condition = .{},
+        loop_cond: Condition = .{},
         stopping: bool = false,
         running: bool = false,
         task_handle: ?grt.task.Handle = null,
@@ -134,14 +121,10 @@ pub fn make(comptime grt: type) type {
             config: Config,
             bearer: PacketBearer,
         ) !void {
-            if (config.mtu <= kcp.OVERHEAD) return error.KcpMuxInvalidMtu;
-            if (config.mtu > drive_packet_buf_capacity) return error.KcpMuxMtuTooLarge;
-            if (config.send_window == 0 or config.recv_window == 0) return error.KcpMuxInvalidWindow;
+            if (config.mtu <= kcp.OVERHEAD) return error.KcpSessionInvalidMtu;
+            if (config.send_window == 0 or config.recv_window == 0) return error.KcpSessionInvalidWindow;
 
             const mss = config.mtu - kcp.OVERHEAD;
-            const window_segments = @max(@as(usize, config.send_window), @as(usize, config.recv_window));
-            const packet_slots = @max(window_segments, @as(usize, 32));
-
             var segment_pool = try SegmentPool.init(
                 allocator,
                 mss,
@@ -149,63 +132,52 @@ pub fn make(comptime grt: type) type {
             );
             errdefer segment_pool.deinit();
 
-            var input_packets = try PacketRing.init(allocator, packet_slots, config.mtu);
-            errdefer input_packets.deinit();
-            var tx_bytes = try BytesRing.init(allocator, default_tx_bytes_capacity);
-            errdefer tx_bytes.deinit();
-            var rx_bytes = try BytesRing.init(allocator, default_rx_bytes_capacity);
-            errdefer rx_bytes.deinit();
-
             self.* = .{
                 .allocator = allocator,
                 .inst = undefined,
                 .segment_pool = segment_pool,
-                .input_packets = input_packets,
-                .tx_bytes = tx_bytes,
-                .rx_bytes = rx_bytes,
                 .bearer = bearer,
                 .output_ctx = undefined,
                 .start_at = grt.time.instant.now(),
                 .config = config,
             };
-            self.output_ctx = .{ .mux = self };
+            self.output_ctx = .{ .session = self };
 
             self.inst = kcp.createWithAllocator(conv, &self.output_ctx, self.segment_pool.allocator()) orelse {
-                return error.KcpMuxCreateFailed;
+                return error.KcpSessionCreateFailed;
             };
             errdefer kcp.release(self.inst);
 
             kcp.setOutput(self.inst, OutputContext.output);
-            if (kcp.setMtu(self.inst, @intCast(config.mtu)) != 0) return error.KcpMuxSetMtuFailed;
+            if (kcp.setMtu(self.inst, @intCast(config.mtu)) != 0) return error.KcpSessionSetMtuFailed;
             if (kcp.nodelay(
                 self.inst,
                 config.nodelay,
                 config.interval_ms,
                 config.resend,
                 config.no_congestion_control,
-            ) != 0) return error.KcpMuxNodelayFailed;
+            ) != 0) return error.KcpSessionNodelayFailed;
             if (kcp.wndsize(self.inst, @intCast(config.send_window), @intCast(config.recv_window)) != 0) {
-                return error.KcpMuxWndsizeFailed;
+                return error.KcpSessionWndsizeFailed;
             }
-            if (config.min_rto_ms > std.math.maxInt(c_int)) return error.KcpMuxInvalidMinRto;
+            if (config.min_rto_ms > std.math.maxInt(c_int)) return error.KcpSessionInvalidMinRto;
             self.inst.*.rx_minrto = @intCast(config.min_rto_ms);
             if (self.inst.*.rx_rto < self.inst.*.rx_minrto) self.inst.*.rx_rto = self.inst.*.rx_minrto;
             self.inst.*.stream = if (config.mode == .stream) 1 else 0;
         }
 
         pub fn start(self: *Self, options: glib.task.Options) !void {
-            self.wake_mutex.lock();
-            defer self.wake_mutex.unlock();
-            if (self.running) return error.KcpMuxAlreadyStarted;
+            self.kcp_mutex.lock();
+            defer self.kcp_mutex.unlock();
+            if (self.running) return error.KcpSessionAlreadyStarted;
             self.stopping = false;
-            self.wake_pending = false;
             self.task_err = null;
             self.running = true;
             errdefer {
                 self.running = false;
                 self.task_handle = null;
             }
-            self.task_handle = try grt.task.go("kcp/mux", options, glib.task.Routine.init(self, driveLoopTask));
+            self.task_handle = try grt.task.go("kcp/session", options, glib.task.Routine.init(self, driveLoopTask));
         }
 
         pub fn startDefault(self: *Self) !void {
@@ -213,41 +185,50 @@ pub fn make(comptime grt: type) type {
         }
 
         pub fn stop(self: *Self) void {
-            self.wake_mutex.lock();
+            self.kcp_mutex.lock();
             const handle = self.task_handle;
             const should_join = self.running;
             self.stopping = true;
-            self.wake_pending = true;
-            self.wake_cond.broadcast();
-            self.wake_mutex.unlock();
-
-            self.input_packets.close();
-            self.tx_bytes.close();
-            self.rx_bytes.close();
+            self.read_cond.broadcast();
+            self.write_cond.broadcast();
+            self.loop_cond.broadcast();
+            self.kcp_mutex.unlock();
 
             if (should_join) {
                 if (handle) |task| task.join();
             }
 
-            self.wake_mutex.lock();
+            self.kcp_mutex.lock();
             self.running = false;
             self.task_handle = null;
-            self.wake_mutex.unlock();
+            self.read_cond.broadcast();
+            self.write_cond.broadcast();
+            self.loop_cond.broadcast();
+            self.kcp_mutex.unlock();
         }
 
         pub fn deinit(self: *Self) void {
             self.stop();
             kcp.release(self.inst);
-            self.rx_bytes.deinit();
-            self.tx_bytes.deinit();
-            self.input_packets.deinit();
             self.segment_pool.deinit();
             self.* = undefined;
         }
 
         pub fn inputPacket(self: *Self, datagram: []const u8) !void {
-            try self.input_packets.pushBlocking(datagram);
-            self.wake();
+            self.kcp_mutex.lock();
+            defer self.kcp_mutex.unlock();
+            if (self.stopping) return error.Closed;
+
+            const rc = kcp.input(self.inst, datagram.ptr, datagram.len);
+            if (rc < 0) {
+                self.input_errors_total +%= 1;
+                self.updateCachedStateLocked();
+                return;
+            }
+            self.input_packets_total +%= 1;
+            self.updateCachedStateLocked();
+            self.read_cond.broadcast();
+            self.write_cond.broadcast();
         }
 
         pub fn inputDatagram(self: *Self, datagram: []const u8) !void {
@@ -255,27 +236,19 @@ pub fn make(comptime grt: type) type {
         }
 
         pub fn write(self: *Self, payload: []const u8) !usize {
-            const written = try self.tx_bytes.writeBlocking(payload);
-            self.wake();
-            return written;
+            return self.writeWithTimeout(payload, null);
         }
 
         pub fn writeTimeout(self: *Self, payload: []const u8, timeout: glib.time.duration.Duration) !usize {
-            const written = try self.tx_bytes.writeTimeout(payload, timeout);
-            self.wake();
-            return written;
+            return self.writeWithTimeout(payload, timeout);
         }
 
         pub fn read(self: *Self, buf: []u8) !usize {
-            const n = try self.rx_bytes.readBlocking(buf);
-            if (n != 0) self.wake();
-            return n;
+            return self.readWithTimeout(buf, null);
         }
 
         pub fn readTimeout(self: *Self, buf: []u8, timeout: glib.time.duration.Duration) !usize {
-            const n = try self.rx_bytes.readTimeout(buf, timeout);
-            if (n != 0) self.wake();
-            return n;
+            return self.readWithTimeout(buf, timeout);
         }
 
         pub fn close(self: *Self) void {
@@ -284,159 +257,132 @@ pub fn make(comptime grt: type) type {
 
         pub fn waitsnd(self: *const Self) usize {
             const mutable: *Self = @constCast(self);
-            mutable.wake_mutex.lock();
-            defer mutable.wake_mutex.unlock();
-            return mutable.pending_segments;
+            mutable.kcp_mutex.lock();
+            defer mutable.kcp_mutex.unlock();
+            const pending = kcp.waitsnd(mutable.inst);
+            return if (pending <= 0) 0 else @intCast(pending);
         }
 
         pub fn snapshot(self: *const Self) Snapshot {
             const mutable: *Self = @constCast(self);
-            mutable.wake_mutex.lock();
-            defer mutable.wake_mutex.unlock();
+            mutable.kcp_mutex.lock();
+            defer mutable.kcp_mutex.unlock();
+            mutable.updateCachedStateLocked();
             return mutable.cached_snapshot;
         }
 
         pub fn checkTaskError(self: *Self) !void {
-            self.wake_mutex.lock();
-            defer self.wake_mutex.unlock();
+            self.kcp_mutex.lock();
+            defer self.kcp_mutex.unlock();
             if (self.task_err) |err| return err;
         }
 
         fn driveLoopTask(self: *Self) void {
             self.driveLoop() catch |err| {
-                std.log.scoped(.kcp_mux).err("drive loop failed: {s}", .{@errorName(err)});
-                self.wake_mutex.lock();
+                std.log.scoped(.kcp_session).err("drive loop failed: {s}", .{@errorName(err)});
+                self.kcp_mutex.lock();
                 self.task_err = err;
-                self.wake_pending = true;
-                self.wake_mutex.unlock();
-                self.input_packets.close();
-                self.tx_bytes.close();
-                self.rx_bytes.close();
+                self.stopping = true;
+                self.read_cond.broadcast();
+                self.write_cond.broadcast();
+                self.loop_cond.broadcast();
+                self.kcp_mutex.unlock();
             };
         }
 
         fn driveLoop(self: *Self) !void {
-            var packet_buf: [drive_packet_buf_capacity]u8 = undefined;
-            var send_buf: [drive_send_buf_capacity]u8 = undefined;
-            var recv_buf: [drive_recv_buf_capacity]u8 = undefined;
-            var progress_rounds: usize = 0;
+            var next_tick = glib.time.instant.add(grt.time.instant.now(), self.intervalDuration());
 
-            var now_ms = self.nowMs();
-            self.beginOutputBurst();
-            kcp.update(self.inst, now_ms);
-            self.updateCachedState();
-            try self.checkOutput();
-
-            while (!self.shouldStop()) {
-                now_ms = self.nowMs();
-                var made_progress = false;
-
-                while (self.input_packets.tryPop(&packet_buf) catch |err| switch (err) {
-                    error.Closed => null,
-                    else => return err,
-                }) |packet_len| {
-                    const rc = kcp.input(self.inst, packet_buf[0..packet_len].ptr, packet_len);
-                    if (rc < 0) {
-                        self.input_errors_total +%= 1;
-                        made_progress = true;
-                        continue;
-                    }
-                    self.input_packets_total +%= 1;
-                    made_progress = true;
+            while (true) {
+                self.kcp_mutex.lock();
+                if (self.stopping) {
+                    self.kcp_mutex.unlock();
+                    return;
                 }
 
-                while (self.sendAdmissionBytes() > 0) {
-                    const n = self.tx_bytes.tryRead(send_buf[0..@min(send_buf.len, self.sendAdmissionBytes())]) catch |err| switch (err) {
-                        error.Closed => 0,
-                        else => return err,
-                    };
-                    if (n == 0) break;
-                    if (n > std.math.maxInt(c_int)) return error.KcpMuxPayloadTooLarge;
-                    const rc = kcp.send(self.inst, send_buf[0..n].ptr, @intCast(n));
-                    if (rc < 0) return error.KcpMuxSendFailed;
-                    made_progress = true;
-                }
+                self.beginOutputBurst();
+                kcp.update(self.inst, self.nowMs());
+                self.checkOutputLocked() catch |err| {
+                    self.kcp_mutex.unlock();
+                    return err;
+                };
+                self.updateCachedStateLocked();
+                self.read_cond.broadcast();
+                self.write_cond.broadcast();
 
-                const due = kcp.check(self.inst, now_ms) <= now_ms;
-                if (made_progress or due) {
-                    self.beginOutputBurst();
-                    if (due) {
-                        kcp.update(self.inst, now_ms);
-                    } else {
-                        kcp.flush(self.inst);
-                    }
-                    try self.checkOutput();
-                    made_progress = true;
+                const wait_ns = glib.time.instant.sub(next_tick, grt.time.instant.now());
+                if (wait_ns > 0 and !self.stopping) {
+                    self.loop_cond.timedWait(&self.kcp_mutex, @intCast(wait_ns)) catch {};
                 }
-
-                while (true) {
-                    const peek = kcp.peeksize(self.inst);
-                    if (peek <= 0) break;
-                    const recv_len = @min(@as(usize, @intCast(peek)), recv_buf.len);
-                    if (self.rx_bytes.availableWrite() < recv_len) break;
-                    const rc = kcp.recv(self.inst, recv_buf[0..recv_len].ptr, @intCast(recv_len));
-                    if (rc < 0) break;
-                    const received: usize = @intCast(rc);
-                    if (received == 0) break;
-                    const admitted = self.rx_bytes.tryWrite(recv_buf[0..received]) catch |err| switch (err) {
-                        error.Closed => return,
-                        else => return err,
-                    };
-                    if (admitted != received) return error.KcpMuxReceiveRingShortWrite;
-                    made_progress = true;
+                if (wait_ns <= 0) {
+                    const now = grt.time.instant.now();
+                    next_tick = now;
                 }
-                self.updateCachedState();
-
-                if (!made_progress) {
-                    progress_rounds = 0;
-                    self.waitForWake(now_ms);
-                } else {
-                    progress_rounds += 1;
-                    if (progress_rounds >= cooperative_sleep_interval) {
-                        progress_rounds = 0;
-                        grt.time.sleep(cooperative_sleep_duration);
-                    }
-                }
+                next_tick = glib.time.instant.add(next_tick, self.intervalDuration());
+                self.kcp_mutex.unlock();
             }
         }
 
-        fn waitForWake(self: *Self, now_ms: u32) void {
-            const check_ms = kcp.check(self.inst, now_ms);
-            const timeout_ns: u64 = if (check_ms <= now_ms)
-                0
-            else
-                @as(u64, check_ms - now_ms) * @as(u64, @intCast(glib.time.duration.MilliSecond));
+        fn writeWithTimeout(self: *Self, payload: []const u8, timeout: ?glib.time.duration.Duration) !usize {
+            if (payload.len == 0) return 0;
+            const deadline = makeDeadline(timeout);
 
-            self.wake_mutex.lock();
-            defer self.wake_mutex.unlock();
-            if (self.stopping) return;
-            if (timeout_ns == 0) return;
-            if (self.wake_pending) {
-                self.wake_pending = false;
-                return;
+            self.kcp_mutex.lock();
+            defer self.kcp_mutex.unlock();
+            while (true) {
+                if (self.stopping) return error.Closed;
+                const admitted = @min(payload.len, self.sendAdmissionBytesLocked());
+                if (admitted != 0) {
+                    const n = @min(admitted, @as(usize, @intCast(std.math.maxInt(c_int))));
+                    const rc = kcp.send(self.inst, payload[0..n].ptr, @intCast(n));
+                    if (rc < 0) return error.KcpSessionSendFailed;
+                    self.updateCachedStateLocked();
+                    self.write_cond.broadcast();
+                    return n;
+                }
+                try self.waitForWriteLocked(deadline);
             }
-            self.wake_cond.timedWait(&self.wake_mutex, timeout_ns) catch {};
-            self.wake_pending = false;
         }
 
-        fn wake(self: *Self) void {
-            self.wake_mutex.lock();
-            defer self.wake_mutex.unlock();
-            self.wake_pending = true;
-            self.wake_cond.signal();
+        fn readWithTimeout(self: *Self, buf: []u8, timeout: ?glib.time.duration.Duration) !usize {
+            if (buf.len == 0) return 0;
+            const deadline = makeDeadline(timeout);
+
+            self.kcp_mutex.lock();
+            defer self.kcp_mutex.unlock();
+            while (true) {
+                if (self.stopping) return error.Closed;
+                const peek = kcp.peeksize(self.inst);
+                if (peek <= 0) {
+                    try self.waitForReadLocked(deadline);
+                    continue;
+                }
+                const recv_len = @min(@as(usize, @intCast(peek)), buf.len);
+                const rc = kcp.recv(self.inst, buf[0..recv_len].ptr, @intCast(recv_len));
+                if (rc < 0) return error.KcpSessionReceiveFailed;
+                const received: usize = @intCast(rc);
+                if (received == 0) {
+                    try self.waitForReadLocked(deadline);
+                    continue;
+                }
+                self.updateCachedStateLocked();
+                self.write_cond.broadcast();
+                return received;
+            }
         }
 
-        fn updateCachedState(self: *Self) void {
+        fn updateCachedStateLocked(self: *Self) void {
             const pending = kcp.waitsnd(self.inst);
+            const peek = kcp.peeksize(self.inst);
             const pool = self.segment_pool.snapshot();
             const snap = Snapshot{
                 .waitsnd = if (pending <= 0) 0 else @intCast(pending),
-                .tx_bytes = self.tx_bytes.availableRead(),
-                .tx_room = self.tx_bytes.availableWrite(),
-                .rx_bytes = self.rx_bytes.availableRead(),
-                .rx_room = self.rx_bytes.availableWrite(),
-                .input_queue = self.input_packets.availableRead(),
-                .input_room = self.input_packets.availableWrite(),
+                .tx_bytes = 0,
+                .tx_room = self.sendAdmissionBytesLocked(),
+                .rx_bytes = if (peek <= 0) 0 else @intCast(peek),
+                .rx_room = 0,
+                .input_queue = 0,
+                .input_room = 0,
                 .snd_queue = self.inst.*.nsnd_que,
                 .snd_buf = self.inst.*.nsnd_buf,
                 .rcv_queue = self.inst.*.nrcv_que,
@@ -470,13 +416,11 @@ pub fn make(comptime grt: type) type {
                 .pool_fallback_frees = pool.fallback_frees,
                 .pool_allocation_failures = pool.allocation_failures,
             };
-            self.wake_mutex.lock();
             self.pending_segments = snap.waitsnd;
             self.cached_snapshot = snap;
-            self.wake_mutex.unlock();
         }
 
-        fn sendAdmissionBytes(self: *Self) usize {
+        fn sendAdmissionBytesLocked(self: *Self) usize {
             const pending = kcp.waitsnd(self.inst);
             if (pending < 0) return 0;
             const pending_segments: usize = @intCast(pending);
@@ -492,8 +436,8 @@ pub fn make(comptime grt: type) type {
         }
 
         fn shouldStop(self: *Self) bool {
-            self.wake_mutex.lock();
-            defer self.wake_mutex.unlock();
+            self.kcp_mutex.lock();
+            defer self.kcp_mutex.unlock();
             return self.stopping;
         }
 
@@ -504,20 +448,50 @@ pub fn make(comptime grt: type) type {
             return @intCast(@min(elapsed_ms, std.math.maxInt(u32)));
         }
 
-        fn checkOutput(self: *Self) !void {
+        fn checkOutputLocked(self: *Self) !void {
             if (self.output_err) |err| {
                 self.output_err = null;
                 return err;
             }
         }
 
+        fn intervalDuration(self: *const Self) glib.time.duration.Duration {
+            const interval_ms: glib.time.duration.Duration = if (self.config.interval_ms <= 0) 1 else @intCast(self.config.interval_ms);
+            return interval_ms * glib.time.duration.MilliSecond;
+        }
+
+        fn makeDeadline(timeout: ?glib.time.duration.Duration) ?glib.time.instant.Time {
+            const value = timeout orelse return null;
+            return glib.time.instant.add(grt.time.instant.now(), value);
+        }
+
+        fn waitForReadLocked(self: *Self, deadline: ?glib.time.instant.Time) error{Timeout}!void {
+            const value = deadline orelse {
+                self.read_cond.wait(&self.kcp_mutex);
+                return;
+            };
+            const remaining = glib.time.instant.sub(value, grt.time.instant.now());
+            if (remaining <= 0) return error.Timeout;
+            self.read_cond.timedWait(&self.kcp_mutex, @intCast(remaining)) catch return error.Timeout;
+        }
+
+        fn waitForWriteLocked(self: *Self, deadline: ?glib.time.instant.Time) error{Timeout}!void {
+            const value = deadline orelse {
+                self.write_cond.wait(&self.kcp_mutex);
+                return;
+            };
+            const remaining = glib.time.instant.sub(value, grt.time.instant.now());
+            if (remaining <= 0) return error.Timeout;
+            self.write_cond.timedWait(&self.kcp_mutex, @intCast(remaining)) catch return error.Timeout;
+        }
+
         const OutputContext = struct {
-            mux: *Self,
+            session: *Self,
 
             fn output(raw: [*c]const u8, len: c_int, _: [*c]kcp.Kcp, user: ?*anyopaque) callconv(.c) c_int {
                 if (len < 0) return -1;
                 const ctx: *OutputContext = @ptrCast(@alignCast(user orelse return -1));
-                const self = ctx.mux;
+                const self = ctx.session;
                 const datagram = raw[0..@intCast(len)];
                 self.output_packets_total +%= 1;
                 self.output_bytes_total +%= datagram.len;
@@ -526,7 +500,7 @@ pub fn make(comptime grt: type) type {
                 self.max_output_burst = @max(self.max_output_burst, self.current_output_burst);
                 self.bearer.write(datagram) catch |err| {
                     self.output_drops_total +%= 1;
-                    std.log.scoped(.kcp_mux).err("output failed: {s} len={d}", .{ @errorName(err), datagram.len });
+                    std.log.scoped(.kcp_session).err("output failed: {s} len={d}", .{ @errorName(err), datagram.len });
                     self.output_err = err;
                     return -1;
                 };
@@ -540,11 +514,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     return glib.testing.TestRunner.fromFn(grt.std, 512 * 1024, struct {
         fn run(_: *glib.testing.T, allocator: grt.std.mem.Allocator) !void {
             const std = grt.std;
-            const Mux = make(grt);
+            const Session = make(grt);
 
             const Wire = struct {
                 mutex: grt.sync.Mutex = .{},
-                peer: ?*Mux = null,
+                peer: ?*Session = null,
 
                 fn output(ctx: ?*anyopaque, datagram: []const u8) !void {
                     const self: *@This() = @ptrCast(@alignCast(ctx orelse return error.MissingWireContext));
@@ -554,7 +528,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     try (peer orelse return error.MissingPeer).inputPacket(datagram);
                 }
 
-                fn setPeer(self: *@This(), peer: *Mux) void {
+                fn setPeer(self: *@This(), peer: *Session) void {
                     self.mutex.lock();
                     defer self.mutex.unlock();
                     self.peer = peer;
@@ -563,10 +537,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             var a_to_b = Wire{};
             var b_to_a = Wire{};
-            var a: Mux = undefined;
+            var a: Session = undefined;
             try a.init(allocator, 7, .{ .mode = .stream }, .{ .ctx = &a_to_b, .writePacket = Wire.output });
             defer a.deinit();
-            var b: Mux = undefined;
+            var b: Session = undefined;
             try b.init(allocator, 7, .{ .mode = .stream }, .{ .ctx = &b_to_a, .writePacket = Wire.output });
             defer b.deinit();
             a_to_b.setPeer(&b);

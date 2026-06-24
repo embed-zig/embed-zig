@@ -1,6 +1,6 @@
 const glib = @import("glib");
 const Protocol = @import("PerfProtocol.zig");
-const MuxEndpointFile = @import("MuxEndpoint.zig");
+const PerfEndpointFile = @import("PerfEndpoint.zig");
 
 const AddrPort = glib.net.netip.AddrPort;
 const transfer_timeout = 180 * glib.time.duration.Second;
@@ -21,7 +21,7 @@ pub fn make(comptime grt: type) type {
     const Net = grt.net;
     const Conn = Net.Conn;
     const PacketConn = Net.PacketConn;
-    const MuxEndpoint = MuxEndpointFile.make(grt);
+    const PerfEndpoint = PerfEndpointFile.make(grt);
 
     return struct {
         const Self = @This();
@@ -127,7 +127,7 @@ pub fn make(comptime grt: type) type {
             try sendHello(pc, data_addr, request.conv);
             const ping_started = if (request.direction == .ping) grt.time.instant.now() else null;
 
-            var endpoint: MuxEndpoint = undefined;
+            var endpoint: PerfEndpoint = undefined;
             try endpoint.init(self.allocator, pc, data_addr, request.conv, request, protocolMode(request.protocol));
             defer endpoint.deinit();
             return try endpoint.run(.client, request, ping_started);
@@ -143,7 +143,7 @@ pub fn make(comptime grt: type) type {
             try sendHello(pc, data_addr, request.conv);
             const ping_started = if (request.direction == .ping) grt.time.instant.now() else null;
 
-            var endpoint: MuxEndpoint = undefined;
+            var endpoint: PerfEndpoint = undefined;
             try endpoint.init(self.allocator, pc, data_addr, request.conv, request, protocolMode(request.protocol));
             defer endpoint.deinit();
             endpoint.setDiagControl(control);
@@ -621,7 +621,7 @@ pub fn make(comptime grt: type) type {
             for (buf, 0..) |*b, i| b.* = @truncate(i);
         }
 
-        fn protocolMode(protocol: Protocol.Protocol) MuxEndpointFile.Mode {
+        fn protocolMode(protocol: Protocol.Protocol) PerfEndpointFile.Mode {
             return switch (protocol) {
                 .ikcp_packet => .packet,
                 .ikcp_stream => .stream,

@@ -2,7 +2,7 @@ const glib = @import("glib");
 const kcp = @import("../kcp.zig");
 const Protocol = @import("PerfProtocol.zig");
 
-const MuxEndpoint = @This();
+const PerfEndpoint = @This();
 
 pub const Mode = enum {
     packet,
@@ -22,15 +22,17 @@ const transfer_buf_size: usize = 8192;
 const ping_payload_size: usize = 8;
 const cooperative_sleep_interval: usize = 32;
 const cooperative_sleep_duration = 1 * glib.time.duration.MilliSecond;
-const mux_task_options: glib.task.Options = .{ .min_stack_size = 96 * 1024 };
+const session_task_options: glib.task.Options = .{ .min_stack_size = 96 * 1024 };
 const reader_task_options: glib.task.Options = .{ .min_stack_size = 64 * 1024 };
+const user_send_task_options: glib.task.Options = .{ .min_stack_size = 96 * 1024 };
+const user_recv_task_options: glib.task.Options = .{ .min_stack_size = 96 * 1024 };
 
 pub fn make(comptime grt: type) type {
     const std = grt.std;
     const Conn = grt.net.Conn;
     const PacketConn = grt.net.PacketConn;
     const AddrPort = glib.net.netip.AddrPort;
-    const Mux = kcp.Mux.make(grt);
+    const Session = kcp.Session.make(grt);
 
     return struct {
         const Self = @This();
@@ -38,7 +40,7 @@ pub fn make(comptime grt: type) type {
         allocator: std.mem.Allocator,
         pc: PacketConn,
         remote: AddrPort,
-        mux: Mux,
+        session: Session,
         reader_handle: ?grt.task.Handle = null,
         state_mutex: grt.sync.Mutex = .{},
         stopping: bool = false,
@@ -59,9 +61,9 @@ pub fn make(comptime grt: type) type {
                 .allocator = allocator,
                 .pc = pc,
                 .remote = remote,
-                .mux = undefined,
+                .session = undefined,
             };
-            const config = kcp.Mux.Config{
+            const config = kcp.Session.Config{
                 .mtu = request.udpPayload(),
                 .mode = switch (mode) {
                     .packet => .packet,
@@ -74,18 +76,18 @@ pub fn make(comptime grt: type) type {
                 .send_window = request.kcp.send_window,
                 .recv_window = request.kcp.recv_window,
             };
-            try self.mux.init(allocator, conv, config, .{ .ctx = self, .writePacket = writePacket });
-            errdefer self.mux.deinit();
-            try self.mux.start(mux_task_options);
-            errdefer self.mux.stop();
-            self.reader_handle = try grt.task.go("kcp/mux/read", reader_task_options, glib.task.Routine.init(self, readerTask));
+            try self.session.init(allocator, conv, config, .{ .ctx = self, .writePacket = writePacket });
+            errdefer self.session.deinit();
+            try self.session.start(session_task_options);
+            errdefer self.session.stop();
+            self.reader_handle = try grt.task.go("kcp/session/read", reader_task_options, glib.task.Routine.init(self, readerTask));
         }
 
         pub fn deinit(self: *Self) void {
             self.requestReaderStop();
-            self.mux.close();
+            self.session.close();
             self.joinReader();
-            self.mux.deinit();
+            self.session.deinit();
             self.* = undefined;
         }
 
@@ -115,81 +117,73 @@ pub fn make(comptime grt: type) type {
         }
 
         fn runTransfer(self: *Self, role: Role, send_total: usize, recv_total: usize, request: Protocol.Request) !Protocol.Result {
-            var send_buf: [transfer_buf_size]u8 = undefined;
-            var recv_buf: [transfer_buf_size]u8 = undefined;
-            fillPattern(&send_buf);
+            var send_result = ThreadResult{};
+            var recv_result = ThreadResult{};
+            var send_task = UserSendTask{
+                .endpoint = self,
+                .bytes = send_total,
+                .request = request,
+                .out = &send_result,
+            };
+            var recv_task = UserRecvTask{
+                .endpoint = self,
+                .bytes = recv_total,
+                .out = &recv_result,
+            };
 
             const started = grt.time.instant.now();
-            var sent: usize = 0;
-            var received: usize = 0;
-            var packets: u32 = 0;
-            var progress_rounds: usize = 0;
+            if (send_total == 0) send_result.finish(.{});
+            if (recv_total == 0) recv_result.finish(.{});
+            var send_handle: ?grt.task.Handle = null;
+            var recv_handle: ?grt.task.Handle = null;
+            defer {
+                if (send_handle) |handle| handle.join();
+                if (recv_handle) |handle| handle.join();
+            }
+            errdefer self.session.close();
+            if (send_total != 0) {
+                send_handle = try grt.task.go("kcp/session/user-send", user_send_task_options, glib.task.Routine.init(&send_task, UserSendTask.run));
+            }
+            if (recv_total != 0) {
+                recv_handle = try grt.task.go("kcp/session/user-recv", user_recv_task_options, glib.task.Routine.init(&recv_task, UserRecvTask.run));
+            }
+
             var next_diag_at: u64 = diag_interval;
 
             while (true) {
                 try self.checkReaderError();
-                try self.mux.checkTaskError();
+                try self.session.checkTaskError();
                 const elapsed = elapsedSince(started);
+                const send_snapshot = send_result.snapshot();
+                const recv_snapshot = recv_result.snapshot();
                 if (elapsed > transfer_timeout) {
-                    self.logDiag("timeout", role, request, sent, send_total, received, recv_total, started);
+                    self.logDiag("timeout", role, request, send_snapshot.result.sent_bytes, send_total, recv_snapshot.result.received_bytes, recv_total, started);
                     return error.NetperfTransferTimeout;
                 }
                 if (elapsed >= next_diag_at) {
-                    self.logDiag("progress", role, request, sent, send_total, received, recv_total, started);
+                    self.logDiag("progress", role, request, send_snapshot.result.sent_bytes, send_total, recv_snapshot.result.received_bytes, recv_total, started);
                     next_diag_at = elapsed + diag_interval;
                 }
-
-                var made_progress = false;
-                if (sent < send_total) {
-                    const chunk = @min(request.streamChunk(), send_total - sent);
-                    const written = self.mux.writeTimeout(send_buf[0..chunk], io_timeout) catch |err| switch (err) {
-                        error.Timeout => 0,
-                        else => return err,
-                    };
-                    sent += written;
-                    if (written != 0) {
-                        packets +%= 1;
-                        made_progress = true;
-                    }
-                }
-
-                if (received < recv_total) {
-                    const want = @min(recv_buf.len, recv_total - received);
-                    const n = self.mux.readTimeout(recv_buf[0..want], io_timeout) catch |err| switch (err) {
-                        error.Timeout => 0,
-                        error.Closed => 0,
-                        else => return err,
-                    };
-                    received += n;
-                    if (n != 0) {
-                        packets +%= 1;
-                        made_progress = true;
-                    }
-                }
-
-                if (sent >= send_total and received >= recv_total and self.mux.waitsnd() == 0) {
+                if (send_snapshot.done and recv_snapshot.done) {
                     break;
                 }
-
-                if (!made_progress) {
-                    progress_rounds = 0;
-                    grt.time.sleep(cooperative_sleep_duration);
-                } else {
-                    progress_rounds += 1;
-                    if (progress_rounds >= cooperative_sleep_interval) {
-                        progress_rounds = 0;
-                        grt.time.sleep(cooperative_sleep_duration);
-                    }
-                }
+                grt.time.sleep(cooperative_sleep_duration);
             }
-            self.logDiag("done", role, request, sent, send_total, received, recv_total, started);
 
-            return .{
-                .sent_bytes = sent,
-                .received_bytes = received,
-                .elapsed_ns = elapsedSince(started),
-                .packets = packets,
+            const final_send = send_result.snapshot();
+            const final_recv = recv_result.snapshot();
+            if (final_send.err) |err| return err;
+            if (final_recv.err) |err| return err;
+
+            const result = Protocol.Result{
+                .sent_bytes = final_send.result.sent_bytes,
+                .received_bytes = final_recv.result.received_bytes,
+                .elapsed_ns = @max(final_send.result.elapsed_ns, final_recv.result.elapsed_ns),
+                .errors = final_send.result.errors + final_recv.result.errors,
+                .packets = final_send.result.packets + final_recv.result.packets,
             };
+            self.logDiag("done", role, request, result.sent_bytes, send_total, result.received_bytes, recv_total, started);
+            return result;
         }
 
         fn runPingClient(self: *Self, started: glib.time.instant.Time) !Protocol.Result {
@@ -197,10 +191,10 @@ pub fn make(comptime grt: type) type {
             var echo: [ping_payload_size + 1]u8 = undefined;
             fillPattern(&payload);
 
-            const written = try self.mux.writeTimeout(&payload, io_timeout);
+            const written = try self.session.writeTimeout(&payload, io_timeout);
             if (written != payload.len) return error.ShortWrite;
             const rtt_started = grt.time.instant.now();
-            try self.readExactMux(&echo, transfer_timeout);
+            try self.readExactSession(&echo, transfer_timeout);
             const first_byte_ns = elapsedSince(started);
             if (echo[0] != 0xaa or !std.mem.eql(u8, &payload, echo[1..])) return error.InvalidPingEcho;
             return .{
@@ -216,13 +210,13 @@ pub fn make(comptime grt: type) type {
         fn runPingServer(self: *Self) !Protocol.Result {
             var payload: [ping_payload_size]u8 = undefined;
             const started = grt.time.instant.now();
-            try self.readExactMux(&payload, transfer_timeout);
+            try self.readExactSession(&payload, transfer_timeout);
             var echo: [ping_payload_size + 1]u8 = undefined;
             echo[0] = 0xaa;
             @memcpy(echo[1..], &payload);
-            const written = try self.mux.writeTimeout(&echo, io_timeout);
+            const written = try self.session.writeTimeout(&echo, io_timeout);
             if (written != echo.len) return error.ShortWrite;
-            while (self.mux.waitsnd() != 0) {
+            while (self.session.waitsnd() != 0) {
                 if (elapsedSince(started) > transfer_timeout) return error.NetperfTransferTimeout;
                 grt.time.sleep(1 * glib.time.duration.MilliSecond);
             }
@@ -234,25 +228,159 @@ pub fn make(comptime grt: type) type {
             };
         }
 
-        fn readExactMux(self: *Self, out: []u8, timeout: glib.time.duration.Duration) !void {
+        fn readExactSession(self: *Self, out: []u8, timeout: glib.time.duration.Duration) !void {
             const deadline = glib.time.instant.add(grt.time.instant.now(), timeout);
             var offset: usize = 0;
             while (offset < out.len) {
                 const remaining = glib.time.instant.sub(deadline, grt.time.instant.now());
                 if (remaining <= 0) return error.Timeout;
-                const n = try self.mux.readTimeout(out[offset..], @intCast(remaining));
+                const n = try self.session.readTimeout(out[offset..], @intCast(remaining));
                 if (n == 0) return error.EndOfStream;
                 offset += n;
             }
         }
 
+        const ThreadResult = struct {
+            mutex: grt.sync.Mutex = .{},
+            result: Protocol.Result = .{},
+            err: ?anyerror = null,
+            done: bool = false,
+
+            const Snapshot = struct {
+                result: Protocol.Result,
+                err: ?anyerror,
+                done: bool,
+            };
+
+            fn finish(self: *@This(), result: Protocol.Result) void {
+                self.mutex.lock();
+                defer self.mutex.unlock();
+                self.result = result;
+                self.done = true;
+            }
+
+            fn fail(self: *@This(), err: anyerror) void {
+                self.mutex.lock();
+                defer self.mutex.unlock();
+                self.err = err;
+                self.done = true;
+            }
+
+            fn snapshot(self: *@This()) Snapshot {
+                self.mutex.lock();
+                defer self.mutex.unlock();
+                return .{
+                    .result = self.result,
+                    .err = self.err,
+                    .done = self.done,
+                };
+            }
+
+            fn update(self: *@This(), result: Protocol.Result) void {
+                self.mutex.lock();
+                defer self.mutex.unlock();
+                self.result = result;
+            }
+        };
+
+        const UserSendTask = struct {
+            endpoint: *Self,
+            bytes: usize,
+            request: Protocol.Request,
+            out: *ThreadResult,
+
+            fn run(self: *@This()) void {
+                const result = self.endpoint.runUserSend(self.bytes, self.request, self.out) catch |err| {
+                    self.out.fail(err);
+                    return;
+                };
+                self.out.finish(result);
+            }
+        };
+
+        const UserRecvTask = struct {
+            endpoint: *Self,
+            bytes: usize,
+            out: *ThreadResult,
+
+            fn run(self: *@This()) void {
+                const result = self.endpoint.runUserRecv(self.bytes, self.out) catch |err| {
+                    self.out.fail(err);
+                    return;
+                };
+                self.out.finish(result);
+            }
+        };
+
+        fn runUserSend(self: *Self, bytes: usize, request: Protocol.Request, out: *ThreadResult) !Protocol.Result {
+            var send_buf: [transfer_buf_size]u8 = undefined;
+            fillPattern(&send_buf);
+
+            const started = grt.time.instant.now();
+            var result = Protocol.Result{};
+            while (result.sent_bytes < bytes) {
+                try self.checkReaderError();
+                try self.session.checkTaskError();
+                if (elapsedSince(started) > transfer_timeout) return error.NetperfTransferTimeout;
+                const chunk = @min(@min(request.streamChunk(), send_buf.len), bytes - result.sent_bytes);
+                const written = self.session.writeTimeout(send_buf[0..chunk], io_timeout) catch |err| switch (err) {
+                    error.Timeout => 0,
+                    else => return err,
+                };
+                if (written == 0) {
+                    grt.time.sleep(cooperative_sleep_duration);
+                    continue;
+                }
+                result.sent_bytes += written;
+                result.packets +%= 1;
+                result.elapsed_ns = elapsedSince(started);
+                out.update(result);
+            }
+            while (self.session.waitsnd() != 0) {
+                try self.checkReaderError();
+                try self.session.checkTaskError();
+                if (elapsedSince(started) > transfer_timeout) return error.NetperfTransferTimeout;
+                grt.time.sleep(cooperative_sleep_duration);
+            }
+            result.elapsed_ns = elapsedSince(started);
+            return result;
+        }
+
+        fn runUserRecv(self: *Self, bytes: usize, out: *ThreadResult) !Protocol.Result {
+            var recv_buf: [transfer_buf_size]u8 = undefined;
+            const started = grt.time.instant.now();
+            var result = Protocol.Result{};
+            while (result.received_bytes < bytes) {
+                try self.checkReaderError();
+                try self.session.checkTaskError();
+                if (elapsedSince(started) > transfer_timeout) return error.NetperfTransferTimeout;
+                const want = @min(recv_buf.len, bytes - result.received_bytes);
+                const n = self.session.readTimeout(recv_buf[0..want], io_timeout) catch |err| switch (err) {
+                    error.Timeout,
+                    error.Closed,
+                    => 0,
+                    else => return err,
+                };
+                if (n == 0) {
+                    grt.time.sleep(cooperative_sleep_duration);
+                    continue;
+                }
+                result.received_bytes += n;
+                result.packets +%= 1;
+                result.elapsed_ns = elapsedSince(started);
+                out.update(result);
+            }
+            result.elapsed_ns = elapsedSince(started);
+            return result;
+        }
+
         fn readerTask(self: *Self) void {
             self.readerLoop() catch |err| {
-                std.log.scoped(.kcp_mux_endpoint).err("reader failed: {s}", .{@errorName(err)});
+                std.log.scoped(.kcp_perf_endpoint).err("reader failed: {s}", .{@errorName(err)});
                 self.state_mutex.lock();
                 self.reader_err = err;
                 self.state_mutex.unlock();
-                self.mux.close();
+                self.session.close();
             };
         }
 
@@ -268,7 +396,7 @@ pub fn make(comptime grt: type) type {
                 };
                 if (!addrEquals(result.addr, self.remote)) continue;
                 if (result.bytes_read < kcp.OVERHEAD) continue;
-                try self.mux.inputPacket(packet[0..result.bytes_read]);
+                try self.session.inputPacket(packet[0..result.bytes_read]);
             }
         }
 
@@ -297,9 +425,9 @@ pub fn make(comptime grt: type) type {
         }
 
         fn writePacket(ctx: ?*anyopaque, datagram: []const u8) !void {
-            const self: *Self = @ptrCast(@alignCast(ctx orelse return error.MissingMuxEndpoint));
+            const self: *Self = @ptrCast(@alignCast(ctx orelse return error.MissingPerfEndpoint));
             const written = self.pc.writeTo(datagram, self.remote) catch |err| {
-                std.log.scoped(.kcp_mux_endpoint).err("write packet failed: {s} len={d}", .{ @errorName(err), datagram.len });
+                std.log.scoped(.kcp_perf_endpoint).err("write packet failed: {s} len={d}", .{ @errorName(err), datagram.len });
                 return err;
             };
             if (written != datagram.len) return error.ShortWrite;
@@ -330,9 +458,9 @@ pub fn make(comptime grt: type) type {
             recv_total: usize,
             started: glib.time.instant.Time,
         ) void {
-            const snap = self.mux.snapshot();
+            const snap = self.session.snapshot();
             const elapsed_ms = elapsedSince(started) / @as(u64, @intCast(glib.time.duration.MilliSecond));
-            const log = std.log.scoped(.kcp_mux_endpoint);
+            const log = std.log.scoped(.kcp_perf_endpoint);
             log.info(
                 "{s} role={s} proto={s} dir={s} ms={d} s={d}/{d} r={d}/{d} wait={d} tx={d}/{d} rx={d}/{d} iq={d}/{d}",
                 .{
@@ -417,12 +545,12 @@ pub fn make(comptime grt: type) type {
             sent: usize,
             received: usize,
             elapsed_ms: u64,
-            snap: Mux.Snapshot,
+            snap: Session.Snapshot,
         ) void {
             var line_buf: [Protocol.max_line_len]u8 = undefined;
             const line = std.fmt.bufPrint(
                 &line_buf,
-                "{s} DIAG mux {s} role={s} proto={s} dir={s} ms={d} s={d} r={d} w={d} sq={d} sb={d} rq={d} rb={d} rw={d} cw={d} rto={d} xmit={d} out={d} drop={d} in={d} ob={d}/{d} oa={d} ia={d} ip={d}\n",
+                "{s} DIAG session {s} role={s} proto={s} dir={s} ms={d} s={d} r={d} w={d} sq={d} sb={d} rq={d} rb={d} rw={d} cw={d} rto={d} xmit={d} out={d} drop={d} in={d} ob={d}/{d} oa={d} ia={d} ip={d}\n",
                 .{
                     Protocol.magic,
                     label,
