@@ -1,5 +1,8 @@
 const glib = @import("glib");
+const BytesRing = @import("../BytesRing.zig");
+const PacketRing = @import("../PacketRing.zig");
 const SegmentPool = @import("../SegmentPool.zig");
+const Mux = @import("../Mux.zig");
 const protocol = @import("../PerfProtocol.zig");
 
 pub fn make(comptime grt: type) glib.testing.TestRunner {
@@ -14,7 +17,10 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
             _ = allocator;
 
             t.run("PerfProtocol", protocol.TestRunner(grt.std));
+            t.run("BytesRing", BytesRing.TestRunner(grt));
+            t.run("PacketRing", PacketRing.TestRunner(grt));
             t.run("SegmentPool", SegmentPool.TestRunner(grt));
+            t.run("Mux", Mux.TestRunner(grt));
             return t.wait();
         }
 

@@ -15,7 +15,7 @@ enum {
     BENCH_PAYLOAD = 64,
     BENCH_PACKET_CAP = 1600,
     BENCH_SMALL_WRITES = 200000,
-    BENCH_TRANSFER_BYTES = 8 * 1024 * 1024,
+    BENCH_TRANSFER_BYTES = 5 * 1024 * 1024,
     BENCH_IDLE_FLUSH_ROUNDS = 200000,
 };
 
@@ -143,8 +143,7 @@ static void peerInit(Peer *peer, IUINT32 conv, BenchStats *s)
     }
     ikcp_setoutput(peer->kcp, peerOutput);
     ikcp_nodelay(peer->kcp, 1, 10, 2, 1);
-    ikcp_wndsize(peer->kcp, 256, 256);
-    peer->kcp->stream = 1;
+    ikcp_wndsize(peer->kcp, 64, 64);
 }
 
 static void peerDeinit(Peer *peer)
@@ -178,15 +177,18 @@ static void drainRecv(Peer *peer, BenchStats *s)
 static void printScenario(const char *name, uint64_t started, BenchStats before)
 {
     const uint64_t elapsed_ns = nowNs() - started;
+    const uint64_t recv_bytes = stats.recv_bytes - before.recv_bytes;
+    const double mbps = elapsed_ns == 0 ? 0.0 : ((double)recv_bytes * 8.0 * 1000.0) / (double)elapsed_ns;
     printf(
-        "%-22s elapsed_ms=%8.3f allocs=%llu frees=%llu output_packets=%llu output_bytes=%llu recv_bytes=%llu\n",
+        "%-22s elapsed_ms=%8.3f mbps=%8.3f allocs=%llu frees=%llu output_packets=%llu output_bytes=%llu recv_bytes=%llu\n",
         name,
         (double)elapsed_ns / 1000000.0,
+        mbps,
         (unsigned long long)(stats.allocs - before.allocs),
         (unsigned long long)(stats.frees - before.frees),
         (unsigned long long)(stats.output_packets - before.output_packets),
         (unsigned long long)(stats.output_bytes - before.output_bytes),
-        (unsigned long long)(stats.recv_bytes - before.recv_bytes));
+        (unsigned long long)recv_bytes);
 }
 
 static void benchStreamSmallWrites(void)
@@ -215,7 +217,7 @@ static void benchStreamSmallWrites(void)
     peerDeinit(&b);
 }
 
-static void benchLoopbackTransfer(void)
+static void benchLoopbackTransfer(const char *name, int stream)
 {
     Peer a;
     Peer b;
@@ -225,13 +227,15 @@ static void benchLoopbackTransfer(void)
     peerInit(&b, 200, &stats);
     a.remote = &b;
     b.remote = &a;
+    a.kcp->stream = stream;
+    b.kcp->stream = stream;
 
     BenchStats before = stats;
     uint64_t started = nowNs();
     size_t sent = 0;
     IUINT32 current = 0;
     while (stats.recv_bytes - before.recv_bytes < BENCH_TRANSFER_BYTES) {
-        while (sent < BENCH_TRANSFER_BYTES && ikcp_waitsnd(a.kcp) < 128) {
+        while (sent < BENCH_TRANSFER_BYTES && ikcp_waitsnd(a.kcp) < 64) {
             size_t remaining = BENCH_TRANSFER_BYTES - sent;
             int len = (int)(remaining < sizeof(payload) ? remaining : sizeof(payload));
             int n = ikcp_send(a.kcp, payload, len);
@@ -250,7 +254,7 @@ static void benchLoopbackTransfer(void)
         pumpPeer(&a, current);
         current += 10;
     }
-    printScenario("loopback-transfer", started, before);
+    printScenario(name, started, before);
 
     peerDeinit(&a);
     peerDeinit(&b);
@@ -339,7 +343,8 @@ int main(void)
     memset(&stats, 0, sizeof(stats));
     ikcp_allocator(benchMalloc, benchFree);
     benchStreamSmallWrites();
-    benchLoopbackTransfer();
+    benchLoopbackTransfer("loopback-stream-5m", 1);
+    benchLoopbackTransfer("loopback-packet-5m", 0);
     benchIdleFlushScan();
     probeFlushSkipHazard();
     return 0;

@@ -5,6 +5,7 @@ const PerfProtocol = @This();
 pub const magic = "NP1";
 pub const default_bytes: usize = 5 * 1024 * 1024;
 pub const default_udp_payload: usize = 1400;
+pub const default_udp_pps: u32 = 1650;
 pub const default_stream_chunk: usize = 8192;
 pub const default_control_port: u16 = 9821;
 pub const default_conv: u32 = 0x4b435031;
@@ -13,13 +14,31 @@ pub const max_line_len: usize = 512;
 pub const Protocol = enum {
     tcp,
     udp,
-    kcp,
+    ikcp_packet,
+    ikcp_stream,
 
     pub fn parse(value: []const u8) !Protocol {
         if (glib.std.mem.eql(u8, value, "tcp")) return .tcp;
         if (glib.std.mem.eql(u8, value, "udp")) return .udp;
-        if (glib.std.mem.eql(u8, value, "kcp")) return .kcp;
+        if (glib.std.mem.eql(u8, value, "ikcp-packet") or
+            glib.std.mem.eql(u8, value, "ikcp_packet")) return .ikcp_packet;
+        if (glib.std.mem.eql(u8, value, "ikcp-stream") or
+            glib.std.mem.eql(u8, value, "ikcp_stream") or
+            glib.std.mem.eql(u8, value, "kcp")) return .ikcp_stream;
         return error.InvalidProtocol;
+    }
+
+    pub fn name(self: Protocol) []const u8 {
+        return switch (self) {
+            .tcp => "tcp",
+            .udp => "udp",
+            .ikcp_packet => "ikcp-packet",
+            .ikcp_stream => "ikcp-stream",
+        };
+    }
+
+    pub fn isIkcp(self: Protocol) bool {
+        return self == .ikcp_packet or self == .ikcp_stream;
     }
 };
 
@@ -39,8 +58,8 @@ pub const Direction = enum {
 };
 
 pub const KcpConfig = struct {
-    send_window: u32 = 64,
-    recv_window: u32 = 64,
+    send_window: u32 = 32,
+    recv_window: u32 = 32,
     nodelay: i32 = 1,
     interval_ms: i32 = 10,
     resend: i32 = 2,
@@ -49,10 +68,11 @@ pub const KcpConfig = struct {
 };
 
 pub const Request = struct {
-    protocol: Protocol = .kcp,
+    protocol: Protocol = .ikcp_stream,
     direction: Direction = .down,
     bytes: usize = default_bytes,
     conv: u32 = default_conv,
+    udp_pps: u32 = default_udp_pps,
     kcp: KcpConfig = .{},
 
     pub fn streamChunk(_: Request) usize {
@@ -93,20 +113,21 @@ pub const Result = struct {
 pub fn requestLine(comptime std: type, out: []u8, req: Request) ![]u8 {
     return std.fmt.bufPrint(
         out,
-        "{s} REQ {s} {s} {d} {d} {d} {d} {d} {d} {d} {d} {d}\n",
+        "{s} REQ {s} {s} {d} {d} {d} {d} {d} {d} {d} {d} {d} {d}\n",
         .{
             magic,
-            @tagName(req.protocol),
+            req.protocol.name(),
             @tagName(req.direction),
             req.bytes,
             req.conv,
+            req.udp_pps,
             req.kcp.send_window,
             req.kcp.recv_window,
             req.kcp.nodelay,
             req.kcp.interval_ms,
             req.kcp.resend,
             req.kcp.no_congestion_control,
-            @intFromBool(req.kcp.stream),
+            @intFromBool(req.protocol == .ikcp_stream),
         },
     );
 }
@@ -151,6 +172,11 @@ pub fn helloLine(comptime std: type, out: []u8, conv: u32) ![]u8 {
     return std.fmt.bufPrint(out, "{s} HELLO {d}\n", .{ magic, conv });
 }
 
+pub fn isDiagLine(comptime std: type, line: []const u8) bool {
+    const trimmed = trimLine(std, line);
+    return std.mem.startsWith(u8, trimmed, magic ++ " DIAG ");
+}
+
 pub fn parseRequest(comptime std: type, line: []const u8) !Request {
     var it = std.mem.tokenizeScalar(u8, trimLine(std, line), ' ');
     try expectToken(it.next(), magic);
@@ -161,6 +187,7 @@ pub fn parseRequest(comptime std: type, line: []const u8) !Request {
     req.direction = try Direction.parse(it.next() orelse return error.InvalidRequest);
     req.bytes = try parseInt(std, usize, it.next());
     req.conv = try parseInt(std, u32, it.next());
+    req.udp_pps = try parseInt(std, u32, it.next());
     req.kcp.send_window = try parseInt(std, u32, it.next());
     req.kcp.recv_window = try parseInt(std, u32, it.next());
     req.kcp.nodelay = try parseInt(std, i32, it.next());
@@ -244,8 +271,26 @@ pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
         fn run(_: *glib.testing.T, allocator: std.mem.Allocator) !void {
             _ = allocator;
             var buf: [max_line_len]u8 = undefined;
+            try std.testing.expectEqual(Protocol.ikcp_packet, try Protocol.parse("ikcp-packet"));
+            try std.testing.expectEqual(Protocol.ikcp_packet, try Protocol.parse("ikcp_packet"));
+            try std.testing.expectEqual(Protocol.ikcp_stream, try Protocol.parse("ikcp-stream"));
+            try std.testing.expectEqual(Protocol.ikcp_stream, try Protocol.parse("ikcp_stream"));
+            try std.testing.expectEqual(Protocol.ikcp_stream, try Protocol.parse("kcp"));
+            try std.testing.expectEqualStrings("ikcp-packet", Protocol.ikcp_packet.name());
+            try std.testing.expectEqualStrings("ikcp-stream", Protocol.ikcp_stream.name());
+            try std.testing.expect(Protocol.ikcp_packet.isIkcp());
+            try std.testing.expect(Protocol.ikcp_stream.isIkcp());
+            try std.testing.expect(!Protocol.tcp.isIkcp());
+            try std.testing.expect(!Protocol.udp.isIkcp());
+
+            const packet_req = Request{ .protocol = .ikcp_packet };
+            const packet_line = try requestLine(std, &buf, packet_req);
+            const parsed_packet = try parseRequest(std, packet_line);
+            try std.testing.expectEqual(Protocol.ikcp_packet, parsed_packet.protocol);
+            try std.testing.expect(!parsed_packet.kcp.stream);
+
             const req = Request{
-                .protocol = .kcp,
+                .protocol = .ikcp_stream,
                 .direction = .duplex,
                 .bytes = 4096,
                 .conv = 9,
@@ -260,13 +305,14 @@ pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
             try std.testing.expectEqual(req.protocol, parsed.protocol);
             try std.testing.expectEqual(req.direction, parsed.direction);
             try std.testing.expectEqual(req.bytes, parsed.bytes);
+            try std.testing.expectEqual(req.udp_pps, parsed.udp_pps);
             try std.testing.expectEqual(req.kcp.send_window, parsed.kcp.send_window);
             try std.testing.expectEqual(@as(usize, 8192), parsed.streamChunk());
             try std.testing.expectEqual(@as(usize, 1400), parsed.udpPayload());
 
             const invalid_line = try std.fmt.bufPrint(
                 &buf,
-                "{s} REQ kcp down 4096 1250 9 64 32 1 10 2 1 1 1\n",
+                "{s} REQ kcp down 4096 1250 1650 9 64 32 1 10 2 1 1 1\n",
                 .{magic},
             );
             try std.testing.expectError(error.InvalidRequest, parseRequest(std, invalid_line));

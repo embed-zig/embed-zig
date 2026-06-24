@@ -9,6 +9,7 @@ const integration_patch_files: []const []const u8 = &.{
 const optimized_patch_files: []const []const u8 = &.{
     "pkg/kcp/patches/0001-embed-zig-kcp-integration.patch",
     "pkg/kcp/patches/0002-embed-zig-kcp-optimizations.patch",
+    "pkg/kcp/patches/0003-embed-zig-kcp-diagnostics.patch",
 };
 
 var library: ?*std.Build.Step.Compile = null;

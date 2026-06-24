@@ -9,12 +9,14 @@ pub fn build(b: *std.Build) void {
     const build_dir = b.option([]const u8, "build", "Generated ESP-IDF build directory") orelse ".build";
     const netperf_wifi_connect = b.option(bool, "netperf_wifi_connect", "Connect WiFi before running zux_netperf") orelse false;
     const netperf_wifi_ssid = b.option([]const u8, "netperf_wifi_ssid", "zux_netperf WiFi SSID") orelse "";
-    const netperf_wifi_password = b.option([]const u8, "netperf_wifi_password", "zux_netperf WiFi password") orelse "";
+    const netperf_wifi_password = b.option([]const u8, "netperf_wifi_password", "zux_netperf WiFi password") orelse
+        b.graph.env_map.get("NETPERF_WIFI_PASSWORD") orelse "";
     const netperf_host = b.option([]const u8, "netperf_host", "zux_netperf control host IP") orelse "127.0.0.1";
     const netperf_port = b.option(u16, "netperf_port", "zux_netperf control TCP port") orelse 9821;
-    const netperf_protocol = b.option([]const u8, "netperf_protocol", "zux_netperf protocol: tcp, udp, ikcp-packet, ikcp-stream, or all") orelse "all";
+    const netperf_protocol = b.option([]const u8, "netperf_protocol", "zux_netperf protocol: tcp, udp, ikcp-packet, ikcp-stream, ikcp-memory, or all") orelse "all";
     const netperf_direction = b.option([]const u8, "netperf_direction", "zux_netperf direction: up, down, duplex, ping, or all") orelse "all";
     const netperf_bytes = b.option(usize, "netperf_bytes", "zux_netperf bytes per direction") orelse 5 * 1024 * 1024;
+    const netperf_udp_pps = b.option(u32, "netperf_udp_pps", "zux_netperf raw UDP packets per second, 0 disables pacing") orelse 1650;
     const netperf_kcp_snd_wnd = b.option(u32, "netperf_kcp_snd_wnd", "zux_netperf KCP send window") orelse 32;
     const netperf_kcp_rcv_wnd = b.option(u32, "netperf_kcp_rcv_wnd", "zux_netperf KCP receive window") orelse 32;
     const netperf_nodelay = b.option(i32, "netperf_nodelay", "zux_netperf TCP_NODELAY / KCP nodelay value") orelse 1;
@@ -61,6 +63,7 @@ pub fn build(b: *std.Build) void {
         .netperf_protocol = netperf_protocol,
         .netperf_direction = netperf_direction,
         .netperf_bytes = netperf_bytes,
+        .netperf_udp_pps = netperf_udp_pps,
         .netperf_kcp_snd_wnd = netperf_kcp_snd_wnd,
         .netperf_kcp_rcv_wnd = netperf_kcp_rcv_wnd,
         .netperf_nodelay = netperf_nodelay,
