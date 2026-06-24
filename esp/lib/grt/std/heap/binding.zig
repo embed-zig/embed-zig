@@ -2,6 +2,9 @@ pub extern fn espz_heap_align_freertos_stack_size_bytes(size: u32) u32;
 pub extern fn espz_heap_caps_malloc(size: usize, caps: u32) ?*anyopaque;
 pub extern fn espz_heap_caps_aligned_alloc(alignment: usize, size: usize, caps: u32) ?*anyopaque;
 pub extern fn espz_heap_caps_free(ptr: ?*anyopaque) void;
+pub extern fn espz_heap_caps_get_total_size(caps: u32) usize;
+pub extern fn espz_heap_caps_get_free_size(caps: u32) usize;
+pub extern fn espz_heap_caps_get_minimum_free_size(caps: u32) usize;
 
 pub extern const espz_heap_cap_32bit: u32;
 pub extern const espz_heap_cap_8bit: u32;

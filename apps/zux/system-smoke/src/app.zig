@@ -99,9 +99,47 @@ fn runSmoke(comptime platform_ctx: type, comptime platform_grt: type) !void {
     const cpu_count = try platform_grt.system.cpuCount();
     if (cpu_count == 0) return error.InvalidCpuCount;
 
+    try smokeStats(platform_grt);
     try smokeTaskRuntimeSnapshot(platform_grt);
 
     log.info("system smoke passed cpu_count={d}", .{cpu_count});
+}
+
+fn smokeStats(comptime platform_grt: type) !void {
+    const log = platform_grt.std.log.scoped(.zux_system_smoke);
+
+    var cpu_stats: platform_grt.system.CpuStats = .{};
+    platform_grt.system.readCpuStats(&cpu_stats) catch |err| switch (err) {
+        error.Unsupported => {
+            log.info("system cpu stats unsupported", .{});
+        },
+        else => return err,
+    };
+    if (cpu_stats.core_count > platform_grt.system.max_cpu_cores) return error.InvalidCpuStats;
+    for (cpu_stats.cores[0..cpu_stats.core_count]) |core| {
+        if (core.usage_percent > 100) return error.InvalidCpuStats;
+    }
+
+    var memory_stats: platform_grt.system.MemoryStats = .{};
+    platform_grt.system.readMemoryStats(&memory_stats) catch |err| switch (err) {
+        error.Unsupported => {
+            log.info("system memory stats unsupported", .{});
+        },
+        else => return err,
+    };
+    if (memory_stats.heap_total != 0 and memory_stats.heap_free > memory_stats.heap_total) return error.InvalidMemoryStats;
+    if (memory_stats.internal_total != 0 and memory_stats.internal_free > memory_stats.internal_total) return error.InvalidMemoryStats;
+    if (memory_stats.psram_total != 0 and memory_stats.psram_free > memory_stats.psram_total) return error.InvalidMemoryStats;
+
+    var task_stats: platform_grt.system.TaskStats = .{};
+    platform_grt.system.readTaskStats(&task_stats) catch |err| switch (err) {
+        error.Unsupported => {
+            log.info("system task stats unsupported", .{});
+            return;
+        },
+        else => return err,
+    };
+    if (task_stats.count == 0) return error.InvalidTaskStats;
 }
 
 fn smokeTaskRuntimeSnapshot(comptime platform_grt: type) !void {

@@ -60,6 +60,21 @@ void espz_heap_caps_free(void *ptr)
     heap_caps_free(ptr);
 }
 
+size_t espz_heap_caps_get_total_size(uint32_t caps)
+{
+    return heap_caps_get_total_size((uint32_t)caps);
+}
+
+size_t espz_heap_caps_get_free_size(uint32_t caps)
+{
+    return heap_caps_get_free_size((uint32_t)caps);
+}
+
+size_t espz_heap_caps_get_minimum_free_size(uint32_t caps)
+{
+    return heap_caps_get_minimum_free_size((uint32_t)caps);
+}
+
 uint32_t espz_heap_malloc_cap_spiram(void)
 {
     return (uint32_t)MALLOC_CAP_SPIRAM;

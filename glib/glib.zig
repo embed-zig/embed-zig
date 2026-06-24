@@ -127,6 +127,11 @@ pub const time = struct {
 pub const system = struct {
     pub const cpu = system_mod.cpu;
     pub const CpuCountError = system_mod.CpuCountError;
+    pub const StatsError = system_mod.StatsError;
+    pub const CpuStats = system_mod.CpuStats;
+    pub const MemoryStats = system_mod.MemoryStats;
+    pub const TaskStats = system_mod.TaskStats;
+    pub const max_cpu_cores = system_mod.max_cpu_cores;
 
     pub fn make(comptime Impl: type) type {
         return system_mod.make(Impl);

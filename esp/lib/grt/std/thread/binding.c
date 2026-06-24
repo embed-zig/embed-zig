@@ -237,6 +237,33 @@ uint32_t espz_freertos_cpu_count(void)
     return (uint32_t)portNUM_PROCESSORS;
 }
 
+uint32_t espz_freertos_task_count(void)
+{
+    return (uint32_t)uxTaskGetNumberOfTasks();
+}
+
+bool espz_freertos_idle_runtime_counter_supported(void)
+{
+#if (!CONFIG_FREERTOS_SMP && CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS == 1 && INCLUDE_xTaskGetIdleTaskHandle == 1)
+    return true;
+#else
+    return false;
+#endif
+}
+
+uint64_t espz_freertos_idle_runtime_counter_for_core(uint32_t core_id)
+{
+#if (!CONFIG_FREERTOS_SMP && CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS == 1 && INCLUDE_xTaskGetIdleTaskHandle == 1)
+    if (core_id >= (uint32_t)portNUM_PROCESSORS) {
+        return 0;
+    }
+    return (uint64_t)ulTaskGetIdleRunTimeCounterForCore((BaseType_t)core_id);
+#else
+    (void)core_id;
+    return 0;
+#endif
+}
+
 TaskHandle_t espz_freertos_current_task_handle(void)
 {
     return xTaskGetCurrentTaskHandle();
