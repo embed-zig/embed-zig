@@ -222,6 +222,7 @@ fn addSideRuntimeBindings(b: *std.Build, files: *std.Build.Step.WriteFile, side:
         _ = files.add(b.fmt("{s}/bk_embed_gpio_button_binding.c", .{side}), @embedFile("../embed/gpio_button_binding.c"));
         _ = files.add(b.fmt("{s}/bk_embed_bt_local_hci.c", .{side}), @embedFile("../embed/bt/local_hci.c"));
         _ = files.add(b.fmt("{s}/bk_embed_wifi_sta_binding.c", .{side}), @embedFile("../embed/wifi/sta_binding.c"));
+        _ = files.add(b.fmt("{s}/bk_embed_preferences_binding.c", .{side}), @embedFile("../embed/system/preferences_binding.c"));
         _ = files.add(b.fmt("{s}/bk_embed_audio_onboard_speaker.c", .{side}), @embedFile("../embed/audio/onboard_speaker_binding.c"));
         _ = files.add(b.fmt("{s}/bk_embed_display_qspi_binding.c", .{side}), @embedFile("../embed/display/qspi_binding.c"));
         _ = files.add(b.fmt("{s}/bk_embed_display_rgb_binding.c", .{side}), @embedFile("../embed/display/rgb_binding.c"));
@@ -571,21 +572,59 @@ fn sideCmakeText(
     app_opts: anytype,
 ) []const u8 {
     const lib_name = b.fmt("{s}_{s}_zig", .{ app_name, side });
+    const flashdb_sources = if (std.mem.eql(u8, side, "ap"))
+        b.fmt(
+            " {s}/ap/components/flashdb/src/fdb.c" ++
+                " {s}/ap/components/flashdb/src/fdb_kvdb.c" ++
+                " {s}/ap/components/flashdb/src/fdb_tsdb.c" ++
+                " {s}/ap/components/flashdb/src/fdb_utils.c" ++
+                " {s}/ap/components/flashdb/src/fdb_file.c" ++
+                " {s}/ap/components/flashdb/port/fal/src/fal.c" ++
+                " {s}/ap/components/flashdb/port/fal/src/fal_flash.c" ++
+                " {s}/ap/components/flashdb/port/fal/src/fal_partition.c" ++
+                " {s}/ap/components/flashdb/port/fal/src/fal_rtt.c",
+            .{
+                context.armino_path,
+                context.armino_path,
+                context.armino_path,
+                context.armino_path,
+                context.armino_path,
+                context.armino_path,
+                context.armino_path,
+                context.armino_path,
+                context.armino_path,
+            },
+        )
+    else
+        "";
     const c_sources = if (std.mem.eql(u8, side, "ap"))
-        b.fmt("{s}_main.c grt_net_binding.c bk_embed_adc_binding.c bk_embed_gpio_button_binding.c bk_embed_bt_local_hci.c bk_embed_wifi_sta_binding.c bk_embed_audio_onboard_speaker.c bk_embed_display_qspi_binding.c bk_embed_display_rgb_binding.c bk_embed_touch_binding.c", .{side})
+        b.fmt("{s}_main.c grt_net_binding.c bk_embed_adc_binding.c bk_embed_gpio_button_binding.c bk_embed_bt_local_hci.c bk_embed_wifi_sta_binding.c bk_embed_preferences_binding.c bk_embed_audio_onboard_speaker.c bk_embed_display_qspi_binding.c bk_embed_display_rgb_binding.c bk_embed_touch_binding.c{s}", .{ side, flashdb_sources })
     else
         b.fmt("{s}_main.c grt_net_binding.c", .{side});
     const base_priv_requires = if (std.mem.eql(u8, side, "ap"))
-        "lwip_intf_v2_1 bk_wifi bk_wifi_driver bk_netif bk_event driver bk_display multimedia media_service bk_peripheral avdk_utils bk_bluetooth audio_play audio_record"
+        "lwip_intf_v2_1 bk_wifi bk_wifi_driver bk_netif bk_event driver bk_display multimedia media_service bk_peripheral avdk_utils bk_bluetooth audio_play audio_record flashdb"
     else
         "lwip_intf_v2_1";
     const priv_requires = b.fmt("{s}{s}", .{ base_priv_requires, sideComponentRequiresText(b, side_opts) });
+    const include_dirs = if (std.mem.eql(u8, side, "ap"))
+        b.fmt(". {s}/ap/components/flashdb/inc {s}/ap/components/flashdb/port {s}/ap/components/flashdb/port/fal/inc", .{
+            context.armino_path,
+            context.armino_path,
+            context.armino_path,
+        })
+    else
+        ".";
+    const compile_definitions = if (std.mem.eql(u8, side, "ap"))
+        "\nset(CMAKE_C_FLAGS \"${CMAKE_C_FLAGS} -DCONFIG_FLASHDB_TSDB_START_ADDR=0 -DCONFIG_FLASHDB_TSDB_SIZE=0\")"
+    else
+        "";
     const extra_zig_options = zigBuildOptionsText(b, app_opts, side_opts);
     const extra_prebuilt_libs = sideExtraPrebuiltLibsText(b, lib_name, side_opts);
     const extra_byproducts = sideExtraPrebuiltByproductsText(b, side_opts);
     return b.fmt(
-        \\set(incs .)
+        \\set(incs {s})
         \\set(srcs {s})
+        \\{s}
         \\
         \\armino_component_register(SRCS "${{srcs}}" INCLUDE_DIRS "${{incs}}" PRIV_REQUIRES {s})
         \\
@@ -610,7 +649,9 @@ fn sideCmakeText(
         \\{s}
         \\
     , .{
+        include_dirs,
         c_sources,
+        compile_definitions,
         priv_requires,
         context.app_root,
         lib_name,

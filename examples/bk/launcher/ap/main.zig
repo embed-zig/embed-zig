@@ -51,6 +51,18 @@ const PlatformCtx = struct {
         };
     }
 
+    pub fn preferencesSmokeTaskOptions() glib.task.Options {
+        return .{
+            .min_stack_size = 24 * 1024,
+        };
+    }
+
+    pub fn preferencesProvider(allocator: grt.std.mem.Allocator) !bk.embed.system.preferences.Provider {
+        return bk.embed.system.preferences.Provider.init(.{
+            .allocator = allocator,
+        });
+    }
+
     pub fn chantPlayerTaskOptions() glib.task.Options {
         return .{
             .min_stack_size = 24 * 1024,

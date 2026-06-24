@@ -1,5 +1,16 @@
 pub const Handle = ?*anyopaque;
 
+pub const Entry = extern struct {
+    namespace_name: [16]u8,
+    key: [16]u8,
+    value_type: i32,
+    value_len: usize,
+};
+
+pub const Namespace = extern struct {
+    name: [16]u8,
+};
+
 pub extern const esp_embed_preferences_ok: i32;
 pub extern const esp_embed_preferences_err_invalid_arg: i32;
 pub extern const esp_embed_preferences_err_invalid_state: i32;
@@ -26,7 +37,7 @@ pub extern fn esp_embed_preferences_get(
     handle: Handle,
     key_ptr: [*]const u8,
     key_len: usize,
-    out_ptr: [*]u8,
+    out_ptr: ?[*]u8,
     inout_len: *usize,
 ) i32;
 pub extern fn esp_embed_preferences_put(
@@ -46,5 +57,16 @@ pub extern fn esp_embed_preferences_contains(
     key_ptr: [*]const u8,
     key_len: usize,
 ) bool;
+pub extern fn esp_embed_preferences_list(
+    handle: Handle,
+    out_entries: [*]Entry,
+    capacity: usize,
+    out_count: *usize,
+) i32;
+pub extern fn esp_embed_preferences_list_namespaces(
+    out_namespaces: [*]Namespace,
+    capacity: usize,
+    out_count: *usize,
+) i32;
 pub extern fn esp_embed_preferences_clear(handle: Handle) i32;
 pub extern fn esp_embed_preferences_sync(handle: Handle) i32;

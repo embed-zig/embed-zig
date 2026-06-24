@@ -200,6 +200,34 @@ fn runSmoke(comptime platform_ctx: type, comptime platform_grt: type, allocator:
     try store.put(key, "alpha");
     try store.sync();
 
+    const perf_value = [_]u8{'p'} ** 128;
+    const perf_iters = 64;
+    const write_started_ns = platform_grt.time.instant.now();
+    for (0..perf_iters) |_| {
+        try store.put("perf", &perf_value);
+    }
+    try store.sync();
+    const write_elapsed_ns = elapsedSince(platform_grt, write_started_ns);
+
+    var perf_buf: [perf_value.len]u8 = undefined;
+    const read_started_ns = platform_grt.time.instant.now();
+    for (0..perf_iters) |_| {
+        const perf_len = try store.get("perf", &perf_buf);
+        if (perf_len != perf_value.len) return error.UnexpectedPreferenceValue;
+    }
+    const read_elapsed_ns = elapsedSince(platform_grt, read_started_ns);
+    log.info(
+        "preferences perf namespace={s} bytes={} write={}ops/{}ms read={}ops/{}ms",
+        .{
+            namespace,
+            perf_value.len * perf_iters,
+            perf_iters,
+            nsToMs(write_elapsed_ns),
+            perf_iters,
+            nsToMs(read_elapsed_ns),
+        },
+    );
+
     var buf: [32]u8 = undefined;
     var len = try store.get(key, &buf);
     try expectEqualStrings(platform_grt, "alpha", buf[0..len]);
@@ -208,6 +236,19 @@ fn runSmoke(comptime platform_ctx: type, comptime platform_grt: type, allocator:
     try store.put(key, "beta-value");
     len = try store.get(key, &buf);
     try expectEqualStrings(platform_grt, "beta-value", buf[0..len]);
+
+    const allocated = try store.getAlloc(allocator, key);
+    defer allocator.free(allocated);
+    try expectEqualStrings(platform_grt, "beta-value", allocated);
+
+    const entries = try store.list(allocator);
+    defer allocator.free(entries);
+    if (!containsEntry(entries, namespace, key)) return error.PreferenceListMissingKey;
+    if (!containsEntry(entries, namespace, "perf")) return error.PreferenceListMissingKey;
+
+    const namespaces = try provider.list(allocator);
+    defer allocator.free(namespaces);
+    if (!containsNamespace(namespaces, namespace)) return error.PreferenceListMissingNamespace;
 
     var small: [4]u8 = undefined;
     try expectError(platform_grt, error.BufferTooSmall, store.get(key, &small));
@@ -224,6 +265,32 @@ fn runSmoke(comptime platform_ctx: type, comptime platform_grt: type, allocator:
     try reopened.clear();
 
     log.info("preferences smoke passed namespace={s}", .{namespace});
+}
+
+fn elapsedSince(comptime platform_grt: type, started_ns: glib.time.instant.Time) glib.time.duration.Duration {
+    return platform_grt.time.instant.sub(platform_grt.time.instant.now(), started_ns);
+}
+
+fn nsToMs(ns: glib.time.duration.Duration) u64 {
+    return @intCast(@divTrunc(ns, glib.time.duration.MilliSecond));
+}
+
+fn containsNamespace(namespaces: []const Preferences.Namespace, name: []const u8) bool {
+    for (namespaces) |namespace| {
+        if (glib.std.mem.eql(u8, namespace.name(), name)) return true;
+    }
+    return false;
+}
+
+fn containsEntry(entries: []const Preferences.Entry, namespace: []const u8, key: []const u8) bool {
+    for (entries) |entry| {
+        if (glib.std.mem.eql(u8, entry.namespace(), namespace) and
+            glib.std.mem.eql(u8, entry.key(), key))
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 fn makePreferencesProvider(comptime platform_ctx: type, comptime platform_grt: type, allocator: glib.std.mem.Allocator) !PreferencesProviderType(platform_ctx, platform_grt) {
@@ -296,6 +363,26 @@ const TestPreferencesProvider = struct {
         }
         return error.OutOfMemory;
     }
+
+    pub fn list(self: *TestPreferencesProvider, allocator: glib.std.mem.Allocator) Preferences.ListError![]Preferences.Namespace {
+        var count: usize = 0;
+        for (&self.stores) |*store| {
+            if (!store.active) continue;
+            count += 1;
+        }
+
+        const namespaces = allocator.alloc(Preferences.Namespace, count) catch return error.OutOfMemory;
+        errdefer allocator.free(namespaces);
+
+        var index: usize = 0;
+        for (&self.stores) |*store| {
+            if (!store.active) continue;
+            namespaces[index] = .{ .name_len = @intCast(store.namespace_len) };
+            @memcpy(namespaces[index].name_buf[0..store.namespace_len], store.namespace());
+            index += 1;
+        }
+        return namespaces;
+    }
 };
 
 const TestStore = struct {
@@ -306,10 +393,11 @@ const TestStore = struct {
 
     const Entry = struct {
         const key_buf_len = 16;
+        const value_buf_len = 128;
 
         key_buf: [key_buf_len]u8 = [_]u8{0} ** key_buf_len,
         key_len: usize = 0,
-        value_buf: [32]u8 = [_]u8{0} ** 32,
+        value_buf: [value_buf_len]u8 = [_]u8{0} ** value_buf_len,
         value_len: usize = 0,
         present: bool = false,
 
@@ -348,7 +436,7 @@ const TestStore = struct {
 
     pub fn put(self: *TestStore, key: []const u8, value: []const u8) Preferences.PutError!void {
         if (key.len == 0 or key.len >= Entry.key_buf_len) return error.InvalidKey;
-        if (value.len > 32) return error.ValueTooLarge;
+        if (value.len > Entry.value_buf_len) return error.ValueTooLarge;
         const entry = self.find(key) orelse self.freeEntry() orelse return error.NoSpaceLeft;
         @memset(&entry.key_buf, 0);
         @memset(&entry.value_buf, 0);
@@ -366,6 +454,26 @@ const TestStore = struct {
 
     pub fn contains(self: *TestStore, key: []const u8) bool {
         return self.find(key) != null;
+    }
+
+    pub fn list(self: *TestStore, allocator: glib.std.mem.Allocator) Preferences.ListError![]Preferences.Entry {
+        const entries = allocator.alloc(Preferences.Entry, self.entryCount()) catch return error.OutOfMemory;
+        errdefer allocator.free(entries);
+
+        var index: usize = 0;
+        for (&self.entries) |*entry| {
+            if (!entry.present) continue;
+            entries[index] = .{
+                .namespace_len = @intCast(self.namespace_len),
+                .key_len = @intCast(entry.key_len),
+                .value_type = .blob,
+                .value_len = entry.value_len,
+            };
+            @memcpy(entries[index].namespace_buf[0..self.namespace_len], self.namespace());
+            @memcpy(entries[index].key_buf[0..entry.key_len], entry.key());
+            index += 1;
+        }
+        return entries;
     }
 
     pub fn clear(self: *TestStore) Preferences.ClearError!void {
@@ -388,5 +496,14 @@ const TestStore = struct {
             if (!entry.present) return entry;
         }
         return null;
+    }
+
+    fn entryCount(self: *TestStore) usize {
+        var count: usize = 0;
+        for (&self.entries) |*entry| {
+            if (!entry.present) continue;
+            count += 1;
+        }
+        return count;
     }
 };
