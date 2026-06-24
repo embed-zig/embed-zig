@@ -1,6 +1,7 @@
 const std = @import("std");
 const armino = @import("bk_armino");
 const glib = @import("glib");
+const bk7258_board = @import("boards/bk7258_v3_2024/Definition.zig");
 const condition_impl = @import("grt/sync/Condition.zig").Impl;
 const mutex_impl = @import("grt/sync/Mutex.zig").Impl;
 const rwlock_impl = @import("grt/sync/RwLock.zig").Impl;
@@ -72,6 +73,7 @@ test "bk armino config render prints supported entries" {
     const cfg = armino.Config.make(.{
         .MAILBOX = true,
         .DISABLED = false,
+        .FWD_CMD_TO_CPUx = true,
         .UART_PRINT_PORT = 0,
         .NAME = "bk",
         .OFFSET = armino.Config.raw("0x8000"),
@@ -80,9 +82,29 @@ test "bk armino config render prints supported entries" {
     defer std.testing.allocator.free(text);
     try std.testing.expect(std.mem.indexOf(u8, text, "CONFIG_MAILBOX=y") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "# CONFIG_DISABLED is not set") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "CONFIG_FWD_CMD_TO_CPUx=y") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "CONFIG_UART_PRINT_PORT=0") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "CONFIG_NAME=\"bk\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "CONFIG_OFFSET=0x8000") != null);
+}
+
+test "bk7258 board routes AP logs through mailbox and CP logs through UART" {
+    const Board = bk7258_board.Board(armino);
+    const ap_text = try armino.Config.render(std.testing.allocator, Board.ap.config);
+    defer std.testing.allocator.free(ap_text);
+    const cp_text = try armino.Config.render(std.testing.allocator, Board.cp.config);
+    defer std.testing.allocator.free(cp_text);
+
+    try std.testing.expect(std.mem.indexOf(u8, ap_text, "# CONFIG_SYS_PRINT_DEV_UART is not set") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ap_text, "CONFIG_SYS_PRINT_DEV_MAILBOX=y") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ap_text, "CONFIG_FWD_CMD_TO_CPUx=y") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ap_text, "CONFIG_UART_PRINT_PORT=1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ap_text, "CONFIG_MAILBOX_IPC_API_TASK_STACK_SIZE=2048") != null);
+
+    try std.testing.expect(std.mem.indexOf(u8, cp_text, "CONFIG_SYS_PRINT_DEV_UART=y") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cp_text, "# CONFIG_SYS_PRINT_DEV_MAILBOX is not set") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cp_text, "CONFIG_FWD_CMD_TO_CPUx=y") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cp_text, "CONFIG_UART_PRINT_PORT=0") != null);
 }
 
 test "bk armino partition table renders csv and derived config" {

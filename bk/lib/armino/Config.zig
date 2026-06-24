@@ -9,6 +9,7 @@ pub fn raw(comptime text: []const u8) RawValue {
 }
 
 pub fn make(comptime macros: anytype) @TypeOf(macros) {
+    @setEvalBranchQuota(10_000);
     validateMacroSet(@TypeOf(macros));
     return macros;
 }
@@ -88,8 +89,8 @@ fn validateName(comptime name: []const u8) void {
         @compileError("omit CONFIG_ prefix in bk.armino.Config.make()");
     }
     inline for (name) |c| {
-        if (!((c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9') or c == '_')) {
-            @compileError("config macro names must use only A-Z, 0-9, and _");
+        if (!((c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z') or (c >= '0' and c <= '9') or c == '_')) {
+            @compileError("config macro names must use only A-Z, a-z, 0-9, and _");
         }
     }
 }

@@ -42,7 +42,7 @@ pub fn write(
 fn receiveApLog(data: []const u8) void {
     const text = glib.std.mem.sliceTo(data, 0);
     var line_buf: [288:0]u8 = undefined;
-    const line = glib.std.fmt.bufPrintZ(&line_buf, "{s}\r\n", .{text}) catch return;
+    const line = glib.std.fmt.bufPrintZ(&line_buf, "{s}", .{text}) catch return;
     armino.system.emergencyUartWriteString(0, line);
 }
 

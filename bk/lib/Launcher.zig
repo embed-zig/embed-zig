@@ -33,10 +33,14 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type, comptime Board: type)
 
             const init_config = try createInitConfig(board_impl);
             var configured_init_config = init_config;
-            configured_init_config.pipeline_config.tick_interval = config.pipeline_tick_interval;
-            configured_init_config.pipeline_config.task_options = config.pipeline_task_options;
-            configured_init_config.poller_config.poll_interval = config.poller_poll_interval;
-            configured_init_config.poller_config.task_options = config.poller_task_options;
+            if (@hasField(ZuxAppType.InitConfig, "pipeline_config")) {
+                configured_init_config.pipeline_config.tick_interval = config.pipeline_tick_interval;
+                configured_init_config.pipeline_config.task_options = config.pipeline_task_options;
+            }
+            if (@hasField(ZuxAppType.InitConfig, "poller_config")) {
+                configured_init_config.poller_config.poll_interval = config.poller_poll_interval;
+                configured_init_config.poller_config.task_options = config.poller_task_options;
+            }
             return .{
                 .allocator = allocator,
                 .board_impl = board_impl,
@@ -74,42 +78,54 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type, comptime Board: type)
             var init_config: ZuxAppType.InitConfig = undefined;
             applyInitConfigDefaults(&init_config);
 
-            inline for (0..registries.single_button.len) |i| {
-                const periph = registries.single_button.periphs[i];
-                if (comptime isVirtualPeriph(periph)) continue;
-                const label_name = comptime labelText(periph.label);
-                @field(init_config, label_name) = try board.singleButton(label_name);
+            if (comptime hasRegistry(registries, "single_button")) {
+                inline for (0..registries.single_button.len) |i| {
+                    const periph = registries.single_button.periphs[i];
+                    if (comptime isVirtualPeriph(periph)) continue;
+                    const label_name = comptime labelText(periph.label);
+                    @field(init_config, label_name) = try board.singleButton(label_name);
+                }
             }
 
-            inline for (0..registries.adc_button.len) |i| {
-                const periph = registries.adc_button.periphs[i];
-                if (comptime isVirtualPeriph(periph)) continue;
-                const label_name = comptime labelText(periph.label);
-                @field(init_config, label_name) = try board.groupedButton(label_name);
+            if (comptime hasRegistry(registries, "adc_button")) {
+                inline for (0..registries.adc_button.len) |i| {
+                    const periph = registries.adc_button.periphs[i];
+                    if (comptime isVirtualPeriph(periph)) continue;
+                    const label_name = comptime labelText(periph.label);
+                    @field(init_config, label_name) = try board.groupedButton(label_name);
+                }
             }
 
-            inline for (0..registries.display.len) |i| {
-                const periph = registries.display.periphs[i];
-                const label_name = comptime labelText(periph.label);
-                @field(init_config, label_name) = try board.display(label_name);
+            if (comptime hasRegistry(registries, "display")) {
+                inline for (0..registries.display.len) |i| {
+                    const periph = registries.display.periphs[i];
+                    const label_name = comptime labelText(periph.label);
+                    @field(init_config, label_name) = try board.display(label_name);
+                }
             }
 
-            inline for (0..registries.touch.len) |i| {
-                const periph = registries.touch.periphs[i];
-                const label_name = comptime labelText(periph.label);
-                @field(init_config, label_name) = try board.touch(label_name);
+            if (comptime hasRegistry(registries, "touch")) {
+                inline for (0..registries.touch.len) |i| {
+                    const periph = registries.touch.periphs[i];
+                    const label_name = comptime labelText(periph.label);
+                    @field(init_config, label_name) = try board.touch(label_name);
+                }
             }
 
-            inline for (0..registries.bt.len) |i| {
-                const periph = registries.bt.periphs[i];
-                const label_name = comptime labelText(periph.label);
-                @field(init_config, label_name) = try board.btHost(label_name);
+            if (comptime hasRegistry(registries, "bt")) {
+                inline for (0..registries.bt.len) |i| {
+                    const periph = registries.bt.periphs[i];
+                    const label_name = comptime labelText(periph.label);
+                    @field(init_config, label_name) = try board.btHost(label_name);
+                }
             }
 
-            inline for (0..registries.audio_system.len) |i| {
-                const periph = registries.audio_system.periphs[i];
-                const label_name = comptime labelText(periph.label);
-                @field(init_config, label_name) = try board.audioSystem(label_name);
+            if (comptime hasRegistry(registries, "audio_system")) {
+                inline for (0..registries.audio_system.len) |i| {
+                    const periph = registries.audio_system.periphs[i];
+                    const label_name = comptime labelText(periph.label);
+                    @field(init_config, label_name) = try board.audioSystem(label_name);
+                }
             }
 
             return init_config;
@@ -127,12 +143,21 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type, comptime Board: type)
 }
 
 fn validateSupportedRegistries(comptime registries: anytype) void {
-    if (registries.ledstrip.len != 0) @compileError("BK launcher does not support ledstrip yet");
-    if (registries.wifi_sta.len != 0) @compileError("BK launcher does not support wifi sta yet");
-    if (registries.imu.len != 0) @compileError("BK launcher does not support imu yet");
-    if (registries.modem.len != 0) @compileError("BK launcher does not support modem yet");
-    if (registries.nfc.len != 0) @compileError("BK launcher does not support nfc yet");
-    if (registries.wifi_ap.len != 0) @compileError("BK launcher does not support wifi ap yet");
+    if (comptime registryLen(registries, "ledstrip") != 0) @compileError("BK launcher does not support ledstrip yet");
+    if (comptime registryLen(registries, "wifi_sta") != 0) @compileError("BK launcher does not support wifi sta yet");
+    if (comptime registryLen(registries, "imu") != 0) @compileError("BK launcher does not support imu yet");
+    if (comptime registryLen(registries, "modem") != 0) @compileError("BK launcher does not support modem yet");
+    if (comptime registryLen(registries, "nfc") != 0) @compileError("BK launcher does not support nfc yet");
+    if (comptime registryLen(registries, "wifi_ap") != 0) @compileError("BK launcher does not support wifi ap yet");
+}
+
+fn hasRegistry(comptime registries: anytype, comptime name: []const u8) bool {
+    return @hasField(@TypeOf(registries), name);
+}
+
+fn registryLen(comptime registries: anytype, comptime name: []const u8) usize {
+    if (!hasRegistry(registries, name)) return 0;
+    return @field(registries, name).len;
 }
 
 fn makeBoardInitConfig(comptime Board: type, allocator: anytype) Board.InitConfig {

@@ -13,9 +13,16 @@ pub fn Board(comptime armino: type) type {
 
         pub const ap = struct {
             pub const config = armino.Config.make(.{
+                .SYS_PRINT_DEV_UART = false,
+                .SYS_PRINT_DEV_MAILBOX = true,
+                .SYS_PRINT_DEV_NULL = false,
+                .FWD_CMD_TO_CPUx = true,
+                .DUMP_UART_PRINT_PORT = 0,
+                .UART_PRINT_PORT = 1,
                 .MAILBOX = true,
                 .MAILBOX_V2_0 = true,
                 .MAILBOX_IPC = true,
+                .MAILBOX_IPC_API_TASK_STACK_SIZE = 2048,
                 .SLAVE_HEART_BEAT = true,
                 .APP_MAIN_TASK_STACK_SIZE = 16 * 1024,
                 .MEDIA = true,
@@ -75,6 +82,12 @@ pub fn Board(comptime armino: type) type {
 
         pub const cp = struct {
             pub const config = armino.Config.make(.{
+                .SYS_PRINT_DEV_UART = true,
+                .SYS_PRINT_DEV_MAILBOX = false,
+                .SYS_PRINT_DEV_NULL = false,
+                .FWD_CMD_TO_CPUx = true,
+                .DUMP_UART_PRINT_PORT = 0,
+                .UART_PRINT_PORT = 0,
                 .MAILBOX = true,
                 .MAILBOX_V2_0 = true,
                 .MAILBOX_IPC = true,

@@ -17,12 +17,12 @@ pub fn write(
 
     const line = glib.std.fmt.bufPrintZ(
         &line_buf,
-        "[AP] [{s}] [{s}] " ++ format,
+        "[AP] [{s}] [{s}] " ++ format ++ "\r\n",
         .{ level_text, scope_text } ++ args,
     ) catch {
         const fallback = glib.std.fmt.bufPrintZ(
             &line_buf,
-            "[AP] [{s}] [{s}] <log message truncated>",
+            "[AP] [{s}] [{s}] <log message truncated>\r\n",
             .{ level_text, scope_text },
         ) catch return;
         _ = ApLogIpc.sendZ(fallback, .{ .sync = true }) catch {};
