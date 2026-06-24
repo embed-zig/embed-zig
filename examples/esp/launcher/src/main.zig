@@ -34,6 +34,7 @@ else
 
 const PlatformCtx = struct {
     pub const AudioSystem = if (@hasDecl(Board, "AudioSystem")) Board.AudioSystem else void;
+    pub const Net = esp.grt.net;
     pub const fs = esp.fs;
 
     pub fn bleSpeedTaskOptions() glib.task.Options {

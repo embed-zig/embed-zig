@@ -6,6 +6,7 @@ pub const embed = @import("embed.zig");
 pub const fs = @import("grt/fs.zig");
 pub const heap = @import("heap.zig");
 pub const Launcher = @import("Launcher.zig");
+pub const net = @import("net.zig");
 
 pub const ap = struct {
     pub const role = @import("ap/role.zig");

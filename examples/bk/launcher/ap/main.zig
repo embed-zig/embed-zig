@@ -13,6 +13,7 @@ const os_allocator = bk.heap.allocator;
 const Board = build_config.Board;
 const PlatformCtx = struct {
     pub const AudioSystem = Board.AudioSystem;
+    pub const Net = bk.net;
     pub const fs = struct {
         pub const storage_path = Board.littlefs_mount_path;
 
