@@ -79,8 +79,8 @@
         "tags": [
           "emit"
         ],
-        "summary": "Inject an input event",
-        "description": "Local-only input event endpoint for single buttons, grouped buttons, and touch devices.",
+        "summary": "Inject a runtime event",
+        "description": "Local-only event endpoint for single buttons, grouped buttons, touch devices, and simulator-controllable outputs.",
         "operationId": "emitInputEvent",
         "parameters": [
           {
@@ -104,7 +104,10 @@
                 "release",
                 "down",
                 "move",
-                "up"
+                "up",
+                "on",
+                "off",
+                "toggle"
               ]
             }
           },
@@ -267,6 +270,7 @@
               "single_button",
               "grouped_button",
               "ledstrip",
+              "switch_output",
               "display",
               "modem",
               "nfc",
@@ -347,6 +351,9 @@
             "$ref": "#/components/schemas/LedStripState"
           },
           {
+            "$ref": "#/components/schemas/SwitchOutputState"
+          },
+          {
             "$ref": "#/components/schemas/DisplayState"
           },
           {
@@ -424,6 +431,26 @@
           "refresh_count": {
             "type": "integer",
             "minimum": 0
+          }
+        }
+      },
+      "SwitchOutputState": {
+        "type": "object",
+        "required": [
+          "label",
+          "kind",
+          "enabled"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "const": "switch_output"
+          },
+          "enabled": {
+            "type": "boolean"
           }
         }
       },

@@ -7,6 +7,7 @@ const ledstrip = @import("../ledstrip.zig");
 const modem = @import("../modem.zig");
 const nfc = @import("../nfc.zig");
 const single_button = @import("../single_button.zig");
+const switch_output = @import("../switch_output.zig");
 const touch = @import("../touch.zig");
 const wifi_sta = @import("../wifi_sta.zig");
 
@@ -32,6 +33,7 @@ pub fn make(comptime std: type) glib.testing.TestRunner {
             t.run("modem", modem.TestRunner(std));
             t.run("nfc", nfc.TestRunner(std));
             t.run("single_button", single_button.TestRunner(std));
+            t.run("switch_output", switch_output.TestRunner(std));
             t.run("touch", touch.TestRunner(std));
             t.run("wifi_sta", wifi_sta.TestRunner(std));
             return t.wait();

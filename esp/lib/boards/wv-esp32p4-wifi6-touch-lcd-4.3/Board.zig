@@ -106,6 +106,7 @@ power_button: PowerButton = .{},
 display_device: Display = .{},
 touch_device: Touch = .{},
 wifi_sta: Wifi.Sta = .{},
+switch_outputs: embed.board.SwitchOutputBank(8) = .{},
 bt_host: ?BtHost = null,
 audio: ?Audio = null,
 audio_allocator: ?esp.grt.std.mem.Allocator = null,
@@ -196,6 +197,14 @@ pub fn wifiSta(self: *Self, label: []const u8) !embed.drivers.wifi.Sta {
     }
     try self.wifi_sta.init();
     return self.wifi_sta.handle();
+}
+
+pub fn switchOutput(self: *Self, label: []const u8) !embed.drivers.Switch {
+    switch (self.state_value) {
+        .powered_on, .started => {},
+        else => return error.InvalidState,
+    }
+    return self.switch_outputs.get(label);
 }
 
 pub fn btHost(self: *Self, label: []const u8) !embed.bt.Host {

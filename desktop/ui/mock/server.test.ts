@@ -57,7 +57,7 @@ test('SSE publishes ledstrip refresh events after emit', async () => {
     expect(hasNonBlackPixel(refreshes[0]!.data.pixels)).toBe(true);
 
     const state = await getState();
-    expect(state.gears).toHaveLength(2);
+    expect(state.gears).toHaveLength(3);
     expect(events.some((event) => event.event === 'state.snapshot')).toBe(true);
     expect(events.some((event) => event.event === 'ledstrip.refreshed')).toBe(true);
     expect(snapshots.length).toBeGreaterThanOrEqual(1);
@@ -82,6 +82,25 @@ test('emit still updates button state while animation is active', async () => {
   const state = await getState();
   const button = state.gears.find((gear) => gear.kind === 'single_button');
   expect(button?.pressed).toBe(true);
+});
+
+test('emit toggles switch output state', async () => {
+  const ts = Date.now();
+  const before = await getState();
+  const previous = before.gears.find((gear) => gear.kind === 'switch_output')?.enabled ?? false;
+
+  const ack = await emitInputEvent({
+    gearLabel: 'relay',
+    event: 'toggle',
+    ts,
+  });
+
+  expect(ack.accepted).toBe(true);
+  expect(ack.ts).toBe(ts);
+
+  const state = await getState();
+  const relay = state.gears.find((gear) => gear.kind === 'switch_output');
+  expect(relay?.enabled).toBe(!previous);
 });
 
 function deferred<T>() {

@@ -4,6 +4,7 @@ import {
   getGroupedButtonStates,
   getLedStripState,
   getSingleButtonStates,
+  getSwitchOutputStates,
 } from './desktop-core.ts';
 import { getTopology } from './api/client.ts';
 import type { GearTopology, StateResponse } from './api/generated/types.gen';
@@ -15,6 +16,7 @@ const gearsEl = getElement('gears', HTMLDivElement);
 let latestState: StateResponse | null = null;
 const buttonEls = new Map<string, HTMLButtonElement>();
 const groupedButtonEls = new Map<string, HTMLButtonElement[]>();
+const switchOutputEls = new Map<string, HTMLButtonElement>();
 const displayCanvases = new Map<string, HTMLCanvasElement>();
 
 function log(message: string, data?: unknown): void {
@@ -37,6 +39,7 @@ function render(state: StateResponse): void {
   const buttons = getSingleButtonStates(state);
   const groupedButtons = getGroupedButtonStates(state);
   const strip = getLedStripState(state);
+  const switchOutputs = getSwitchOutputStates(state);
   const displays = getDisplayStates(state);
 
   for (const button of buttons) {
@@ -49,6 +52,13 @@ function render(state: StateResponse): void {
     nodes.forEach((node, id) => {
       node.classList.toggle('pressed', group.pressed_button_id === id);
     });
+  }
+
+  for (const output of switchOutputs) {
+    const node = switchOutputEls.get(output.label);
+    if (!node) continue;
+    node.classList.toggle('enabled', output.enabled);
+    node.setAttribute('aria-checked', String(output.enabled));
   }
 
   const stripEl = document.getElementById('strip');
@@ -83,6 +93,10 @@ async function emitTouch(
 
 async function emitGroupedButton(gearLabel: string, event: 'press' | 'release', buttonId: number): Promise<void> {
   await controller.emit(gearLabel, event, { buttonId });
+}
+
+async function emitSwitchOutput(gearLabel: string, event: 'toggle' | 'on' | 'off'): Promise<void> {
+  await controller.emit(gearLabel, event);
 }
 
 const controller = await createDesktopController({
@@ -121,6 +135,7 @@ function buildGearUi(): void {
   gearsEl.innerHTML = '';
   buttonEls.clear();
   groupedButtonEls.clear();
+  switchOutputEls.clear();
   displayCanvases.clear();
 
   for (const gear of topology.gears) {
@@ -182,6 +197,35 @@ function buildGearUi(): void {
       groupedButtonEls.set(gear.label, buttons);
       group.appendChild(grid);
       gearsEl.appendChild(wrapPanel(group));
+      continue;
+    }
+
+    if (gear.kind === 'switch_output') {
+      const toggle = document.createElement('button');
+      toggle.className = 'switch-output';
+      toggle.type = 'button';
+      toggle.setAttribute('role', 'switch');
+      toggle.setAttribute('aria-checked', 'false');
+      toggle.title = gear.label;
+
+      const text = document.createElement('span');
+      text.className = 'switch-output-label';
+      text.textContent = formatGearLabel(gear);
+      toggle.appendChild(text);
+
+      const track = document.createElement('span');
+      track.className = 'switch-output-track';
+      track.setAttribute('aria-hidden', 'true');
+      const thumb = document.createElement('span');
+      thumb.className = 'switch-output-thumb';
+      track.appendChild(thumb);
+      toggle.appendChild(track);
+
+      toggle.addEventListener('click', () => {
+        void emitSwitchOutput(gear.label, 'toggle');
+      });
+      switchOutputEls.set(gear.label, toggle);
+      gearsEl.appendChild(wrapPanel(toggle));
       continue;
     }
 

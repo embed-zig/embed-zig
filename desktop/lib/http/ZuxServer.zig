@@ -45,13 +45,14 @@ pub fn make(comptime Launcher: type) type {
     const grouped_button_count = registries.adc_button.len;
     const exposed_grouped_button_count = exposedButtonCount(registries.adc_button);
     const ledstrip_count = registries.ledstrip.len;
+    const switch_output_count = if (@hasField(@TypeOf(registries), "switch_output")) registries.switch_output.len else 0;
     const modem_count = registries.modem.len;
     const nfc_count = registries.nfc.len;
     const touch_count = registries.touch.len;
     const wifi_sta_count = registries.wifi_sta.len;
     const has_bt_host = @hasField(ZuxApp.InitConfig, "bt");
-    const topology_gear_count = exposed_single_button_count + exposed_grouped_button_count + ledstrip_count + display_count + modem_count + nfc_count + touch_count + wifi_sta_count;
-    const state_gear_count = exposed_single_button_count + exposed_grouped_button_count + ledstrip_count + display_count + wifi_sta_count;
+    const topology_gear_count = exposed_single_button_count + exposed_grouped_button_count + ledstrip_count + switch_output_count + display_count + modem_count + nfc_count + touch_count + wifi_sta_count;
+    const state_gear_count = exposed_single_button_count + exposed_grouped_button_count + ledstrip_count + switch_output_count + display_count + wifi_sta_count;
 
     return struct {
         const Server = @This();
@@ -140,6 +141,7 @@ pub fn make(comptime Launcher: type) type {
                 try runtime.init(allocator, start_config);
                 errdefer runtime.deinit();
                 runtime.attachStripRefreshHooks();
+                runtime.attachSwitchOutputHooks();
                 runtime.attachDisplayRefreshHooks();
 
                 const server = try api.ServerApi.init(allocator, runtime, .{
@@ -230,6 +232,7 @@ pub fn make(comptime Launcher: type) type {
             modems: [modem_count]device.modem.Modem,
             nfcs: [nfc_count]device.nfc.Nfc,
             strips: [ledstrip_count]device.ledstrip.LedStrip,
+            switch_outputs: [switch_output_count]device.switch_output.SwitchOutput,
             touches: [touch_count]device.touch.Touch,
             wifi_stas: [wifi_sta_count]device.wifi_sta.WifiSta,
             bt_host: if (has_bt_host) device.bt_host.BtHost else void,
@@ -306,6 +309,7 @@ pub fn make(comptime Launcher: type) type {
                 self.nfcs = [_]device.nfc.Nfc{.{}} ** nfc_count;
                 self.strips = try initStripDevices(allocator);
                 errdefer deinitStripDevices(&self.strips);
+                self.switch_outputs = [_]device.switch_output.SwitchOutput{.{}} ** switch_output_count;
                 self.touches = [_]device.touch.Touch{.{}} ** touch_count;
                 self.wifi_stas = try initWifiStaDevices(allocator);
                 errdefer deinitWifiStaDevices(&self.wifi_stas);
@@ -324,6 +328,7 @@ pub fn make(comptime Launcher: type) type {
                     &self.modems,
                     &self.nfcs,
                     &self.strips,
+                    &self.switch_outputs,
                     &self.touches,
                     &self.wifi_stas,
                     &self.bt_host,
@@ -362,8 +367,20 @@ pub fn make(comptime Launcher: type) type {
                 }
             }
 
+            fn attachSwitchOutputHooks(self: *Self) void {
+                inline for (0..switch_output_count) |i| {
+                    self.switch_outputs[i].setChangeHook(self, onSwitchOutputChanged);
+                }
+            }
+
             fn onStripRefresh(ctx: *anyopaque, strip: *device.ledstrip.LedStrip) void {
                 _ = strip;
+                const self: *Self = @ptrCast(@alignCast(ctx));
+                self.bumpRevision();
+            }
+
+            fn onSwitchOutputChanged(ctx: *anyopaque, output: *device.switch_output.SwitchOutput) void {
+                _ = output;
                 const self: *Self = @ptrCast(@alignCast(ctx));
                 self.bumpRevision();
             }
@@ -426,6 +443,21 @@ pub fn make(comptime Launcher: type) type {
                         .kind = "ledstrip",
                         .label = comptime labelText(periph.label),
                         .pixel_count = @intCast(periph.pixel_count),
+                        .button_count = null,
+                        .width = null,
+                        .height = null,
+                        .target = null,
+                        .metadata = topologyMetadata(periphMetadata(periph)),
+                    };
+                    index += 1;
+                }
+
+                inline for (0..switch_output_count) |i| {
+                    const periph = registries.switch_output.periphs[i];
+                    gears[index] = .{
+                        .kind = "switch_output",
+                        .label = comptime labelText(periph.label),
+                        .pixel_count = null,
                         .button_count = null,
                         .width = null,
                         .height = null,
@@ -591,6 +623,16 @@ pub fn make(comptime Launcher: type) type {
                     index += 1;
                 }
 
+                inline for (0..switch_output_count) |i| {
+                    const periph = registries.switch_output.periphs[i];
+                    gears[index] = @unionInit(Models.GearState, "SwitchOutputState", .{
+                        .kind = "switch_output",
+                        .label = comptime labelText(periph.label),
+                        .enabled = try self.switch_outputs[i].get(),
+                    });
+                    index += 1;
+                }
+
                 inline for (0..display_count) |i| {
                     const periph = registries.display.periphs[i];
                     const snapshot = try self.displays[i].snapshot(allocator);
@@ -732,6 +774,33 @@ pub fn make(comptime Launcher: type) type {
                     const periph = registries.ledstrip.periphs[i];
                     if (gstd.runtime.std.mem.eql(u8, gear_label, comptime labelText(periph.label))) {
                         return error.InvalidEvent;
+                    }
+                }
+
+                inline for (0..switch_output_count) |i| {
+                    const periph = registries.switch_output.periphs[i];
+                    const label_name = comptime labelText(periph.label);
+                    if (gstd.runtime.std.mem.eql(u8, gear_label, label_name)) {
+                        const enabled = if (gstd.runtime.std.mem.eql(u8, event_name, "on"))
+                            true
+                        else if (gstd.runtime.std.mem.eql(u8, event_name, "off"))
+                            false
+                        else if (gstd.runtime.std.mem.eql(u8, event_name, "toggle"))
+                            !(self.switch_outputs[i].get() catch return error.InvalidEvent)
+                        else
+                            return error.InvalidEvent;
+
+                        self.launcher.zux().set_switch(@field(ZuxApp.PeriphLabel, label_name), enabled) catch return error.InvalidEvent;
+                        // Desktop keeps an observable local output state for UI/state snapshots.
+                        self.switch_outputs[i].set(enabled) catch return error.InvalidEvent;
+                        self.bumpRevision();
+                        return .{
+                            .accepted = true,
+                            .event = event_name,
+                            .gear_label = gear_label,
+                            .metadata = metadata,
+                            .ts = ts_ms,
+                        };
                     }
                 }
 
@@ -1022,6 +1091,7 @@ pub fn make(comptime Launcher: type) type {
                 modems: *[modem_count]device.modem.Modem,
                 nfcs: *[nfc_count]device.nfc.Nfc,
                 strips: *[ledstrip_count]device.ledstrip.LedStrip,
+                switch_outputs: *[switch_output_count]device.switch_output.SwitchOutput,
                 touches: *[touch_count]device.touch.Touch,
                 wifi_stas: *[wifi_sta_count]device.wifi_sta.WifiSta,
                 bt_host: *if (has_bt_host) device.bt_host.BtHost else void,
@@ -1079,6 +1149,12 @@ pub fn make(comptime Launcher: type) type {
                     const periph = registries.ledstrip.periphs[i];
                     const label_name = comptime labelText(periph.label);
                     @field(init_config, label_name) = strips[i].handle();
+                }
+
+                inline for (0..switch_output_count) |i| {
+                    const periph = registries.switch_output.periphs[i];
+                    const label_name = comptime labelText(periph.label);
+                    @field(init_config, label_name) = switch_outputs[i].handle();
                 }
 
                 inline for (0..display_count) |i| {
@@ -1311,15 +1387,24 @@ fn validateLauncher(comptime Launcher: type) void {
     if (!@hasDecl(ZuxApp, "InitConfig")) @compileError("desktop ZuxServer requires ZuxApp.InitConfig");
     if (!@hasDecl(ZuxApp, "StartConfig")) @compileError("desktop ZuxServer requires ZuxApp.StartConfig");
     if (!@hasDecl(ZuxApp, "PeriphLabel")) @compileError("desktop ZuxServer requires ZuxApp.PeriphLabel");
+    const registries = ZuxApp.registries;
     _ = @as(*const fn (*ZuxApp) void, &ZuxApp.deinit);
     _ = @as(*const fn (*ZuxApp, ZuxApp.StartConfig) anyerror!void, &ZuxApp.start);
     _ = @as(*const fn (*ZuxApp) anyerror!void, &ZuxApp.stop);
-    _ = @as(*const fn (*ZuxApp, ZuxApp.PeriphLabel) anyerror!void, &ZuxApp.press_single_button);
-    _ = @as(*const fn (*ZuxApp, ZuxApp.PeriphLabel) anyerror!void, &ZuxApp.release_single_button);
-    _ = @as(*const fn (*ZuxApp, ZuxApp.PeriphLabel, u32) anyerror!void, &ZuxApp.press_grouped_button);
-    _ = @as(*const fn (*ZuxApp, ZuxApp.PeriphLabel) anyerror!void, &ZuxApp.release_grouped_button);
 
-    const registries = ZuxApp.registries;
+    if (registries.single_button.len != 0) {
+        _ = @as(*const fn (*ZuxApp, ZuxApp.PeriphLabel) anyerror!void, &ZuxApp.press_single_button);
+        _ = @as(*const fn (*ZuxApp, ZuxApp.PeriphLabel) anyerror!void, &ZuxApp.release_single_button);
+    }
+    if (registries.adc_button.len != 0) {
+        _ = @as(*const fn (*ZuxApp, ZuxApp.PeriphLabel, u32) anyerror!void, &ZuxApp.press_grouped_button);
+        _ = @as(*const fn (*ZuxApp, ZuxApp.PeriphLabel) anyerror!void, &ZuxApp.release_grouped_button);
+    }
+    if (@hasField(@TypeOf(registries), "switch_output")) {
+        if (registries.switch_output.len != 0) {
+            _ = @as(*const fn (*ZuxApp, ZuxApp.PeriphLabel, bool) anyerror!void, &ZuxApp.set_switch);
+        }
+    }
     if (registries.imu.len != 0) @compileError("desktop ZuxServer does not support imu yet");
     if (registries.wifi_ap.len != 0) @compileError("desktop ZuxServer does not support wifi ap yet");
 }
@@ -1534,6 +1619,7 @@ pub fn TestRunner(comptime std_api: type) glib.testing.TestRunner {
             .max_displays = 1,
             .max_modem = 1,
             .max_nfc = 1,
+            .max_switches = 1,
         });
         var assembler = AssemblerType.init();
         assembler.addGroupedButtonWithMetadata("buttons", 7, .{
@@ -1549,6 +1635,9 @@ pub fn TestRunner(comptime std_api: type) glib.testing.TestRunner {
         assembler.addNfcWithMetadata("nfc", 13, .{
             .label_text = "NFC",
         });
+        assembler.addSwitchWithMetadata("relay", 17, .{
+            .label_text = "Relay",
+        });
 
         const BuildConfig = assembler.BuildConfig();
         const build_config: BuildConfig = .{
@@ -1556,6 +1645,7 @@ pub fn TestRunner(comptime std_api: type) glib.testing.TestRunner {
             .screen = embed.drivers.Display,
             .modem = embed.drivers.Modem,
             .nfc = embed.nfc.Reader,
+            .relay = embed.drivers.Switch,
         };
         break :blk assembler.build(build_config);
     };
@@ -1605,11 +1695,12 @@ pub fn TestRunner(comptime std_api: type) glib.testing.TestRunner {
             defer allocator.free(topology.gears);
 
             try std_api.testing.expectEqualStrings("topology test", topology.title);
-            try std_api.testing.expectEqual(@as(usize, 4), topology.gears.len);
+            try std_api.testing.expectEqual(@as(usize, 5), topology.gears.len);
             try expectGear(topology.gears[0], "grouped_button", "buttons", null, 3, null, null, null, "Buttons", &.{ "Red", "Green", "Blue" });
-            try expectGear(topology.gears[1], "display", "screen", null, null, 128, 64, null, "Screen", &.{});
-            try expectGear(topology.gears[2], "modem", "modem", null, null, null, null, null, "Cellular", &.{});
-            try expectGear(topology.gears[3], "nfc", "nfc", null, null, null, null, null, "NFC", &.{});
+            try expectGear(topology.gears[1], "switch_output", "relay", null, null, null, null, null, "Relay", &.{});
+            try expectGear(topology.gears[2], "display", "screen", null, null, 128, 64, null, "Screen", &.{});
+            try expectGear(topology.gears[3], "modem", "modem", null, null, null, null, null, "Cellular", &.{});
+            try expectGear(topology.gears[4], "nfc", "nfc", null, null, null, null, null, "NFC", &.{});
         }
 
         fn groupedButtonEmitUpdatesState(allocator: std_api.mem.Allocator) !void {
@@ -1621,7 +1712,7 @@ pub fn TestRunner(comptime std_api: type) glib.testing.TestRunner {
             var pressed = try runtime.makeStateResponse(allocator, 124);
             defer Server.RuntimeState.deinitStateResponse(allocator, &pressed);
 
-            try std_api.testing.expectEqual(@as(usize, 2), pressed.gears.len);
+            try std_api.testing.expectEqual(@as(usize, 3), pressed.gears.len);
             switch (pressed.gears[0]) {
                 .GroupedButtonState => |state| {
                     try std_api.testing.expectEqualStrings("buttons", state.label);
@@ -1645,6 +1736,33 @@ pub fn TestRunner(comptime std_api: type) glib.testing.TestRunner {
                 Server.RuntimeState.EmitError.InvalidEvent,
                 runtime.emit("buttons", "press", 127, null, null, 3),
             );
+        }
+
+        fn switchOutputEmitUpdatesState(allocator: std_api.mem.Allocator) !void {
+            var runtime: Server.RuntimeState = undefined;
+            try runtime.init(allocator, .{ .ticker = .manual });
+            defer runtime.deinit();
+
+            _ = try runtime.emit("relay", "on", 223, null, null, null);
+            var enabled = try runtime.makeStateResponse(allocator, 224);
+            defer Server.RuntimeState.deinitStateResponse(allocator, &enabled);
+
+            switch (enabled.gears[1]) {
+                .SwitchOutputState => |state| {
+                    try std_api.testing.expectEqualStrings("relay", state.label);
+                    try std_api.testing.expect(state.enabled);
+                },
+                else => return error.ExpectedSwitchOutputState,
+            }
+
+            _ = try runtime.emit("relay", "toggle", 225, null, null, null);
+            var toggled = try runtime.makeStateResponse(allocator, 226);
+            defer Server.RuntimeState.deinitStateResponse(allocator, &toggled);
+
+            switch (toggled.gears[1]) {
+                .SwitchOutputState => |state| try std_api.testing.expect(!state.enabled),
+                else => return error.ExpectedSwitchOutputState,
+            }
         }
 
         fn expectGear(
@@ -1694,11 +1812,15 @@ pub fn TestRunner(comptime std_api: type) glib.testing.TestRunner {
             _ = self;
 
             TestCase.topologyIncludesComponentMetadata(allocator) catch |err| {
-                t.logFatal(@errorName(err));
+                t.logFatalf("topologyIncludesComponentMetadata: {s}", .{@errorName(err)});
                 return false;
             };
             TestCase.groupedButtonEmitUpdatesState(allocator) catch |err| {
-                t.logFatal(@errorName(err));
+                t.logFatalf("groupedButtonEmitUpdatesState: {s}", .{@errorName(err)});
+                return false;
+            };
+            TestCase.switchOutputEmitUpdatesState(allocator) catch |err| {
+                t.logFatalf("switchOutputEmitUpdatesState: {s}", .{@errorName(err)});
                 return false;
             };
             return true;

@@ -207,6 +207,17 @@ pub fn make(
                 };
             }
 
+            if (comptime hasRegistry(registries, "switch_output")) {
+                inline for (0..registries.switch_output.len) |i| {
+                    const periph = registries.switch_output.periphs[i];
+                    const label_name = comptime labelText(periph.label);
+                    @field(init_config, label_name) = board.switchOutput(label_name) catch |err| {
+                        log.err("board missing switch output component '{s}': {s}", .{ label_name, @errorName(err) });
+                        return err;
+                    };
+                }
+            }
+
             inline for (0..registries.touch.len) |i| {
                 const periph = registries.touch.periphs[i];
                 const label_name = comptime labelText(periph.label);
@@ -243,6 +254,10 @@ pub fn make(
 fn validateSupportedRegistries(comptime registries: anytype) void {
     if (registries.imu.len != 0) @compileError("ESP launcher does not support imu yet");
     if (registries.wifi_ap.len != 0) @compileError("ESP launcher does not support wifi ap yet");
+}
+
+fn hasRegistry(comptime registries: anytype, comptime name: []const u8) bool {
+    return @hasField(@TypeOf(registries), name);
 }
 
 fn makeBoardInitConfig(comptime Board: type, allocator: grt.std.mem.Allocator, _: Config) Board.InitConfig {

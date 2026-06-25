@@ -46,6 +46,7 @@ pub fn make(comptime grt: type, comptime spec: SpecType) type {
             groupedButton: ?*const fn (ptr: *anyopaque, label: []const u8) anyerror!drivers.button.Grouped = null,
             imu: ?*const fn (ptr: *anyopaque, label: []const u8) anyerror!drivers.imu = null,
             ledStrip: ?*const fn (ptr: *anyopaque, label: []const u8) anyerror!ledstrip.LedStrip = null,
+            switchOutput: ?*const fn (ptr: *anyopaque, label: []const u8) anyerror!drivers.Switch = null,
             modem: ?*const fn (ptr: *anyopaque, label: []const u8) anyerror!drivers.Modem = null,
             nfc: ?*const fn (ptr: *anyopaque, label: []const u8) anyerror!nfc_api.Reader = null,
             touch: ?*const fn (ptr: *anyopaque, label: []const u8) anyerror!drivers.Touch = null,
@@ -135,6 +136,14 @@ pub fn make(comptime grt: type, comptime spec: SpecType) type {
                     const self: *Impl = @ptrCast(@alignCast(ptr));
                     if (comptime @hasDecl(Impl, "ledStrip")) {
                         return self.ledStrip(label);
+                    }
+                    return error.Unsupported;
+                }
+
+                fn switchOutputFn(ptr: *anyopaque, label: []const u8) anyerror!drivers.Switch {
+                    const self: *Impl = @ptrCast(@alignCast(ptr));
+                    if (comptime @hasDecl(Impl, "switchOutput")) {
+                        return self.switchOutput(label);
                     }
                     return error.Unsupported;
                 }
@@ -237,6 +246,7 @@ pub fn make(comptime grt: type, comptime spec: SpecType) type {
                     .groupedButton = groupedButtonFn,
                     .imu = imuFn,
                     .ledStrip = ledStripFn,
+                    .switchOutput = switchOutputFn,
                     .modem = modemFn,
                     .nfc = nfcFn,
                     .touch = touchFn,
@@ -302,6 +312,11 @@ pub fn make(comptime grt: type, comptime spec: SpecType) type {
 
         pub fn ledStrip(self: Board, label: []const u8) !ledstrip.LedStrip {
             if (self.vtable.ledStrip) |f| return f(self.ptr, label);
+            return error.Unsupported;
+        }
+
+        pub fn switchOutput(self: Board, label: []const u8) !drivers.Switch {
+            if (self.vtable.switchOutput) |f| return f(self.ptr, label);
             return error.Unsupported;
         }
 

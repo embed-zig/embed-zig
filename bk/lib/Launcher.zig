@@ -128,6 +128,14 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type, comptime Board: type)
                 }
             }
 
+            if (comptime hasRegistry(registries, "switch_output")) {
+                inline for (0..registries.switch_output.len) |i| {
+                    const periph = registries.switch_output.periphs[i];
+                    const label_name = comptime labelText(periph.label);
+                    @field(init_config, label_name) = try board.switchOutput(label_name);
+                }
+            }
+
             return init_config;
         }
 

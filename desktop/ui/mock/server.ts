@@ -9,6 +9,10 @@ type GearTopology =
       label: 'strip';
       kind: 'ledstrip';
       pixel_count: number;
+    }
+  | {
+      label: 'relay';
+      kind: 'switch_output';
     };
 
 type Color = {
@@ -30,9 +34,15 @@ type LedStripState = {
   refresh_count: number;
 };
 
+type SwitchOutputState = {
+  label: 'relay';
+  kind: 'switch_output';
+  enabled: boolean;
+};
+
 type StateResponse = {
   ts_ms: number;
-  gears: Array<SingleButtonState | LedStripState>;
+  gears: Array<SingleButtonState | LedStripState | SwitchOutputState>;
 };
 
 type ServerEvent =
@@ -66,12 +76,14 @@ export function createMockServer(options?: {
     gears: [
       { label: 'power-btn', kind: 'single_button' },
       { label: 'strip', kind: 'ledstrip', pixel_count: 8 },
+      { label: 'relay', kind: 'switch_output' },
     ],
   };
 
   const state: {
     button: SingleButtonState;
     strip: LedStripState;
+    relay: SwitchOutputState;
   } = {
     button: {
       label: 'power-btn',
@@ -83,6 +95,11 @@ export function createMockServer(options?: {
       kind: 'ledstrip',
       pixels: Array.from({ length: 8 }, () => black()),
       refresh_count: 0,
+    },
+    relay: {
+      label: 'relay',
+      kind: 'switch_output',
+      enabled: false,
     },
   };
 
@@ -109,6 +126,7 @@ export function createMockServer(options?: {
         ...state.strip,
         pixels: clonePixels(state.strip.pixels),
       },
+      { ...state.relay },
     ],
   });
 
@@ -194,15 +212,35 @@ export function createMockServer(options?: {
       return json({ error: { code: 'INVALID_TS', message: 'Query parameter ts must be a number.' } }, 400);
     }
 
-    if (gearLabel !== 'power-btn') {
+    if (gearLabel !== 'power-btn' && gearLabel !== 'relay') {
       return json({ error: { code: 'UNKNOWN_GEAR', message: `Unknown gear label: ${gearLabel}` } }, 404);
     }
 
-    if (eventName !== 'press' && eventName !== 'release') {
-      return json({ error: { code: 'INVALID_EVENT', message: `Unsupported event: ${eventName}` } }, 400);
+    if (gearLabel === 'power-btn') {
+      if (eventName !== 'press' && eventName !== 'release') {
+        return json({ error: { code: 'INVALID_EVENT', message: `Unsupported event: ${eventName}` } }, 400);
+      }
+      state.button.pressed = eventName === 'press';
+      broadcastSnapshot(ts);
+
+      return json({
+        accepted: true,
+        gear_label: gearLabel,
+        event: eventName,
+        ts,
+        metadata: metadata ?? undefined,
+      });
     }
 
-    state.button.pressed = eventName === 'press';
+    if (eventName === 'on') {
+      state.relay.enabled = true;
+    } else if (eventName === 'off') {
+      state.relay.enabled = false;
+    } else if (eventName === 'toggle') {
+      state.relay.enabled = !state.relay.enabled;
+    } else {
+      return json({ error: { code: 'INVALID_EVENT', message: `Unsupported event: ${eventName}` } }, 400);
+    }
     broadcastSnapshot(ts);
 
     return json({

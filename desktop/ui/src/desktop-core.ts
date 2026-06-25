@@ -7,9 +7,10 @@ import type {
   LedStripState,
   SingleButtonState,
   StateResponse,
+  SwitchOutputState,
 } from './api/generated/types.gen';
 
-export type DesktopInputEvent = 'press' | 'release' | 'down' | 'move' | 'up';
+export type DesktopInputEvent = 'press' | 'release' | 'down' | 'move' | 'up' | 'on' | 'off' | 'toggle';
 export type DesktopEmitOptions = {
   point?: { x: number; y: number };
   buttonId?: number;
@@ -19,10 +20,12 @@ type GearState =
   | SingleButtonState
   | GroupedButtonState
   | LedStripState
+  | SwitchOutputState
   | DisplayState
   | { SingleButtonState: SingleButtonState }
   | { GroupedButtonState: GroupedButtonState }
   | { LedStripState: LedStripState }
+  | { SwitchOutputState: SwitchOutputState }
   | { DisplayState: DisplayState };
 
 export interface DesktopController {
@@ -145,6 +148,18 @@ export function getLedStripState(state: StateResponse): LedStripState | undefine
     if ('kind' in gear && gear.kind === 'ledstrip') return gear;
   }
   return undefined;
+}
+
+export function getSwitchOutputStates(state: StateResponse): SwitchOutputState[] {
+  const outputs: SwitchOutputState[] = [];
+  for (const gear of state.gears as GearState[]) {
+    if ('SwitchOutputState' in gear) {
+      outputs.push(gear.SwitchOutputState);
+    } else if ('kind' in gear && gear.kind === 'switch_output') {
+      outputs.push(gear);
+    }
+  }
+  return outputs;
 }
 
 export function getDisplayStates(state: StateResponse): DisplayState[] {

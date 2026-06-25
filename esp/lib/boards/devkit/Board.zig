@@ -27,6 +27,7 @@ pub const InitConfig = struct {
 power_button: PowerButton = .{},
 led_strip: LedStrip = .{},
 wifi_sta: Wifi.Sta = .{},
+switch_outputs: embed.board.SwitchOutputBank(8) = .{},
 bt_host: ?BtHost = null,
 bt_allocator: ?esp.grt.std.mem.Allocator = null,
 state_value: embed.board.State = .uninitialized,
@@ -81,6 +82,14 @@ pub fn ledStrip(self: *Self, label: []const u8) !embed.ledstrip.LedStrip {
         else => return error.InvalidState,
     }
     return self.led_strip.handle();
+}
+
+pub fn switchOutput(self: *Self, label: []const u8) !embed.drivers.Switch {
+    switch (self.state_value) {
+        .powered_on, .started => {},
+        else => return error.InvalidState,
+    }
+    return self.switch_outputs.get(label);
 }
 
 pub fn wifiSta(self: *Self, label: []const u8) !embed.drivers.wifi.Sta {

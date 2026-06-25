@@ -1,6 +1,7 @@
 import { client } from './generated/client.gen';
 import type {
   EmitAck,
+  EmitInputEventData,
   MetadataValue,
   StateResponse,
   TopologyResponse,
@@ -24,7 +25,7 @@ export async function getState(): Promise<StateResponse> {
 
 export async function emitInputEvent(options: {
   gearLabel: string;
-  event: 'press' | 'release' | 'down' | 'move' | 'up';
+  event: EmitInputEventData['path']['event'];
   ts: number;
   x?: number;
   y?: number;

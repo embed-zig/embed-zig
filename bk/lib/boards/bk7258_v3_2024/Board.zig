@@ -46,6 +46,7 @@ pub const InitConfig = struct {
 
 display_device: Display = .{},
 adc_group: Keys = .{},
+switch_outputs: embed.board.SwitchOutputBank(8) = .{},
 audio: ?Audio = null,
 audio_allocator: ?bk.ap.grt.std.mem.Allocator = null,
 audio_system_config: Audio.Type.Config = .{},
@@ -92,6 +93,10 @@ pub fn groupedButton(self: *Board, label: []const u8) !embed.drivers.button.Grou
     if (!stringsEqual(label, "keys") and !stringsEqual(label, "controls")) return error.UnknownPeripheral;
     try self.adc_group.init();
     return self.adc_group.handle();
+}
+
+pub fn switchOutput(self: *Board, label: []const u8) !embed.drivers.Switch {
+    return self.switch_outputs.get(label);
 }
 
 pub fn touch(self: *Board, label: []const u8) !embed.drivers.Touch {
