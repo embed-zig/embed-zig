@@ -160,19 +160,21 @@ pub fn make(comptime grt: type) type {
                 .allocator = self.allocator,
                 .address = dataBindAddr(self.config.control_addr),
             });
-            defer pc.deinit();
-            try configurePacketConn(pc, self.config.udp_socket_buffer_size);
-            const udp_port = try boundPacketPort(pc);
-            waitForDataPortPublish();
-
-            try writeReady(control, .{
-                .udp_port = udp_port,
-                .conv = request.conv,
-            });
-
-            const remote = try waitHello(pc, request.conv, self.config.idle_timeout);
             var endpoint: PerfEndpoint = undefined;
-            try endpoint.init(self.allocator, pc, remote, request.conv, request, protocolMode(request.protocol));
+            {
+                errdefer pc.deinit();
+                try configurePacketConn(pc, self.config.udp_socket_buffer_size);
+                const udp_port = try boundPacketPort(pc);
+                waitForDataPortPublish();
+
+                try writeReady(control, .{
+                    .udp_port = udp_port,
+                    .conv = request.conv,
+                });
+
+                const remote = try waitHello(pc, request.conv, self.config.idle_timeout);
+                try endpoint.init(self.allocator, pc, remote, request.conv, request, protocolMode(request.protocol));
+            }
             defer endpoint.deinit();
 
             const result = endpoint.run(.server, request, null) catch |err| {

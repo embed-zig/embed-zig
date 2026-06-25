@@ -16,7 +16,6 @@ pub const Role = enum {
 
 const transfer_timeout = 180 * glib.time.duration.Second;
 const io_timeout = 100 * glib.time.duration.MilliSecond;
-const reader_timeout = 100 * glib.time.duration.MilliSecond;
 const diag_interval = 1 * glib.time.duration.Second;
 const transfer_buf_size: usize = 8192;
 const ping_payload_size: usize = 8;
@@ -88,6 +87,7 @@ pub fn make(comptime grt: type) type {
             self.session.close();
             self.joinReader();
             self.session.deinit();
+            self.pc.deinit();
             self.* = undefined;
         }
 
@@ -386,12 +386,13 @@ pub fn make(comptime grt: type) type {
 
         fn readerLoop(self: *Self) !void {
             var packet: [2048]u8 = undefined;
-            defer self.pc.setReadDeadline(null);
             while (!self.shouldStopReader()) {
-                self.pc.setReadDeadline(glib.time.instant.add(grt.time.instant.now(), reader_timeout));
                 const result = self.pc.readFrom(&packet) catch |err| switch (err) {
-                    error.TimedOut => continue,
                     error.Closed => return,
+                    error.TimedOut => {
+                        if (self.shouldStopReader()) return;
+                        continue;
+                    },
                     else => return err,
                 };
                 if (!addrEquals(result.addr, self.remote)) continue;
@@ -424,6 +425,21 @@ pub fn make(comptime grt: type) type {
             if (self.reader_err) |err| return err;
         }
 
+        const PacketWriteSnapshot = struct {
+            count: u64 = 0,
+            avg_us: u64 = 0,
+            max_us: u64 = 0,
+        };
+
+        const UdpRuntimeSnapshot = struct {
+            retry_total: u64 = 0,
+            retry_packets: u64 = 0,
+            retry_max_per_packet: u64 = 0,
+            enqueue_wait_total: u64 = 0,
+            enqueue_wait_packets: u64 = 0,
+            enqueue_wait_max_per_packet: u64 = 0,
+        };
+
         fn writePacket(ctx: ?*anyopaque, datagram: []const u8) !void {
             const self: *Self = @ptrCast(@alignCast(ctx orelse return error.MissingPerfEndpoint));
             const written = self.pc.writeTo(datagram, self.remote) catch |err| {
@@ -431,6 +447,25 @@ pub fn make(comptime grt: type) type {
                 return err;
             };
             if (written != datagram.len) return error.ShortWrite;
+        }
+
+        fn packetWriteSnapshot(_: *Self) PacketWriteSnapshot {
+            return .{};
+        }
+
+        fn udpRuntimeSnapshot(self: *Self) UdpRuntimeSnapshot {
+            const udp = self.pc.as(grt.net.UdpConn) catch return .{};
+            const stats = udp.debugStats();
+            const Stats = @TypeOf(stats);
+            if (!@hasField(Stats, "send_retry_total")) return .{};
+            return .{
+                .retry_total = @intCast(stats.send_retry_total),
+                .retry_packets = @intCast(stats.send_retry_packet_total),
+                .retry_max_per_packet = @intCast(stats.send_retry_max_per_packet),
+                .enqueue_wait_total = @intCast(stats.send_enqueue_wait_total),
+                .enqueue_wait_packets = @intCast(stats.send_enqueue_wait_packet_total),
+                .enqueue_wait_max_per_packet = @intCast(stats.send_enqueue_wait_max_per_packet),
+            };
         }
 
         fn addrEquals(a: AddrPort, b: AddrPort) bool {
@@ -459,6 +494,8 @@ pub fn make(comptime grt: type) type {
             started: glib.time.instant.Time,
         ) void {
             const snap = self.session.snapshot();
+            const packet_write = self.packetWriteSnapshot();
+            const udp_runtime = self.udpRuntimeSnapshot();
             const elapsed_ms = elapsedSince(started) / @as(u64, @intCast(glib.time.duration.MilliSecond));
             const log = std.log.scoped(.kcp_perf_endpoint);
             log.info(
@@ -534,7 +571,55 @@ pub fn make(comptime grt: type) type {
                     snap.pool_allocation_failures,
                 },
             );
-            self.writeDiagControl(label, role, request, sent, received, elapsed_ms, snap);
+            log.info(
+                "{s} role={s} proto={s} dir={s} ms={d} loop={d} sleep={d}/{d}ms zero={d} work={d}/{d}us late={d}us lock={d}/{d}us upd={d}/{d}us upd_ob={d} upd_cb={d}/{d}us upd_write={d}/{d}us upd_core={d}us post={d}/{d}us",
+                .{
+                    label,
+                    @tagName(role),
+                    request.protocol.name(),
+                    @tagName(request.direction),
+                    elapsed_ms,
+                    snap.loop_count,
+                    snap.loop_sleep_count,
+                    snap.loop_sleep_ms,
+                    snap.loop_zero_sleep_count,
+                    snap.loop_work_us,
+                    snap.loop_work_max_us,
+                    snap.loop_late_max_us,
+                    snap.loop_lock_wait_us,
+                    snap.loop_lock_wait_max_us,
+                    snap.loop_update_us,
+                    snap.loop_update_max_us,
+                    snap.loop_update_max_output_burst,
+                    snap.loop_update_max_output_callback_us,
+                    snap.loop_update_max_output_callback_max_us,
+                    snap.loop_update_max_output_write_us,
+                    snap.loop_update_max_output_write_max_us,
+                    snap.loop_update_max_internal_us,
+                    snap.loop_post_us,
+                    snap.loop_post_max_us,
+                },
+            );
+            log.info(
+                "{s} role={s} proto={s} dir={s} ms={d} udpw={d} avg={d}us max={d}us retry={d}/{d} retryMax={d} qwait={d}/{d} qwaitMax={d}",
+                .{
+                    label,
+                    @tagName(role),
+                    request.protocol.name(),
+                    @tagName(request.direction),
+                    elapsed_ms,
+                    packet_write.count,
+                    packet_write.avg_us,
+                    packet_write.max_us,
+                    udp_runtime.retry_total,
+                    udp_runtime.retry_packets,
+                    udp_runtime.retry_max_per_packet,
+                    udp_runtime.enqueue_wait_total,
+                    udp_runtime.enqueue_wait_packets,
+                    udp_runtime.enqueue_wait_max_per_packet,
+                },
+            );
+            self.writeDiagControl(label, role, request, sent, received, elapsed_ms, snap, packet_write, udp_runtime);
         }
 
         fn writeDiagControl(
@@ -546,11 +631,15 @@ pub fn make(comptime grt: type) type {
             received: usize,
             elapsed_ms: u64,
             snap: Session.Snapshot,
+            packet_write: PacketWriteSnapshot,
+            udp_runtime: UdpRuntimeSnapshot,
         ) void {
             var line_buf: [Protocol.max_line_len]u8 = undefined;
+            var timing_line_buf: [Protocol.max_line_len]u8 = undefined;
+            var udp_line_buf: [Protocol.max_line_len]u8 = undefined;
             const line = std.fmt.bufPrint(
                 &line_buf,
-                "{s} DIAG session {s} role={s} proto={s} dir={s} ms={d} s={d} r={d} w={d} sq={d} sb={d} rq={d} rb={d} rw={d} cw={d} rto={d} xmit={d} out={d} drop={d} in={d} ob={d}/{d} oa={d} ia={d} ip={d}\n",
+                "{s} DIAG session {s} role={s} proto={s} dir={s} ms={d} s={d} r={d} w={d} sq={d} sb={d} rq={d} rb={d} rw={d} cw={d} rto={d} xmit={d} out={d} drop={d} in={d}\n",
                 .{
                     Protocol.magic,
                     label,
@@ -572,11 +661,60 @@ pub fn make(comptime grt: type) type {
                     snap.output_packets,
                     snap.output_drops,
                     snap.input_packets,
+                },
+            ) catch return;
+            const timing_line = std.fmt.bufPrint(
+                &timing_line_buf,
+                "{s} DIAG timing {s} role={s} proto={s} dir={s} ms={d} loop={d} sleep={d}/{d} zero={d} work={d}/{d} late={d} lock={d}/{d} upd={d}/{d} upd_ob={d} upd_cb={d}/{d} upd_write={d}/{d} upd_core={d} post={d}/{d} ob={d}/{d}\n",
+                .{
+                    Protocol.magic,
+                    label,
+                    @tagName(role),
+                    request.protocol.name(),
+                    @tagName(request.direction),
+                    elapsed_ms,
+                    snap.loop_count,
+                    snap.loop_sleep_count,
+                    snap.loop_sleep_ms,
+                    snap.loop_zero_sleep_count,
+                    snap.loop_work_us,
+                    snap.loop_work_max_us,
+                    snap.loop_late_max_us,
+                    snap.loop_lock_wait_us,
+                    snap.loop_lock_wait_max_us,
+                    snap.loop_update_us,
+                    snap.loop_update_max_us,
+                    snap.loop_update_max_output_burst,
+                    snap.loop_update_max_output_callback_us,
+                    snap.loop_update_max_output_callback_max_us,
+                    snap.loop_update_max_output_write_us,
+                    snap.loop_update_max_output_write_max_us,
+                    snap.loop_update_max_internal_us,
+                    snap.loop_post_us,
+                    snap.loop_post_max_us,
                     snap.last_output_burst,
                     snap.max_output_burst,
-                    snap.output_ack_segments,
-                    snap.input_ack_segments,
-                    snap.input_push_segments,
+                },
+            ) catch return;
+            const udp_line = std.fmt.bufPrint(
+                &udp_line_buf,
+                "{s} DIAG udp {s} role={s} proto={s} dir={s} ms={d} writes={d} avg_us={d} max_us={d} retry={d}/{d} retry_max={d} qwait={d}/{d} qwait_max={d}\n",
+                .{
+                    Protocol.magic,
+                    label,
+                    @tagName(role),
+                    request.protocol.name(),
+                    @tagName(request.direction),
+                    elapsed_ms,
+                    packet_write.count,
+                    packet_write.avg_us,
+                    packet_write.max_us,
+                    udp_runtime.retry_total,
+                    udp_runtime.retry_packets,
+                    udp_runtime.retry_max_per_packet,
+                    udp_runtime.enqueue_wait_total,
+                    udp_runtime.enqueue_wait_packets,
+                    udp_runtime.enqueue_wait_max_per_packet,
                 },
             ) catch return;
 
@@ -585,6 +723,12 @@ pub fn make(comptime grt: type) type {
             if (self.diag_control_failed) return;
             const conn = self.diag_control orelse return;
             writeAll(conn, line) catch {
+                self.diag_control_failed = true;
+            };
+            writeAll(conn, timing_line) catch {
+                self.diag_control_failed = true;
+            };
+            writeAll(conn, udp_line) catch {
                 self.diag_control_failed = true;
             };
         }

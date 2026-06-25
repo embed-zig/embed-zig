@@ -243,10 +243,16 @@ const CpuSample = struct {
 };
 
 fn runNetperf(comptime platform_grt: type, allocator: platform_grt.std.mem.Allocator) !void {
+    if (glib.std.mem.eql(u8, config.protocol, "ikcp-memory")) {
+        try runIkcpMemoryBench(platform_grt, allocator);
+        return;
+    }
+
     if (glib.std.mem.eql(u8, config.protocol, "all")) {
         try runNetperfProtocol(platform_grt, allocator, .tcp);
         try runNetperfProtocol(platform_grt, allocator, .udp);
-        try runNetperfProtocol(platform_grt, allocator, .kcp);
+        try runNetperfProtocol(platform_grt, allocator, .ikcp_packet);
+        try runNetperfProtocol(platform_grt, allocator, .ikcp_stream);
         return;
     }
 
@@ -262,7 +268,7 @@ fn runNetperfProtocol(
         try runNetperfOne(platform_grt, allocator, protocol, .up);
         try runNetperfOne(platform_grt, allocator, protocol, .down);
         try runNetperfOne(platform_grt, allocator, protocol, .duplex);
-        if (protocol == .tcp or protocol == .kcp) {
+        if (protocol == .tcp or protocol.isIkcp()) {
             try runNetperfOne(platform_grt, allocator, protocol, .ping);
         }
         return;
@@ -321,7 +327,9 @@ fn runNetperfOne(
     const request = Protocol.Request{
         .protocol = protocol,
         .direction = direction,
+        .conv = uniqueConv(platform_grt, Protocol.default_conv, protocol, direction),
         .bytes = config.bytes,
+        .udp_pps = config.udp_pps,
         .kcp = .{
             .send_window = config.send_window,
             .recv_window = config.recv_window,
@@ -333,15 +341,16 @@ fn runNetperfOne(
     };
 
     log.info(
-        "netperf start protocol={s} direction={s} host={s} port={d} bytes={d} stream_chunk={d} udp_payload={d} wnd={d}/{d} nodelay={d} interval={d} resend={d} nc={d}",
+        "netperf start protocol={s} direction={s} host={s} port={d} bytes={d} stream_chunk={d} udp_payload={d} udp_pps={d} wnd={d}/{d} nodelay={d} interval={d} resend={d} nc={d}",
         .{
-            @tagName(protocol),
+            protocol.name(),
             @tagName(direction),
             config.host,
             config.port,
             config.bytes,
             request.streamChunk(),
             request.udpPayload(),
+            request.udp_pps,
             config.send_window,
             config.recv_window,
             config.nodelay,
@@ -358,7 +367,7 @@ fn runNetperfOne(
     log.info(
         "netperf {s}/{s} client sent={d} recv={d} elapsed_ns={d} mbps={d:.3} packets={d} errors={d} first_byte_ns={d} rtt_ns={d}",
         .{
-            @tagName(protocol),
+            protocol.name(),
             @tagName(direction),
             result.client.sent_bytes,
             result.client.received_bytes,
@@ -373,7 +382,7 @@ fn runNetperfOne(
     log.info(
         "netperf {s}/{s} server sent={d} recv={d} elapsed_ns={d} mbps={d:.3} packets={d} errors={d} first_byte_ns={d} rtt_ns={d}",
         .{
-            @tagName(protocol),
+            protocol.name(),
             @tagName(direction),
             result.server.sent_bytes,
             result.server.received_bytes,
@@ -389,7 +398,7 @@ fn runNetperfOne(
         log.info(
             "netperf {s}/{s} summary mbps={d:.3} sent={d} recv={d}",
             .{
-                @tagName(protocol),
+                protocol.name(),
                 @tagName(direction),
                 result.server.mbps(),
                 result.client.sent_bytes,
@@ -400,7 +409,7 @@ fn runNetperfOne(
         log.info(
             "netperf {s}/{s} summary mbps={d:.3} sent={d} recv={d}",
             .{
-                @tagName(protocol),
+                protocol.name(),
                 @tagName(direction),
                 result.client.mbps(),
                 result.server.sent_bytes,
@@ -412,7 +421,7 @@ fn runNetperfOne(
         log.info(
             "netperf {s}/{s} summary mbps={d:.3} sent={d} recv={d}",
             .{
-                @tagName(protocol),
+                protocol.name(),
                 @tagName(direction),
                 mbps,
                 result.client.sent_bytes + result.server.sent_bytes,
@@ -423,7 +432,7 @@ fn runNetperfOne(
         log.info(
             "netperf {s}/{s} summary first_byte_ns={d} rtt_ns={d} errors={d}",
             .{
-                @tagName(protocol),
+                protocol.name(),
                 @tagName(direction),
                 result.client.first_byte_ns,
                 result.client.rtt_ns,
@@ -432,6 +441,20 @@ fn runNetperfOne(
         );
     }
     logCpuDelta(platform_grt, protocol, direction, cpu_before, cpu_after);
+}
+
+fn uniqueConv(
+    comptime platform_grt: type,
+    base: u32,
+    protocol: Protocol.Protocol,
+    direction: Protocol.Direction,
+) u32 {
+    const now = platform_grt.time.instant.now();
+    const now_ns: u64 = if (now <= 0) 0 else @intCast(now);
+    return base ^
+        @as(u32, @truncate(now_ns)) ^
+        (@as(u32, @intFromEnum(protocol)) << 16) ^
+        (@as(u32, @intFromEnum(direction)) << 24);
 }
 
 fn sampleCpu(comptime platform_grt: type) CpuSample {
@@ -460,7 +483,7 @@ fn logCpuDelta(
 ) void {
     const log = platform_grt.std.log.scoped(.zux_netperf);
     if (!before.supported or !after.supported) {
-        log.info("netperf {s}/{s} cpu unsupported", .{ @tagName(protocol), @tagName(direction) });
+        log.info("netperf {s}/{s} cpu unsupported", .{ protocol.name(), @tagName(direction) });
         return;
     }
 
@@ -474,7 +497,7 @@ fn logCpuDelta(
         if (isIdleTask(&entry.name)) idle += delta;
     }
     if (total == 0) {
-        log.info("netperf {s}/{s} cpu no-delta", .{ @tagName(protocol), @tagName(direction) });
+        log.info("netperf {s}/{s} cpu no-delta", .{ protocol.name(), @tagName(direction) });
         return;
     }
 
@@ -482,7 +505,7 @@ fn logCpuDelta(
     log.info(
         "netperf {s}/{s} cpu busy={d:.2}% idle={d:.2}% total_runtime={d} tasks={d}",
         .{
-            @tagName(protocol),
+            protocol.name(),
             @tagName(direction),
             percent(busy, total),
             percent(idle, total),
@@ -500,7 +523,7 @@ fn logCpuDelta(
         log.info(
             "netperf {s}/{s} cpu task name={s} pct={d:.2}% runtime={d}",
             .{
-                @tagName(protocol),
+                protocol.name(),
                 @tagName(direction),
                 entryName(&after.entries[index].name),
                 percent(deltas[index], total),
@@ -541,6 +564,53 @@ fn entryName(name: *const [16]u8) []const u8 {
     return glib.std.mem.sliceTo(name.*[0..], 0);
 }
 
+fn runIkcpMemoryBench(comptime platform_grt: type, allocator: platform_grt.std.mem.Allocator) !void {
+    const log = platform_grt.std.log.scoped(.zux_netperf);
+    const Bench = kcp.test_runner.benchmark.Runner(platform_grt);
+
+    log.info(
+        "ikcp-memory start bytes={d} udp_payload={d} wnd={d}/{d} nodelay={d} interval={d} resend={d} nc={d}",
+        .{
+            config.bytes,
+            Protocol.default_udp_payload,
+            config.send_window,
+            config.recv_window,
+            config.nodelay,
+            config.interval_ms,
+            config.resend,
+            config.no_congestion_control,
+        },
+    );
+
+    var results: [3]kcp.test_runner.benchmark.Result = undefined;
+    const len = try Bench.runAll(allocator, .{
+        .bytes = config.bytes,
+        .udp_payload = Protocol.default_udp_payload,
+        .send_window = config.send_window,
+        .recv_window = config.recv_window,
+        .nodelay = config.nodelay,
+        .interval_ms = @intCast(@max(config.interval_ms, 1)),
+        .resend = config.resend,
+        .no_congestion_control = config.no_congestion_control,
+    }, results[0..]);
+    for (results[0..len]) |result| {
+        log.info(
+            "ikcp-memory {s} elapsed_ns={d} mbps={d:.3} sent={d} recv={d} output_packets={d} output_bytes={d} output_drops={d} input_errors={d}",
+            .{
+                result.scenario.label(),
+                result.elapsed_ns,
+                result.mbps(),
+                result.sent_bytes,
+                result.received_bytes,
+                result.output_packets,
+                result.output_bytes,
+                result.output_drops,
+                result.input_errors,
+            },
+        );
+    }
+}
+
 fn percent(value: u64, total: u64) f64 {
     if (total == 0) return 0;
     return 100.0 * @as(f64, @floatFromInt(value)) / @as(f64, @floatFromInt(total));
@@ -548,6 +618,7 @@ fn percent(value: u64, total: u64) f64 {
 
 fn validateProtocol(value: []const u8) !void {
     if (glib.std.mem.eql(u8, value, "all")) return;
+    if (glib.std.mem.eql(u8, value, "ikcp-memory")) return;
     _ = try Protocol.Protocol.parse(value);
 }
 

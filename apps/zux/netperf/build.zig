@@ -15,9 +15,10 @@ pub fn register(registry: anytype) void {
     options.addOption([]const u8, "wifi_password", registry.b.option([]const u8, "netperf_wifi_password", "WiFi password for ESP netperf") orelse "");
     options.addOption([]const u8, "host", registry.b.option([]const u8, "netperf_host", "Netperf control host IP") orelse "127.0.0.1");
     options.addOption(u16, "port", registry.b.option(u16, "netperf_port", "Netperf control TCP port") orelse 9821);
-    options.addOption([]const u8, "protocol", registry.b.option([]const u8, "netperf_protocol", "tcp, udp, ikcp-packet, ikcp-stream, or all") orelse "all");
+    options.addOption([]const u8, "protocol", registry.b.option([]const u8, "netperf_protocol", "tcp, udp, ikcp-packet, ikcp-stream, ikcp-memory, or all") orelse "all");
     options.addOption([]const u8, "direction", registry.b.option([]const u8, "netperf_direction", "up, down, duplex, ping, or all") orelse "all");
     options.addOption(usize, "bytes", registry.b.option(usize, "netperf_bytes", "Bytes per direction") orelse 5 * 1024 * 1024);
+    options.addOption(u32, "udp_pps", registry.b.option(u32, "netperf_udp_pps", "Raw UDP send packets per second, 0 disables pacing") orelse 1650);
     options.addOption(u32, "send_window", registry.b.option(u32, "netperf_kcp_snd_wnd", "KCP send window") orelse 32);
     options.addOption(u32, "recv_window", registry.b.option(u32, "netperf_kcp_rcv_wnd", "KCP receive window") orelse 32);
     options.addOption(i32, "nodelay", registry.b.option(i32, "netperf_nodelay", "TCP_NODELAY / KCP nodelay value") orelse 1);

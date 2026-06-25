@@ -55,7 +55,6 @@ pub fn make(comptime grt: type) type {
         kcp_mutex: Mutex = .{},
         read_cond: Condition = .{},
         write_cond: Condition = .{},
-        loop_cond: Condition = .{},
         stopping: bool = false,
         running: bool = false,
         task_handle: ?grt.task.Handle = null,
@@ -67,6 +66,29 @@ pub fn make(comptime grt: type) type {
         output_packets_total: u64 = 0,
         output_bytes_total: u64 = 0,
         output_drops_total: u64 = 0,
+        loop_count: u64 = 0,
+        loop_sleep_count: u64 = 0,
+        loop_sleep_ns_total: u64 = 0,
+        loop_zero_sleep_count: u64 = 0,
+        loop_work_ns_total: u64 = 0,
+        loop_work_ns_max: u64 = 0,
+        loop_late_ns_max: u64 = 0,
+        loop_lock_wait_ns_total: u64 = 0,
+        loop_lock_wait_ns_max: u64 = 0,
+        loop_update_ns_total: u64 = 0,
+        loop_update_ns_max: u64 = 0,
+        loop_update_max_output_burst: u32 = 0,
+        loop_update_max_output_callback_ns_total: u64 = 0,
+        loop_update_max_output_callback_ns_max: u64 = 0,
+        loop_update_max_output_write_ns_total: u64 = 0,
+        loop_update_max_output_write_ns_max: u64 = 0,
+        loop_update_max_internal_ns: u64 = 0,
+        loop_post_ns_total: u64 = 0,
+        loop_post_ns_max: u64 = 0,
+        current_output_callback_ns_total: u64 = 0,
+        current_output_callback_ns_max: u64 = 0,
+        current_output_write_ns_total: u64 = 0,
+        current_output_write_ns_max: u64 = 0,
         current_output_burst: u32 = 0,
         last_output_burst: u32 = 0,
         max_output_burst: u32 = 0,
@@ -95,6 +117,25 @@ pub fn make(comptime grt: type) type {
             output_packets: u64 = 0,
             output_bytes: u64 = 0,
             output_drops: u64 = 0,
+            loop_count: u64 = 0,
+            loop_sleep_count: u64 = 0,
+            loop_sleep_ms: u64 = 0,
+            loop_zero_sleep_count: u64 = 0,
+            loop_work_us: u64 = 0,
+            loop_work_max_us: u64 = 0,
+            loop_late_max_us: u64 = 0,
+            loop_lock_wait_us: u64 = 0,
+            loop_lock_wait_max_us: u64 = 0,
+            loop_update_us: u64 = 0,
+            loop_update_max_us: u64 = 0,
+            loop_update_max_output_burst: u32 = 0,
+            loop_update_max_output_callback_us: u64 = 0,
+            loop_update_max_output_callback_max_us: u64 = 0,
+            loop_update_max_output_write_us: u64 = 0,
+            loop_update_max_output_write_max_us: u64 = 0,
+            loop_update_max_internal_us: u64 = 0,
+            loop_post_us: u64 = 0,
+            loop_post_max_us: u64 = 0,
             last_output_burst: u32 = 0,
             max_output_burst: u32 = 0,
             output_new_segments: u32 = 0,
@@ -191,7 +232,6 @@ pub fn make(comptime grt: type) type {
             self.stopping = true;
             self.read_cond.broadcast();
             self.write_cond.broadcast();
-            self.loop_cond.broadcast();
             self.kcp_mutex.unlock();
 
             if (should_join) {
@@ -203,7 +243,6 @@ pub fn make(comptime grt: type) type {
             self.task_handle = null;
             self.read_cond.broadcast();
             self.write_cond.broadcast();
-            self.loop_cond.broadcast();
             self.kcp_mutex.unlock();
         }
 
@@ -226,9 +265,10 @@ pub fn make(comptime grt: type) type {
                 return;
             }
             self.input_packets_total +%= 1;
+            self.beginOutputBurst();
+            kcp.flush(self.inst);
+            try self.checkOutputLocked();
             self.updateCachedStateLocked();
-            self.read_cond.broadcast();
-            self.write_cond.broadcast();
         }
 
         pub fn inputDatagram(self: *Self, datagram: []const u8) !void {
@@ -285,7 +325,6 @@ pub fn make(comptime grt: type) type {
                 self.stopping = true;
                 self.read_cond.broadcast();
                 self.write_cond.broadcast();
-                self.loop_cond.broadcast();
                 self.kcp_mutex.unlock();
             };
         }
@@ -294,7 +333,9 @@ pub fn make(comptime grt: type) type {
             var next_tick = glib.time.instant.add(grt.time.instant.now(), self.intervalDuration());
 
             while (true) {
+                const loop_start = grt.time.instant.now();
                 self.kcp_mutex.lock();
+                const lock_acquired = grt.time.instant.now();
                 if (self.stopping) {
                     self.kcp_mutex.unlock();
                     return;
@@ -302,6 +343,7 @@ pub fn make(comptime grt: type) type {
 
                 self.beginOutputBurst();
                 kcp.update(self.inst, self.nowMs());
+                const update_end = grt.time.instant.now();
                 self.checkOutputLocked() catch |err| {
                     self.kcp_mutex.unlock();
                     return err;
@@ -310,11 +352,45 @@ pub fn make(comptime grt: type) type {
                 self.read_cond.broadcast();
                 self.write_cond.broadcast();
 
-                const wait_ns = glib.time.instant.sub(next_tick, grt.time.instant.now());
+                const work_end = grt.time.instant.now();
+                self.loop_count +%= 1;
+                const lock_wait_ns = positiveDurationNs(glib.time.instant.sub(lock_acquired, loop_start));
+                self.loop_lock_wait_ns_total +%= lock_wait_ns;
+                self.loop_lock_wait_ns_max = @max(self.loop_lock_wait_ns_max, lock_wait_ns);
+                const update_ns = positiveDurationNs(glib.time.instant.sub(update_end, lock_acquired));
+                self.loop_update_ns_total +%= update_ns;
+                if (update_ns > self.loop_update_ns_max) {
+                    self.loop_update_ns_max = update_ns;
+                    self.loop_update_max_output_burst = self.current_output_burst;
+                    self.loop_update_max_output_callback_ns_total = self.current_output_callback_ns_total;
+                    self.loop_update_max_output_callback_ns_max = self.current_output_callback_ns_max;
+                    self.loop_update_max_output_write_ns_total = self.current_output_write_ns_total;
+                    self.loop_update_max_output_write_ns_max = self.current_output_write_ns_max;
+                    self.loop_update_max_internal_ns = update_ns -| self.current_output_callback_ns_total;
+                }
+                const post_ns = positiveDurationNs(glib.time.instant.sub(work_end, update_end));
+                self.loop_post_ns_total +%= post_ns;
+                self.loop_post_ns_max = @max(self.loop_post_ns_max, post_ns);
+                const work_ns = positiveDurationNs(glib.time.instant.sub(work_end, loop_start));
+                self.loop_work_ns_total +%= work_ns;
+                self.loop_work_ns_max = @max(self.loop_work_ns_max, work_ns);
+
+                const wait_ns = glib.time.instant.sub(next_tick, work_end);
                 if (wait_ns > 0 and !self.stopping) {
-                    self.loop_cond.timedWait(&self.kcp_mutex, @intCast(wait_ns)) catch {};
+                    self.kcp_mutex.unlock();
+                    const sleep_start = grt.time.instant.now();
+                    grt.time.sleep(wait_ns);
+                    const sleep_ns = positiveDurationNs(glib.time.instant.sub(grt.time.instant.now(), sleep_start));
+                    self.kcp_mutex.lock();
+                    self.loop_sleep_count +%= 1;
+                    self.loop_sleep_ns_total +%= sleep_ns;
+                    next_tick = glib.time.instant.add(next_tick, self.intervalDuration());
+                    self.kcp_mutex.unlock();
+                    continue;
                 }
                 if (wait_ns <= 0) {
+                    self.loop_zero_sleep_count +%= 1;
+                    self.loop_late_ns_max = @max(self.loop_late_ns_max, glib.time.duration.magnitude(wait_ns));
                     const now = grt.time.instant.now();
                     next_tick = now;
                 }
@@ -337,7 +413,6 @@ pub fn make(comptime grt: type) type {
                     const rc = kcp.send(self.inst, payload[0..n].ptr, @intCast(n));
                     if (rc < 0) return error.KcpSessionSendFailed;
                     self.updateCachedStateLocked();
-                    self.write_cond.broadcast();
                     return n;
                 }
                 try self.waitForWriteLocked(deadline);
@@ -366,7 +441,6 @@ pub fn make(comptime grt: type) type {
                     continue;
                 }
                 self.updateCachedStateLocked();
-                self.write_cond.broadcast();
                 return received;
             }
         }
@@ -398,6 +472,25 @@ pub fn make(comptime grt: type) type {
                 .output_packets = self.output_packets_total,
                 .output_bytes = self.output_bytes_total,
                 .output_drops = self.output_drops_total,
+                .loop_count = self.loop_count,
+                .loop_sleep_count = self.loop_sleep_count,
+                .loop_sleep_ms = self.loop_sleep_ns_total / @as(u64, @intCast(glib.time.duration.MilliSecond)),
+                .loop_zero_sleep_count = self.loop_zero_sleep_count,
+                .loop_work_us = self.loop_work_ns_total / @as(u64, @intCast(glib.time.duration.MicroSecond)),
+                .loop_work_max_us = self.loop_work_ns_max / @as(u64, @intCast(glib.time.duration.MicroSecond)),
+                .loop_late_max_us = self.loop_late_ns_max / @as(u64, @intCast(glib.time.duration.MicroSecond)),
+                .loop_lock_wait_us = self.loop_lock_wait_ns_total / @as(u64, @intCast(glib.time.duration.MicroSecond)),
+                .loop_lock_wait_max_us = self.loop_lock_wait_ns_max / @as(u64, @intCast(glib.time.duration.MicroSecond)),
+                .loop_update_us = self.loop_update_ns_total / @as(u64, @intCast(glib.time.duration.MicroSecond)),
+                .loop_update_max_us = self.loop_update_ns_max / @as(u64, @intCast(glib.time.duration.MicroSecond)),
+                .loop_update_max_output_burst = self.loop_update_max_output_burst,
+                .loop_update_max_output_callback_us = self.loop_update_max_output_callback_ns_total / @as(u64, @intCast(glib.time.duration.MicroSecond)),
+                .loop_update_max_output_callback_max_us = self.loop_update_max_output_callback_ns_max / @as(u64, @intCast(glib.time.duration.MicroSecond)),
+                .loop_update_max_output_write_us = self.loop_update_max_output_write_ns_total / @as(u64, @intCast(glib.time.duration.MicroSecond)),
+                .loop_update_max_output_write_max_us = self.loop_update_max_output_write_ns_max / @as(u64, @intCast(glib.time.duration.MicroSecond)),
+                .loop_update_max_internal_us = self.loop_update_max_internal_ns / @as(u64, @intCast(glib.time.duration.MicroSecond)),
+                .loop_post_us = self.loop_post_ns_total / @as(u64, @intCast(glib.time.duration.MicroSecond)),
+                .loop_post_max_us = self.loop_post_ns_max / @as(u64, @intCast(glib.time.duration.MicroSecond)),
                 .last_output_burst = self.last_output_burst,
                 .max_output_burst = self.max_output_burst,
                 .output_new_segments = self.inst.*.diag_output_new,
@@ -433,6 +526,10 @@ pub fn make(comptime grt: type) type {
         fn beginOutputBurst(self: *Self) void {
             self.current_output_burst = 0;
             self.last_output_burst = 0;
+            self.current_output_callback_ns_total = 0;
+            self.current_output_callback_ns_max = 0;
+            self.current_output_write_ns_total = 0;
+            self.current_output_write_ns_max = 0;
         }
 
         fn shouldStop(self: *Self) bool {
@@ -458,6 +555,10 @@ pub fn make(comptime grt: type) type {
         fn intervalDuration(self: *const Self) glib.time.duration.Duration {
             const interval_ms: glib.time.duration.Duration = if (self.config.interval_ms <= 0) 1 else @intCast(self.config.interval_ms);
             return interval_ms * glib.time.duration.MilliSecond;
+        }
+
+        fn positiveDurationNs(duration: glib.time.duration.Duration) u64 {
+            return if (duration <= 0) 0 else @intCast(duration);
         }
 
         fn makeDeadline(timeout: ?glib.time.duration.Duration) ?glib.time.instant.Time {
@@ -490,6 +591,7 @@ pub fn make(comptime grt: type) type {
 
             fn output(raw: [*c]const u8, len: c_int, _: [*c]kcp.Kcp, user: ?*anyopaque) callconv(.c) c_int {
                 if (len < 0) return -1;
+                const callback_start = grt.time.instant.now();
                 const ctx: *OutputContext = @ptrCast(@alignCast(user orelse return -1));
                 const self = ctx.session;
                 const datagram = raw[0..@intCast(len)];
@@ -498,12 +600,25 @@ pub fn make(comptime grt: type) type {
                 self.current_output_burst +%= 1;
                 self.last_output_burst = self.current_output_burst;
                 self.max_output_burst = @max(self.max_output_burst, self.current_output_burst);
+                const write_start = grt.time.instant.now();
                 self.bearer.write(datagram) catch |err| {
+                    const write_ns = positiveDurationNs(grt.time.instant.since(write_start));
+                    self.current_output_write_ns_total +%= write_ns;
+                    self.current_output_write_ns_max = @max(self.current_output_write_ns_max, write_ns);
+                    const callback_ns = positiveDurationNs(grt.time.instant.since(callback_start));
+                    self.current_output_callback_ns_total +%= callback_ns;
+                    self.current_output_callback_ns_max = @max(self.current_output_callback_ns_max, callback_ns);
                     self.output_drops_total +%= 1;
                     std.log.scoped(.kcp_session).err("output failed: {s} len={d}", .{ @errorName(err), datagram.len });
                     self.output_err = err;
                     return -1;
                 };
+                const write_ns = positiveDurationNs(grt.time.instant.since(write_start));
+                self.current_output_write_ns_total +%= write_ns;
+                self.current_output_write_ns_max = @max(self.current_output_write_ns_max, write_ns);
+                const callback_ns = positiveDurationNs(grt.time.instant.since(callback_start));
+                self.current_output_callback_ns_total +%= callback_ns;
+                self.current_output_callback_ns_max = @max(self.current_output_callback_ns_max, callback_ns);
                 return len;
             }
         };
@@ -517,21 +632,58 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             const Session = make(grt);
 
             const Wire = struct {
+                const max_packets = 16;
+                const max_packet_size = 2048;
+
                 mutex: grt.sync.Mutex = .{},
                 peer: ?*Session = null,
+                packets: [max_packets][max_packet_size]u8 = undefined,
+                lens: [max_packets]usize = undefined,
+                head: usize = 0,
+                tail: usize = 0,
+                count: usize = 0,
 
                 fn output(ctx: ?*anyopaque, datagram: []const u8) !void {
                     const self: *@This() = @ptrCast(@alignCast(ctx orelse return error.MissingWireContext));
+                    if (datagram.len > max_packet_size) return error.PacketTooLarge;
                     self.mutex.lock();
-                    const peer = self.peer;
-                    self.mutex.unlock();
-                    try (peer orelse return error.MissingPeer).inputPacket(datagram);
+                    defer self.mutex.unlock();
+                    if (self.count == max_packets) return error.PacketQueueFull;
+                    @memcpy(self.packets[self.tail][0..datagram.len], datagram);
+                    self.lens[self.tail] = datagram.len;
+                    self.tail = (self.tail + 1) % max_packets;
+                    self.count += 1;
                 }
 
                 fn setPeer(self: *@This(), peer: *Session) void {
                     self.mutex.lock();
                     defer self.mutex.unlock();
                     self.peer = peer;
+                }
+
+                fn pumpOne(self: *@This()) !bool {
+                    var packet: [max_packet_size]u8 = undefined;
+                    var packet_len: usize = 0;
+                    var peer: ?*Session = null;
+
+                    self.mutex.lock();
+                    if (self.count == 0) {
+                        self.mutex.unlock();
+                        return false;
+                    }
+                    peer = self.peer;
+                    packet_len = self.lens[self.head];
+                    @memcpy(packet[0..packet_len], self.packets[self.head][0..packet_len]);
+                    self.head = (self.head + 1) % max_packets;
+                    self.count -= 1;
+                    self.mutex.unlock();
+
+                    try (peer orelse return error.MissingPeer).inputPacket(packet[0..packet_len]);
+                    return true;
+                }
+
+                fn pumpAll(self: *@This()) !void {
+                    while (try self.pumpOne()) {}
                 }
             };
 
@@ -551,7 +703,18 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             try std.testing.expectEqual(@as(usize, 5), try a.write("hello"));
             var out: [16]u8 = undefined;
-            const n = try b.readTimeout(&out, 2 * glib.time.duration.Second);
+            const started = grt.time.instant.now();
+            const n = while (glib.time.instant.sub(grt.time.instant.now(), started) < 2 * glib.time.duration.Second) {
+                try a_to_b.pumpAll();
+                try b_to_a.pumpAll();
+                break b.readTimeout(&out, glib.time.duration.MilliSecond) catch |err| switch (err) {
+                    error.Timeout => {
+                        grt.time.sleep(glib.time.duration.MilliSecond);
+                        continue;
+                    },
+                    else => return err,
+                };
+            } else return error.KcpSessionTestTimedOut;
             try std.testing.expectEqual(@as(usize, 5), n);
             try std.testing.expectEqualStrings("hello", out[0..5]);
         }

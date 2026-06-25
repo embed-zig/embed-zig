@@ -122,13 +122,15 @@ pub fn make(comptime grt: type) type {
                 .allocator = self.allocator,
                 .address = localBindAddr(data_addr),
             });
-            defer pc.deinit();
-            try configurePacketConn(pc, self.config.udp_socket_buffer_size);
-            try sendHello(pc, data_addr, request.conv);
             const ping_started = if (request.direction == .ping) grt.time.instant.now() else null;
 
             var endpoint: PerfEndpoint = undefined;
-            try endpoint.init(self.allocator, pc, data_addr, request.conv, request, protocolMode(request.protocol));
+            {
+                errdefer pc.deinit();
+                try configurePacketConn(pc, self.config.udp_socket_buffer_size);
+                try sendHello(pc, data_addr, request.conv);
+                try endpoint.init(self.allocator, pc, data_addr, request.conv, request, protocolMode(request.protocol));
+            }
             defer endpoint.deinit();
             return try endpoint.run(.client, request, ping_started);
         }
@@ -138,13 +140,15 @@ pub fn make(comptime grt: type) type {
                 .allocator = self.allocator,
                 .address = localBindAddr(data_addr),
             });
-            defer pc.deinit();
-            try configurePacketConn(pc, self.config.udp_socket_buffer_size);
-            try sendHello(pc, data_addr, request.conv);
             const ping_started = if (request.direction == .ping) grt.time.instant.now() else null;
 
             var endpoint: PerfEndpoint = undefined;
-            try endpoint.init(self.allocator, pc, data_addr, request.conv, request, protocolMode(request.protocol));
+            {
+                errdefer pc.deinit();
+                try configurePacketConn(pc, self.config.udp_socket_buffer_size);
+                try sendHello(pc, data_addr, request.conv);
+                try endpoint.init(self.allocator, pc, data_addr, request.conv, request, protocolMode(request.protocol));
+            }
             defer endpoint.deinit();
             endpoint.setDiagControl(control);
 

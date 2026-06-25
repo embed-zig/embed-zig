@@ -9,7 +9,7 @@ pub const default_udp_pps: u32 = 1650;
 pub const default_stream_chunk: usize = 8192;
 pub const default_control_port: u16 = 9821;
 pub const default_conv: u32 = 0x4b435031;
-pub const max_line_len: usize = 512;
+pub const max_line_len: usize = 768;
 
 pub const Protocol = enum {
     tcp,

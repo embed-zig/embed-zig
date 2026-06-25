@@ -2,6 +2,7 @@ const glib = @import("glib");
 
 pub const ikcp_memory = @import("benchmark/ikcp_memory.zig");
 pub const ikcp_udp = @import("benchmark/ikcp_udp.zig");
+pub const session_udp = @import("benchmark/session_udp.zig");
 
 pub const default_bytes = ikcp_memory.default_bytes;
 pub const default_udp_payload = ikcp_memory.default_udp_payload;
@@ -12,10 +13,12 @@ pub const Config = ikcp_memory.Config;
 pub const Scenario = ikcp_memory.Scenario;
 pub const Result = ikcp_memory.Result;
 pub const UdpResult = ikcp_udp.Result;
+pub const SessionUdpResult = session_udp.Result;
 
 pub fn Runner(comptime grt: type) type {
     const MemoryRunner = ikcp_memory.Runner(grt);
     const UdpRunner = ikcp_udp.Runner(grt);
+    const SessionUdpRunner = session_udp.Runner(grt);
 
     return struct {
         pub fn runAll(allocator: grt.std.mem.Allocator, config: Config, out: []Result) !usize {
@@ -24,6 +27,10 @@ pub fn Runner(comptime grt: type) type {
 
         pub fn runLocalhostUdpRtt(allocator: grt.std.mem.Allocator, config: Config, rtt_ms: u32) !UdpResult {
             return UdpRunner.runLocalhostRtt(allocator, config, rtt_ms);
+        }
+
+        pub fn runLocalhostSessionUp(allocator: grt.std.mem.Allocator, config: Config) !SessionUdpResult {
+            return SessionUdpRunner.runLocalhostUp(allocator, config);
         }
     };
 }
@@ -132,6 +139,64 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                 if (result.received_bytes != udp_config.bytes or result.input_errors != 0 or result.output_drops != 0) {
                     return false;
                 }
+            }
+
+            const session_config = Config{ .bytes = 1024 * 1024 };
+            const session_result = RunnerImpl.runLocalhostSessionUp(allocator, session_config) catch |err| {
+                t.logErrorf("session-udp benchmark failed: {s}", .{@errorName(err)});
+                return false;
+            };
+            native_std.debug.print(
+                "session-udp localhost up elapsed_ns={d} mbps={d:.3} client_sent={d} server_recv={d} client_out={d} client_in={d} client_xmit={d} client_drop={d} client_work_max={d}us client_upd_max={d}us client_late_max={d}us client_upd_ob={d} client_upd_write_max={d}us client_upd_core={d}us server_out={d} server_in={d} server_xmit={d}\n",
+                .{
+                    session_result.elapsed_ns,
+                    session_result.mbps(),
+                    session_result.client.sent_bytes,
+                    session_result.server.received_bytes,
+                    session_result.client_snapshot.output_packets,
+                    session_result.client_snapshot.input_packets,
+                    session_result.client_snapshot.xmit,
+                    session_result.client_snapshot.output_drops,
+                    session_result.client_snapshot.loop_work_max_us,
+                    session_result.client_snapshot.loop_update_max_us,
+                    session_result.client_snapshot.loop_late_max_us,
+                    session_result.client_snapshot.loop_update_max_output_burst,
+                    session_result.client_snapshot.loop_update_max_output_write_max_us,
+                    session_result.client_snapshot.loop_update_max_internal_us,
+                    session_result.server_snapshot.output_packets,
+                    session_result.server_snapshot.input_packets,
+                    session_result.server_snapshot.xmit,
+                },
+            );
+            t.logInfof(
+                "session-udp localhost up elapsed_ns={d} mbps={d:.3} client_sent={d} server_recv={d} client_out={d} client_in={d} client_xmit={d} client_drop={d} client_work_max={d}us client_upd_max={d}us client_late_max={d}us client_upd_ob={d} client_upd_write_max={d}us client_upd_core={d}us server_out={d} server_in={d} server_xmit={d}",
+                .{
+                    session_result.elapsed_ns,
+                    session_result.mbps(),
+                    session_result.client.sent_bytes,
+                    session_result.server.received_bytes,
+                    session_result.client_snapshot.output_packets,
+                    session_result.client_snapshot.input_packets,
+                    session_result.client_snapshot.xmit,
+                    session_result.client_snapshot.output_drops,
+                    session_result.client_snapshot.loop_work_max_us,
+                    session_result.client_snapshot.loop_update_max_us,
+                    session_result.client_snapshot.loop_late_max_us,
+                    session_result.client_snapshot.loop_update_max_output_burst,
+                    session_result.client_snapshot.loop_update_max_output_write_max_us,
+                    session_result.client_snapshot.loop_update_max_internal_us,
+                    session_result.server_snapshot.output_packets,
+                    session_result.server_snapshot.input_packets,
+                    session_result.server_snapshot.xmit,
+                },
+            );
+            if (session_result.server.received_bytes != session_config.bytes or
+                session_result.client_snapshot.output_drops != 0 or
+                session_result.client_snapshot.input_errors != 0 or
+                session_result.server_snapshot.output_drops != 0 or
+                session_result.server_snapshot.input_errors != 0)
+            {
+                return false;
             }
             return true;
         }

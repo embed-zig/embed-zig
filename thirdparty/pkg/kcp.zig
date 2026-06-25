@@ -78,6 +78,7 @@ pub const PacketRing = @import("kcp/PacketRing.zig");
 pub const SegmentPool = @import("kcp/SegmentPool.zig");
 pub const Session = @import("kcp/Session.zig");
 pub const PerfProtocol = @import("kcp/PerfProtocol.zig");
+pub const PerfEndpoint = @import("kcp/PerfEndpoint.zig");
 pub const PerfServer = @import("kcp/PerfServer.zig");
 pub const PerfClient = @import("kcp/PerfClient.zig");
 
