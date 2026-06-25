@@ -260,9 +260,6 @@ pub fn getIpInfo(self: *CWSta) ?Sta.IpInfo {
     defer pool.deinit();
 
     const interface = self.getInterface() orelse return null;
-    var ssid_buf: [Sta.max_ssid_len]u8 = undefined;
-    _ = self.currentLinkInfo(interface, &ssid_buf) orelse return null;
-
     const name_obj = objc.msgSend(?objc.Id, interface, objc.sel("interfaceName"), .{}) orelse return null;
     var interface_name_buf: [32]u8 = undefined;
     const interface_name = objc.nsStringGetBytes(name_obj, &interface_name_buf);
