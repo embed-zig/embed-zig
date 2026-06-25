@@ -37,6 +37,47 @@ pub const partition_table = esp_idf.PartitionTable.make(.{
     },
 });
 
+pub const task_policy = .{
+    .zux = .{
+        .priority = 5,
+    },
+    .audio = .{
+        .priority = 10,
+        .core_id = 1,
+    },
+    .kcp = .{
+        .priority = 6,
+        .core_id = 1,
+    },
+    .netperf = .{
+        .priority = 5,
+        .core_id = 1,
+    },
+    .esp = .{
+        .priority = 7,
+        .core_id = 1,
+    },
+    .lvgl = .{
+        .priority = 5,
+        .core_id = 1,
+    },
+    .gizclaw = .{
+        .priority = 5,
+        .core_id = 1,
+    },
+    .giznet = .{
+        .priority = 5,
+        .core_id = 1,
+    },
+    .sync = .{
+        .priority = 5,
+        .core_id = 1,
+    },
+    .testing = .{
+        .priority = 5,
+    },
+};
+
 pub const sdk_config = esp_idf.SdkConfig.make(.{
     .ESP32P4_SELECTS_REV_LESS_V3 = true,
     .ESP32P4_REV_MIN_1 = true,
@@ -52,6 +93,12 @@ pub const sdk_config = esp_idf.SdkConfig.make(.{
     .CACHE_L2_CACHE_LINE_128B = true,
     .ESP_MAIN_TASK_STACK_SIZE = 24 * 1024,
     .FREERTOS_HZ = 1000,
+    .FREERTOS_USE_TRACE_FACILITY = true,
+    .FREERTOS_GENERATE_RUN_TIME_STATS = true,
+    .FREERTOS_RUN_TIME_COUNTER_TYPE_U32 = false,
+    .FREERTOS_RUN_TIME_COUNTER_TYPE_U64 = true,
+    .FREERTOS_RUN_TIME_STATS_USING_ESP_TIMER = true,
+    .FREERTOS_RUN_TIME_STATS_USING_CPU_CLK = false,
     .FREERTOS_TIMER_TASK_STACK_DEPTH = 4096,
     .ESP_TASK_WDT_EN = false,
     .ESP_WIFI_ENABLED = true,
