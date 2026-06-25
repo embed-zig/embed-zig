@@ -13,6 +13,12 @@ pub const upstream_tarball_url = "https://codeload.github.com/lvgl/lvgl/tar.gz/"
 
 const bundled_custom_include = "lv_os_custom.h";
 
+pub fn configure(b: *std.Build, selected_c_sysroot: []const u8, selected_c_short_enums: bool) void {
+    c_short_enums = selected_c_short_enums;
+    c_sysroot = if (selected_c_sysroot.len == 0) null else b.dupe(selected_c_sysroot);
+    options_loaded = true;
+}
+
 pub fn getUpstreamArchive(b: *std.Build) buildtools.Archive {
     if (upstream_archive) |a| return a;
     const a = buildtools.addFetchArchive(b, .{
