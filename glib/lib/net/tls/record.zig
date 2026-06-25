@@ -666,6 +666,63 @@ pub fn TestRunner(comptime std: type) testing_api.TestRunner {
 
             {
                 const MockConn = struct {
+                    read_buf: [512]u8 = undefined,
+                    read_len: usize = 0,
+                    read_pos: usize = 0,
+                    write_buf: [512]u8 = undefined,
+                    write_len: usize = 0,
+                    read_chunk_len: usize = 2,
+                    write_chunk_len: usize = 2,
+                    read_calls: usize = 0,
+                    write_calls: usize = 0,
+
+                    pub fn read(self: *@This(), buf: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
+                        self.read_calls += 1;
+                        if (self.read_pos >= self.read_len) return error.EndOfStream;
+                        const n = @min(buf.len, self.read_chunk_len, self.read_len - self.read_pos);
+                        @memcpy(buf[0..n], self.read_buf[self.read_pos..][0..n]);
+                        self.read_pos += n;
+                        return n;
+                    }
+
+                    pub fn write(self: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
+                        self.write_calls += 1;
+                        const n = @min(buf.len, self.write_chunk_len, self.write_buf.len - self.write_len);
+                        if (n == 0) return error.Unexpected;
+                        @memcpy(self.write_buf[self.write_len..][0..n], buf[0..n]);
+                        self.write_len += n;
+                        return n;
+                    }
+
+                    pub fn close(_: *@This()) void {}
+                    pub fn deinit(_: *@This()) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                };
+
+                var mock = MockConn{};
+                var layer = record.RecordLayer(*MockConn).init(&mock);
+
+                var write_buf: [128]u8 = undefined;
+                var plaintext_buf: [128]u8 = undefined;
+                _ = try layer.writeRecord(.application_data, "fragmented", &write_buf, &plaintext_buf);
+                try testing.expect(mock.write_calls > 1);
+
+                @memcpy(mock.read_buf[0..mock.write_len], mock.write_buf[0..mock.write_len]);
+                mock.read_len = mock.write_len;
+                mock.read_pos = 0;
+
+                var cipher_buf: [128]u8 = undefined;
+                var plaintext_out: [128]u8 = undefined;
+                const result = try layer.readRecord(&cipher_buf, &plaintext_out);
+                try testing.expect(mock.read_calls > 1);
+                try testing.expectEqual(common.ContentType.application_data, result.content_type);
+                try testing.expectEqual(@as(usize, "fragmented".len), result.length);
+                try testing.expectEqualSlices(u8, "fragmented", plaintext_out[0..result.length]);
+            }
+
+            {
+                const MockConn = struct {
                     read_buf: [1024]u8 = undefined,
                     read_len: usize = 0,
                     read_pos: usize = 0,
