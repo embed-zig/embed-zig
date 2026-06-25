@@ -20,6 +20,14 @@ pub fn build(b: *std.Build) void {
         .target = context.target,
         .optimize = optimize,
     });
+    const runtime_build_config_module = createBoardBuildConfigModule(
+        b,
+        esp_dep,
+        esp_dep.module("esp"),
+    );
+    const esp_grt_module = esp_dep.module("esp").import_table.get("esp_grt") orelse
+        @panic("esp module is missing esp_grt import");
+    esp_grt_module.addImport("build_config", runtime_build_config_module);
     const embed_module = esp_dep.module("esp_embed");
 
     const entry_module = b.createModule(.{
@@ -79,16 +87,16 @@ fn addBoardComponent(b: *std.Build, esp_dep: *std.Build.Dependency) *esp.idf.Com
         .files = &.{
             "power_button.c",
             "led_strip.c",
-            "wifi_sta.c",
         },
     });
+    component.addCSourceFiles(.{
+        .root = esp_dep.path("lib/embed/bt"),
+        .files = &.{"local_hci.c"},
+    });
     component.addRequire("driver");
+    component.addRequire("bt");
     component.addRequire("esp_driver_gpio");
-    component.addRequire("esp_event");
-    component.addRequire("esp_netif");
-    component.addRequire("esp_wifi");
     component.addRequire("led_strip");
     component.addRequire("log");
-    component.addRequire("nvs_flash");
     return component;
 }
