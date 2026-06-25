@@ -1,8 +1,21 @@
 #include <stddef.h>
+#include <inttypes.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
+#include "esp_err.h"
+#include "esp_event.h"
+#include "esp_heap_caps.h"
+#include "esp_idf_version.h"
+#include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_netif_defaults.h"
+#include "esp_netif_net_stack.h"
+#include "esp_netif_ppp.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
 #include "lwip/api.h"
 #include "lwip/err.h"
 #include "lwip/ip.h"
@@ -33,7 +46,78 @@ typedef struct {
     uint8_t netmask[4];
 } espz_netif_info_t;
 
+typedef struct {
+    esp_netif_driver_base_t base;
+    esp_netif_t *netif;
+    void *ctx;
+#ifdef CONFIG_PPP_SUPPORT
+    EventGroupHandle_t events;
+    esp_event_handler_instance_t ppp_event_instance;
+#endif
+} espz_modem_ppp_t;
+
 extern void espz_lwip_runtime_on_event(void *ctx, int event, uint16_t len);
+extern int espz_modem_ppp_write(void *ctx, const uint8_t *data, size_t len, size_t *written);
+
+#define ESPZ_LWIP_SEND_DIAG_ENABLED 0
+
+#if ESPZ_LWIP_SEND_DIAG_ENABLED
+static const char *const espz_lwip_tag = "espz_lwip";
+
+typedef struct {
+    uint32_t count;
+    uint64_t bytes;
+    uint64_t total_us;
+    uint64_t new_us;
+    uint64_t alloc_us;
+    uint64_t copy_us;
+    uint64_t send_us;
+    uint64_t delete_us;
+} espz_lwip_send_diag_t;
+
+static espz_lwip_send_diag_t espz_lwip_sendto_diag;
+
+static int64_t espz_lwip_now_us(void)
+{
+    return esp_timer_get_time();
+}
+
+static uint64_t espz_lwip_elapsed_us(int64_t start)
+{
+    const int64_t end = esp_timer_get_time();
+    return end > start ? (uint64_t)(end - start) : 0;
+}
+
+static void espz_lwip_send_diag_log(const char *name, espz_lwip_send_diag_t *diag)
+{
+    if (diag->count == 0 || diag->count % 1000 != 0) {
+        return;
+    }
+    ESP_LOGI(
+        espz_lwip_tag,
+        "%s count=%" PRIu32 " bytes=%" PRIu64 " avg_us total=%" PRIu64 " new=%" PRIu64 " alloc=%" PRIu64 " copy=%" PRIu64 " send=%" PRIu64 " delete=%" PRIu64,
+        name,
+        diag->count,
+        diag->bytes,
+        diag->total_us / diag->count,
+        diag->new_us / diag->count,
+        diag->alloc_us / diag->count,
+        diag->copy_us / diag->count,
+        diag->send_us / diag->count,
+        diag->delete_us / diag->count
+    );
+}
+#endif
+
+static esp_err_t espz_ok_if_already_initialized(esp_err_t err)
+{
+    return err == ESP_ERR_INVALID_STATE ? ESP_OK : err;
+}
+
+int espz_lwip_runtime_init(void)
+{
+    return (int)espz_ok_if_already_initialized(esp_netif_init());
+}
 
 static void espz_lwip_netconn_callback(struct netconn *conn, enum netconn_evt event, uint16_t len)
 {
@@ -99,6 +183,21 @@ void espz_lwip_netconn_set_nonblocking(struct netconn *conn, uint32_t enabled)
     netconn_set_nonblocking(conn, enabled != 0U);
 }
 
+int espz_lwip_netconn_set_recvbuf_size(struct netconn *conn, int size)
+{
+#if LWIP_SO_RCVBUF
+    if (conn == NULL || size < 0) {
+        return (int)ERR_VAL;
+    }
+    netconn_set_recvbufsize(conn, size);
+    return (int)ERR_OK;
+#else
+    (void)conn;
+    (void)size;
+    return (int)ERR_VAL;
+#endif
+}
+
 int espz_lwip_netconn_delete(struct netconn *conn)
 {
     return (int)netconn_delete(conn);
@@ -153,21 +252,58 @@ int espz_lwip_netconn_send_to(struct netconn *conn, const void *data, size_t len
     if (len > UINT16_MAX) {
         return (int)ERR_VAL;
     }
+#if ESPZ_LWIP_SEND_DIAG_ENABLED
+    const int64_t total_start = espz_lwip_now_us();
+    int64_t stage_start = total_start;
+    uint64_t new_us = 0;
+    uint64_t alloc_us = 0;
+    uint64_t copy_us = 0;
+    uint64_t send_us = 0;
+    uint64_t delete_us = 0;
+#endif
     struct netbuf *buf = netbuf_new();
+#if ESPZ_LWIP_SEND_DIAG_ENABLED
+    new_us = espz_lwip_elapsed_us(stage_start);
+    stage_start = espz_lwip_now_us();
+#endif
     if (buf == NULL) {
         return (int)ERR_MEM;
     }
     void *dst = netbuf_alloc(buf, (uint16_t)len);
+#if ESPZ_LWIP_SEND_DIAG_ENABLED
+    alloc_us = espz_lwip_elapsed_us(stage_start);
+    stage_start = espz_lwip_now_us();
+#endif
     if (dst == NULL) {
         netbuf_delete(buf);
         return (int)ERR_MEM;
     }
     memcpy(dst, data, len);
+#if ESPZ_LWIP_SEND_DIAG_ENABLED
+    copy_us = espz_lwip_elapsed_us(stage_start);
+    stage_start = espz_lwip_now_us();
+#endif
 
     ip_addr_t ip;
     espz_lwip_to_ip_addr(&ip, addr);
     const int rc = (int)netconn_sendto(conn, buf, &ip, port);
+#if ESPZ_LWIP_SEND_DIAG_ENABLED
+    send_us = espz_lwip_elapsed_us(stage_start);
+    stage_start = espz_lwip_now_us();
+#endif
     netbuf_delete(buf);
+#if ESPZ_LWIP_SEND_DIAG_ENABLED
+    delete_us = espz_lwip_elapsed_us(stage_start);
+    espz_lwip_sendto_diag.count += 1;
+    espz_lwip_sendto_diag.bytes += len;
+    espz_lwip_sendto_diag.total_us += espz_lwip_elapsed_us(total_start);
+    espz_lwip_sendto_diag.new_us += new_us;
+    espz_lwip_sendto_diag.alloc_us += alloc_us;
+    espz_lwip_sendto_diag.copy_us += copy_us;
+    espz_lwip_sendto_diag.send_us += send_us;
+    espz_lwip_sendto_diag.delete_us += delete_us;
+    espz_lwip_send_diag_log("sendto", &espz_lwip_sendto_diag);
+#endif
     return rc;
 }
 
@@ -190,6 +326,28 @@ int espz_lwip_netconn_send(struct netconn *conn, const void *data, size_t len)
     const int rc = (int)netconn_send(conn, buf);
     netbuf_delete(buf);
     return rc;
+}
+
+int espz_lwip_netconn_bind_default_netif(struct netconn *conn, uintptr_t *out_id, uint8_t *out_if_idx)
+{
+    if (conn == NULL || out_id == NULL || out_if_idx == NULL) {
+        return (int)ERR_ARG;
+    }
+    esp_netif_t *netif = esp_netif_get_default_netif();
+    if (netif == NULL) {
+        *out_id = 0;
+        *out_if_idx = 0;
+        return (int)ERR_RTE;
+    }
+    int if_idx = esp_netif_get_netif_impl_index(netif);
+    if (if_idx <= 0 || if_idx > UINT8_MAX) {
+        *out_id = (uintptr_t)netif;
+        *out_if_idx = 0;
+        return (int)ERR_IF;
+    }
+    *out_id = (uintptr_t)netif;
+    *out_if_idx = (uint8_t)if_idx;
+    return (int)netconn_bind_if(conn, (uint8_t)if_idx);
 }
 
 int espz_lwip_netconn_get_addr(struct netconn *conn, uint32_t local, espz_lwip_ip_addr_t *addr, uint16_t *port)
@@ -333,10 +491,10 @@ int espz_netif_get_default(uintptr_t *out_id)
     esp_netif_t *netif = esp_netif_get_default_netif();
     if (netif == NULL) {
         *out_id = 0;
-        return 0;
+        return ESP_OK;
     }
     *out_id = (uintptr_t)netif;
-    return 0;
+    return ESP_OK;
 }
 
 int espz_netif_set_default(uintptr_t id)
@@ -346,4 +504,232 @@ int espz_netif_set_default(uintptr_t id)
         return -2;
     }
     return esp_netif_set_default_netif(netif) == ESP_OK ? 0 : -3;
+}
+
+#ifdef CONFIG_PPP_SUPPORT
+#define ESPZ_MODEM_PPP_STOPPED_BIT BIT0
+#define ESPZ_MODEM_PPP_STARTED_BIT BIT1
+
+static void espz_modem_ppp_on_status(void *arg, esp_event_base_t base, int32_t event_id, void *event_data)
+{
+    (void)base;
+    espz_modem_ppp_t *ppp = (espz_modem_ppp_t *)arg;
+    if (ppp == NULL || ppp->events == NULL || event_data == NULL) {
+        return;
+    }
+
+    esp_netif_t *netif = *(esp_netif_t **)event_data;
+    if (netif != ppp->netif) {
+        return;
+    }
+
+    if (event_id == NETIF_PPP_ERRORUSER ||
+        event_id == NETIF_PPP_ERRORCONNECT ||
+        event_id == NETIF_PPP_CONNECT_FAILED ||
+        event_id == NETIF_PPP_PHASE_DEAD ||
+        event_id == NETIF_PPP_PHASE_DISCONNECT) {
+        xEventGroupSetBits(ppp->events, ESPZ_MODEM_PPP_STOPPED_BIT);
+    }
+}
+
+static esp_err_t espz_modem_ppp_transmit(void *handle, void *buffer, size_t len)
+{
+    espz_modem_ppp_t *ppp = (espz_modem_ppp_t *)handle;
+    size_t written = 0;
+    if (espz_modem_ppp_write(ppp->ctx, (const uint8_t *)buffer, len, &written) != 0) {
+        return ESP_FAIL;
+    }
+    return written == len ? ESP_OK : ESP_FAIL;
+}
+
+static esp_err_t espz_modem_ppp_post_attach(esp_netif_t *netif, esp_netif_iodriver_handle handle)
+{
+    espz_modem_ppp_t *ppp = (espz_modem_ppp_t *)handle;
+    ppp->base.netif = netif;
+    ppp->netif = netif;
+
+    esp_netif_driver_ifconfig_t driver_config = {
+        .handle = ppp,
+        .transmit = espz_modem_ppp_transmit,
+        .transmit_wrap = NULL,
+        .driver_free_rx_buffer = NULL,
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)
+        .driver_set_mac_filter = NULL,
+#endif
+    };
+    return esp_netif_set_driver_config(netif, &driver_config);
+}
+#endif
+
+espz_modem_ppp_t *espz_modem_ppp_create(void *ctx)
+{
+#ifdef CONFIG_PPP_SUPPORT
+    espz_modem_ppp_t *ppp = calloc(1, sizeof(espz_modem_ppp_t));
+    if (ppp == NULL) {
+        return NULL;
+    }
+
+    ppp->events = xEventGroupCreate();
+    if (ppp->events == NULL) {
+        free(ppp);
+        return NULL;
+    }
+
+    esp_netif_config_t netif_config = ESP_NETIF_DEFAULT_PPP();
+    ppp->netif = esp_netif_new(&netif_config);
+    if (ppp->netif == NULL) {
+        vEventGroupDelete(ppp->events);
+        free(ppp);
+        return NULL;
+    }
+
+    esp_netif_ppp_config_t ppp_config = {
+        .ppp_phase_event_enabled = true,
+        .ppp_error_event_enabled = true,
+    };
+    if (esp_netif_ppp_set_params(ppp->netif, &ppp_config) != ESP_OK) {
+        esp_netif_destroy(ppp->netif);
+        vEventGroupDelete(ppp->events);
+        free(ppp);
+        return NULL;
+    }
+    if (esp_event_handler_instance_register(
+            NETIF_PPP_STATUS,
+            ESP_EVENT_ANY_ID,
+            espz_modem_ppp_on_status,
+            ppp,
+            &ppp->ppp_event_instance) != ESP_OK) {
+        esp_netif_destroy(ppp->netif);
+        vEventGroupDelete(ppp->events);
+        free(ppp);
+        return NULL;
+    }
+
+    ppp->ctx = ctx;
+    ppp->base.post_attach = espz_modem_ppp_post_attach;
+    ppp->base.netif = ppp->netif;
+    if (esp_netif_attach(ppp->netif, ppp) != ESP_OK) {
+        esp_event_handler_instance_unregister(NETIF_PPP_STATUS, ESP_EVENT_ANY_ID, ppp->ppp_event_instance);
+        esp_netif_destroy(ppp->netif);
+        vEventGroupDelete(ppp->events);
+        free(ppp);
+        return NULL;
+    }
+
+    return ppp;
+#else
+    (void)ctx;
+    return NULL;
+#endif
+}
+
+int espz_modem_ppp_start(espz_modem_ppp_t *ppp)
+{
+#ifdef CONFIG_PPP_SUPPORT
+    if (ppp == NULL || ppp->netif == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (ppp->events != NULL && (xEventGroupGetBits(ppp->events) & ESPZ_MODEM_PPP_STARTED_BIT) != 0) {
+        return ESP_OK;
+    }
+    if (ppp->events != NULL) {
+        xEventGroupClearBits(ppp->events, ESPZ_MODEM_PPP_STOPPED_BIT);
+        xEventGroupSetBits(ppp->events, ESPZ_MODEM_PPP_STARTED_BIT);
+    }
+    esp_netif_action_start(ppp->netif, 0, 0, NULL);
+    return ESP_OK;
+#else
+    (void)ppp;
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
+}
+
+int espz_modem_ppp_stop(espz_modem_ppp_t *ppp)
+{
+#ifdef CONFIG_PPP_SUPPORT
+    if (ppp == NULL || ppp->netif == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (ppp->events != NULL && (xEventGroupGetBits(ppp->events) & ESPZ_MODEM_PPP_STARTED_BIT) == 0) {
+        return ESP_OK;
+    }
+    if (ppp->events != NULL) {
+        xEventGroupClearBits(ppp->events, ESPZ_MODEM_PPP_STOPPED_BIT | ESPZ_MODEM_PPP_STARTED_BIT);
+    }
+    esp_netif_action_stop(ppp->netif, 0, 0, NULL);
+    if (ppp->events != NULL) {
+        (void)xEventGroupWaitBits(
+            ppp->events,
+            ESPZ_MODEM_PPP_STOPPED_BIT,
+            pdFALSE,
+            pdFALSE,
+            pdMS_TO_TICKS(1500)
+        );
+    }
+    return ESP_OK;
+#else
+    (void)ppp;
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
+}
+
+void espz_modem_ppp_destroy(espz_modem_ppp_t *ppp)
+{
+    if (ppp == NULL) {
+        return;
+    }
+#ifdef CONFIG_PPP_SUPPORT
+    if (ppp->netif != NULL) {
+        (void)espz_modem_ppp_stop(ppp);
+        esp_event_handler_instance_unregister(NETIF_PPP_STATUS, ESP_EVENT_ANY_ID, ppp->ppp_event_instance);
+        esp_netif_destroy(ppp->netif);
+        ppp->netif = NULL;
+    }
+    if (ppp->events != NULL) {
+        vEventGroupDelete(ppp->events);
+        ppp->events = NULL;
+    }
+#endif
+    free(ppp);
+}
+
+int espz_modem_ppp_input(espz_modem_ppp_t *ppp, const void *data, size_t len)
+{
+#ifdef CONFIG_PPP_SUPPORT
+    if (ppp == NULL || ppp->netif == NULL || data == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return esp_netif_receive(ppp->netif, (void *)data, len, NULL);
+#else
+    (void)ppp;
+    (void)data;
+    (void)len;
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
+}
+
+int espz_modem_ppp_set_default(espz_modem_ppp_t *ppp)
+{
+#ifdef CONFIG_PPP_SUPPORT
+    if (ppp == NULL || ppp->netif == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return esp_netif_set_default_netif(ppp->netif);
+#else
+    (void)ppp;
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
+}
+
+uintptr_t espz_modem_ppp_netif_id(espz_modem_ppp_t *ppp)
+{
+#ifdef CONFIG_PPP_SUPPORT
+    if (ppp == NULL) {
+        return 0;
+    }
+    return (uintptr_t)ppp->netif;
+#else
+    (void)ppp;
+    return 0;
+#endif
 }

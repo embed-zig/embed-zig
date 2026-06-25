@@ -1,5 +1,5 @@
 const glib = @import("glib");
-const Native = @import("task/Native.zig");
+pub const Native = @import("task/Native.zig");
 
 pub const impl = struct {
     pub fn make(comptime grt: type) type {

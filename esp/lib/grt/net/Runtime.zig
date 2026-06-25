@@ -1,6 +1,7 @@
 const glib = @import("glib");
 const binding = @import("binding.zig");
 const Time = @import("../time/instant.zig");
+const esp_log = @import("../std/log.zig");
 const heap_binding = @import("../std/heap/binding.zig");
 const Condition = @import("../std/thread/Condition.zig");
 const Mutex = @import("../std/thread/Mutex.zig");
@@ -11,8 +12,16 @@ const net_routes = glib.net.routes;
 const net_types = glib.net.types;
 const netip = glib.net.netip;
 const max_udp_payload_len = glib.std.math.maxInt(u16);
+const udp_recv_buffer_size = 4 * 1024 * 1024;
+const udp_read_retry_poll_interval_ns: u64 = @intCast(1 * glib.time.duration.MilliSecond);
+const udp_write_retry_poll_interval_ns: u64 = @intCast(1 * glib.time.duration.MilliSecond);
+const SocketKind = enum {
+    tcp,
+    udp,
+};
 
 const State = struct {
+    kind: SocketKind,
     conn: ?*binding.netconn,
     mutex: Mutex = .{},
     condition: Condition = .{},
@@ -24,11 +33,58 @@ const State = struct {
     write_interrupt: bool = false,
     pending_recv: ?*binding.netbuf = null,
     pending_recv_offset: usize = 0,
+    event_rcvplus_total: usize = 0,
+    event_rcvminus_total: usize = 0,
+    event_error_total: usize = 0,
+    recv_udp_ok_total: usize = 0,
+    recv_udp_bytes_total: usize = 0,
+    recv_udp_wouldblock_total: usize = 0,
+    send_udp_ok_total: usize = 0,
+    send_udp_fail_total: usize = 0,
+    send_udp_local_drop_total: usize = 0,
+    send_udp_retry_total: usize = 0,
+    send_udp_retry_packet_total: usize = 0,
+    send_udp_retry_max_per_packet: usize = 0,
+    send_udp_enqueue_wait_total: usize = 0,
+    send_udp_enqueue_wait_packet_total: usize = 0,
+    send_udp_enqueue_wait_max_per_packet: usize = 0,
+    send_udp_pps_started_ns: u64 = 0,
+    send_udp_pps_last_ns: u64 = 0,
+    send_udp_pps_last_total: usize = 0,
 
-    fn create(conn: *binding.netconn) error{OutOfMemory}!*State {
-        const raw = heap_binding.espz_heap_caps_malloc(@sizeOf(State), defaultInternalCaps()) orelse return error.OutOfMemory;
+    fn create(conn: *binding.netconn, kind: SocketKind) error{OutOfMemory}!*State {
+        const raw = heap_binding.espz_heap_caps_aligned_alloc(@alignOf(State), @sizeOf(State), defaultInternalCaps()) orelse return error.OutOfMemory;
         const self: *State = @ptrCast(@alignCast(raw));
-        self.* = .{ .conn = conn };
+        self.kind = kind;
+        self.conn = conn;
+        self.mutex = .{};
+        self.condition = .{};
+        self.closed = false;
+        self.read_ready_count = 0;
+        self.write_ready = true;
+        self.failed = false;
+        self.read_interrupt = false;
+        self.write_interrupt = false;
+        self.pending_recv = null;
+        self.pending_recv_offset = 0;
+        self.event_rcvplus_total = 0;
+        self.event_rcvminus_total = 0;
+        self.event_error_total = 0;
+        self.recv_udp_ok_total = 0;
+        self.recv_udp_bytes_total = 0;
+        self.recv_udp_wouldblock_total = 0;
+        self.send_udp_ok_total = 0;
+        self.send_udp_fail_total = 0;
+        self.send_udp_local_drop_total = 0;
+        self.send_udp_retry_total = 0;
+        self.send_udp_retry_packet_total = 0;
+        self.send_udp_retry_max_per_packet = 0;
+        self.send_udp_enqueue_wait_total = 0;
+        self.send_udp_enqueue_wait_packet_total = 0;
+        self.send_udp_enqueue_wait_max_per_packet = 0;
+        self.send_udp_pps_started_ns = 0;
+        self.send_udp_pps_last_ns = 0;
+        self.send_udp_pps_last_total = 0;
         binding.espz_lwip_netconn_set_callback_arg(conn, self);
         return self;
     }
@@ -139,7 +195,7 @@ pub const Tcp = struct {
         if (remote) |out| {
             out.* = try getAddr(accepted, false);
         }
-        const state = State.create(accepted) catch return error.Unexpected;
+        const state = State.create(accepted, .tcp) catch return error.Unexpected;
         return .{ .state = state };
     }
 
@@ -165,13 +221,16 @@ pub const Tcp = struct {
         const conn = try liveConn(self.state);
         if (buf.len == 0) return 0;
         var written: usize = 0;
-        return switch (binding.espz_lwip_netconn_write(conn, buf.ptr, buf.len, &written)) {
+        const rc = binding.espz_lwip_netconn_write(conn, buf.ptr, buf.len, &written);
+        return switch (rc) {
             binding.err_ok => written,
-            binding.err_wouldblock, binding.err_mem => {
+            binding.err_wouldblock, binding.err_mem, binding.err_inprogress, binding.err_already => {
                 setWriteReady(self.state, false);
                 return error.WouldBlock;
             },
-            else => |err| lwipErrToSocket(err),
+            else => {
+                return lwipErrToSocket(rc);
+            },
         };
     }
 
@@ -202,6 +261,26 @@ pub const Udp = struct {
     state: *State,
 
     const Self = @This();
+
+    pub const DebugStats = struct {
+        read_ready: usize,
+        pending_recv: bool,
+        rcvplus_total: usize,
+        rcvminus_total: usize,
+        event_error_total: usize,
+        recv_ok_total: usize,
+        recv_bytes_total: usize,
+        recv_wouldblock_total: usize,
+        send_ok_total: usize,
+        send_fail_total: usize,
+        send_local_drop_total: usize,
+        send_retry_total: usize,
+        send_retry_packet_total: usize,
+        send_retry_max_per_packet: usize,
+        send_enqueue_wait_total: usize,
+        send_enqueue_wait_packet_total: usize,
+        send_enqueue_wait_max_per_packet: usize,
+    };
 
     pub fn close(self: *Self) void {
         if (self.state.markClosed()) return;
@@ -255,14 +334,8 @@ pub const Udp = struct {
         const conn = try liveConn(self.state);
         if (buf.len == 0) return 0;
         if (buf.len > max_udp_payload_len) return error.MessageTooLong;
-        return switch (binding.espz_lwip_netconn_send(conn, buf.ptr, buf.len)) {
-            binding.err_ok => buf.len,
-            binding.err_wouldblock, binding.err_mem => {
-                setWriteReady(self.state, false);
-                return error.WouldBlock;
-            },
-            else => |err| lwipErrToSocket(err),
-        };
+        const rc = binding.espz_lwip_netconn_send(conn, buf.ptr, buf.len);
+        return finishUdpSend(self.state, rc, buf.len);
     }
 
     pub fn sendTo(self: *Self, buf: []const u8, addr: netip.AddrPort) runtime.SocketError!usize {
@@ -270,14 +343,8 @@ pub const Udp = struct {
         if (buf.len == 0) return 0;
         if (buf.len > max_udp_payload_len) return error.MessageTooLong;
         const encoded = encodeAddr(addr.addr()) catch return error.Unexpected;
-        return switch (binding.espz_lwip_netconn_send_to(conn, buf.ptr, buf.len, &encoded, addr.port())) {
-            binding.err_ok => buf.len,
-            binding.err_wouldblock, binding.err_mem => {
-                setWriteReady(self.state, false);
-                return error.WouldBlock;
-            },
-            else => |err| lwipErrToSocket(err),
-        };
+        const rc = binding.espz_lwip_netconn_send_to(conn, buf.ptr, buf.len, &encoded, addr.port());
+        return finishUdpSend(self.state, rc, buf.len);
     }
 
     pub fn localAddr(self: *Self) runtime.SocketError!netip.AddrPort {
@@ -298,18 +365,64 @@ pub const Udp = struct {
     pub fn poll(self: *Self, want: runtime.PollEvents, timeout: ?glib.time.duration.Duration) runtime.PollError!runtime.PollEvents {
         return pollState(self.state, want, timeout);
     }
+
+    pub fn debugStats(self: *Self) DebugStats {
+        self.state.lock();
+        const state_stats = .{
+            .read_ready = self.state.read_ready_count,
+            .pending_recv = self.state.pending_recv != null,
+            .rcvplus_total = self.state.event_rcvplus_total,
+            .rcvminus_total = self.state.event_rcvminus_total,
+            .event_error_total = self.state.event_error_total,
+            .recv_ok_total = self.state.recv_udp_ok_total,
+            .recv_bytes_total = self.state.recv_udp_bytes_total,
+            .recv_wouldblock_total = self.state.recv_udp_wouldblock_total,
+            .send_ok_total = self.state.send_udp_ok_total,
+            .send_fail_total = self.state.send_udp_fail_total,
+            .send_local_drop_total = self.state.send_udp_local_drop_total,
+            .send_retry_total = self.state.send_udp_retry_total,
+            .send_retry_packet_total = self.state.send_udp_retry_packet_total,
+            .send_retry_max_per_packet = self.state.send_udp_retry_max_per_packet,
+            .send_enqueue_wait_total = self.state.send_udp_enqueue_wait_total,
+            .send_enqueue_wait_packet_total = self.state.send_udp_enqueue_wait_packet_total,
+            .send_enqueue_wait_max_per_packet = self.state.send_udp_enqueue_wait_max_per_packet,
+        };
+        self.state.unlock();
+
+        return .{
+            .read_ready = state_stats.read_ready,
+            .pending_recv = state_stats.pending_recv,
+            .rcvplus_total = state_stats.rcvplus_total,
+            .rcvminus_total = state_stats.rcvminus_total,
+            .event_error_total = state_stats.event_error_total,
+            .recv_ok_total = state_stats.recv_ok_total,
+            .recv_bytes_total = state_stats.recv_bytes_total,
+            .recv_wouldblock_total = state_stats.recv_wouldblock_total,
+            .send_ok_total = state_stats.send_ok_total,
+            .send_fail_total = state_stats.send_fail_total,
+            .send_local_drop_total = state_stats.send_local_drop_total,
+            .send_retry_total = state_stats.send_retry_total,
+            .send_retry_packet_total = state_stats.send_retry_packet_total,
+            .send_retry_max_per_packet = state_stats.send_retry_max_per_packet,
+            .send_enqueue_wait_total = state_stats.send_enqueue_wait_total,
+            .send_enqueue_wait_packet_total = state_stats.send_enqueue_wait_packet_total,
+            .send_enqueue_wait_max_per_packet = state_stats.send_enqueue_wait_max_per_packet,
+        };
+    }
 };
 
 pub fn tcp(domain: runtime.Domain) runtime.CreateError!Tcp {
-    return createRuntime(Tcp, netconnType(domain, .tcp));
+    return createRuntime(Tcp, .tcp, netconnType(domain, .tcp));
 }
 
 pub fn udp(domain: runtime.Domain) runtime.CreateError!Udp {
-    return createRuntime(Udp, netconnType(domain, .udp));
+    return createRuntime(Udp, .udp, netconnType(domain, .udp));
 }
 
 pub const interfaces = struct {
     pub fn list(out: []net_interfaces.Info) net_types.Error![]net_interfaces.Info {
+        if (out.len == 0) return error.BufferTooSmall;
+
         var raw_buf: [16]binding.netif_info = undefined;
         const cap = @min(raw_buf.len, out.len);
         const raw_count = binding.espz_netif_list(&raw_buf, cap);
@@ -372,13 +485,22 @@ export fn espz_lwip_runtime_on_event(ctx: ?*anyopaque, event: c_int, _: u16) voi
     defer state.unlock();
 
     switch (event) {
-        binding.netconn_event_rcvplus => state.read_ready_count +|= 1,
-        binding.netconn_event_rcvminus => if (state.read_ready_count > 0) {
-            state.read_ready_count -= 1;
+        binding.netconn_event_rcvplus => {
+            state.read_ready_count +|= 1;
+            state.event_rcvplus_total +|= 1;
+        },
+        binding.netconn_event_rcvminus => {
+            state.event_rcvminus_total +|= 1;
+            if (state.read_ready_count > 0) {
+                state.read_ready_count -= 1;
+            }
         },
         binding.netconn_event_sendplus => state.write_ready = true,
         binding.netconn_event_sendminus => state.write_ready = false,
-        binding.netconn_event_error => state.failed = true,
+        binding.netconn_event_error => {
+            state.failed = true;
+            state.event_error_total +|= 1;
+        },
         else => {},
     }
     state.wake();
@@ -423,11 +545,24 @@ fn prefixLen4(bytes: [4]u8) u8 {
     return prefix;
 }
 
-fn createRuntime(comptime Socket: type, netconn_type: u32) runtime.CreateError!Socket {
+fn createRuntime(comptime Socket: type, kind: SocketKind, netconn_type: u32) runtime.CreateError!Socket {
+    if (binding.espz_lwip_runtime_init() != 0) return error.SystemResources;
+
     const conn = binding.espz_lwip_netconn_new(netconn_type, null) orelse return error.SystemResources;
     errdefer _ = binding.espz_lwip_netconn_delete(conn);
+    if (kind == .udp) {
+        _ = binding.espz_lwip_netconn_set_recvbuf_size(conn, udp_recv_buffer_size);
+        var netif_id: usize = 0;
+        var if_idx: u8 = 0;
+        const rc = binding.espz_lwip_netconn_bind_default_netif(conn, &netif_id, &if_idx);
+        if (rc == binding.err_ok) {
+            esp_log.write(.info, .espz_udp, "bound default netif id=0x{x} if_idx={}", .{ netif_id, if_idx });
+        } else {
+            esp_log.write(.warn, .espz_udp, "bind default netif failed rc={} id=0x{x} if_idx={}", .{ rc, netif_id, if_idx });
+        }
+    }
 
-    const state = State.create(conn) catch |err| switch (err) {
+    const state = State.create(conn, kind) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
     };
     return .{ .state = state };
@@ -468,11 +603,56 @@ fn pollState(state: *State, want: runtime.PollEvents, timeout: ?glib.time.durati
         if (timeout_ns) |ns| {
             const remaining_ns = remainingTimeoutNs(started, ns);
             if (remaining_ns == 0) return error.TimedOut;
-            state.condition.timedWait(&state.mutex, remaining_ns) catch return error.TimedOut;
+            const wait_ns = pollWaitTimeoutNs(state, want, remaining_ns);
+            state.condition.timedWait(&state.mutex, wait_ns) catch {
+                if (udpReadRetryElapsed(state, want, wait_ns, remaining_ns)) return .{ .read = true };
+                if (udpWriteRetryElapsed(state, want, wait_ns, remaining_ns)) {
+                    state.write_ready = true;
+                    continue;
+                }
+                return error.TimedOut;
+            };
         } else {
-            state.condition.wait(&state.mutex);
+            if (shouldRetryUdpReadPoll(state, want) or shouldRetryUdpWritePoll(state, want)) {
+                const wait_ns = udpPollRetryIntervalNs(state, want);
+                state.condition.timedWait(&state.mutex, wait_ns) catch {
+                    if (shouldRetryUdpReadPoll(state, want)) return .{ .read = true };
+                    state.write_ready = true;
+                    continue;
+                };
+            } else {
+                state.condition.wait(&state.mutex);
+            }
         }
     }
+}
+
+fn pollWaitTimeoutNs(state: *const State, want: runtime.PollEvents, remaining_ns: u64) u64 {
+    if (!shouldRetryUdpReadPoll(state, want) and !shouldRetryUdpWritePoll(state, want)) return remaining_ns;
+    return @min(remaining_ns, udpPollRetryIntervalNs(state, want));
+}
+
+fn udpPollRetryIntervalNs(state: *const State, want: runtime.PollEvents) u64 {
+    var interval: u64 = glib.std.math.maxInt(u64);
+    if (shouldRetryUdpReadPoll(state, want)) interval = @min(interval, udp_read_retry_poll_interval_ns);
+    if (shouldRetryUdpWritePoll(state, want)) interval = @min(interval, udp_write_retry_poll_interval_ns);
+    return interval;
+}
+
+fn udpReadRetryElapsed(state: *const State, want: runtime.PollEvents, wait_ns: u64, remaining_ns: u64) bool {
+    return shouldRetryUdpReadPoll(state, want) and wait_ns < remaining_ns;
+}
+
+fn udpWriteRetryElapsed(state: *const State, want: runtime.PollEvents, wait_ns: u64, remaining_ns: u64) bool {
+    return shouldRetryUdpWritePoll(state, want) and wait_ns < remaining_ns;
+}
+
+fn shouldRetryUdpReadPoll(state: *const State, want: runtime.PollEvents) bool {
+    return state.kind == .udp and want.read and state.read_ready_count == 0 and state.pending_recv == null;
+}
+
+fn shouldRetryUdpWritePoll(state: *const State, want: runtime.PollEvents) bool {
+    return state.kind == .udp and want.write and !state.write_ready;
 }
 
 fn takeEventsLocked(state: *State, want: runtime.PollEvents) runtime.PollEvents {
@@ -572,6 +752,9 @@ fn recvUdp(state: *State, conn: *binding.netconn, out: []u8, remote: ?*netip.Add
     switch (rc) {
         binding.err_ok => {},
         binding.err_wouldblock => {
+            state.lock();
+            state.recv_udp_wouldblock_total +|= 1;
+            state.unlock();
             clearReadReady(state);
             return error.WouldBlock;
         },
@@ -581,6 +764,10 @@ fn recvUdp(state: *State, conn: *binding.netconn, out: []u8, remote: ?*netip.Add
 
     const total = binding.espz_lwip_netbuf_len(buf);
     const n = binding.espz_lwip_netbuf_copy(buf, 0, out.ptr, @min(out.len, total));
+    state.lock();
+    state.recv_udp_ok_total +|= 1;
+    state.recv_udp_bytes_total +|= n;
+    state.unlock();
     if (remote) |addr| {
         var raw_addr: binding.ip_addr = undefined;
         var port: u16 = 0;
@@ -588,6 +775,84 @@ fn recvUdp(state: *State, conn: *binding.netconn, out: []u8, remote: ?*netip.Add
         addr.* = decodeAddr(raw_addr, port);
     }
     return n;
+}
+
+fn recordUdpSendResult(state: *State, rc: c_int) void {
+    const PpsLog = struct {
+        total: usize,
+        recent_pps: u64,
+        avg_pps: u64,
+        window_ms: u64,
+        total_ms: u64,
+    };
+
+    var pps_log: ?PpsLog = null;
+
+    state.lock();
+    if (rc == binding.err_ok) {
+        state.send_udp_ok_total +|= 1;
+        const total = state.send_udp_ok_total;
+        if (state.send_udp_pps_started_ns == 0) {
+            const now = Time.instantNow();
+            state.send_udp_pps_started_ns = now;
+            state.send_udp_pps_last_ns = now;
+            state.send_udp_pps_last_total = 0;
+        } else if (total % 100 == 0) {
+            const now = Time.instantNow();
+            const window_ns = elapsedNsSince(state.send_udp_pps_last_ns, now);
+            const total_ns = elapsedNsSince(state.send_udp_pps_started_ns, now);
+            const window_packets = total - state.send_udp_pps_last_total;
+            pps_log = .{
+                .total = total,
+                .recent_pps = packetsPerSecond(window_packets, window_ns),
+                .avg_pps = packetsPerSecond(total, total_ns),
+                .window_ms = nsToMs(window_ns),
+                .total_ms = nsToMs(total_ns),
+            };
+            state.send_udp_pps_last_ns = now;
+            state.send_udp_pps_last_total = total;
+        }
+    } else if (rc == binding.err_mem or rc == binding.err_buf) {
+        state.send_udp_local_drop_total +|= 1;
+    } else {
+        state.send_udp_fail_total +|= 1;
+    }
+    state.unlock();
+
+    if (pps_log) |log| {
+        esp_log.write(.info, .espz_udp, "pps n={} recent={} avg={} window_ms={} total_ms={}", .{
+            log.total,
+            log.recent_pps,
+            log.avg_pps,
+            log.window_ms,
+            log.total_ms,
+        });
+    }
+}
+
+fn finishUdpSend(state: *State, rc: c_int, len: usize) runtime.SocketError!usize {
+    recordUdpSendResult(state, rc);
+    return switch (rc) {
+        binding.err_ok => len,
+        binding.err_mem, binding.err_buf, binding.err_wouldblock => {
+            setWriteReady(state, false);
+            return error.WouldBlock;
+        },
+        else => lwipErrToSocket(rc),
+    };
+}
+
+fn elapsedNsSince(started_ns: u64, now: u64) u64 {
+    return if (now > started_ns) now - started_ns else 0;
+}
+
+fn packetsPerSecond(packets: usize, ns: u64) u64 {
+    if (ns == 0) return 0;
+    return @divTrunc(@as(u64, @intCast(packets)) * glib.time.duration.Second, ns);
+}
+
+fn nsToMs(ns: u64) u64 {
+    return @divTrunc(ns, glib.time.duration.MilliSecond);
 }
 
 fn connectConn(conn: *binding.netconn, addr: *const binding.ip_addr, port: u16) runtime.SocketError!void {
@@ -628,7 +893,13 @@ fn applySocketLevelOpt(conn: *binding.netconn, opt: runtime.SocketLevelOption) r
             if (enabled) return error.Unsupported;
         },
         .broadcast => |enabled| try setOptResult(binding.espz_lwip_netconn_set_socket_broadcast(conn, if (enabled) 1 else 0)),
+        .recv_buffer_size => |size| try setOptResult(binding.espz_lwip_netconn_set_recvbuf_size(conn, cappedSocketBufferSize(size))),
+        .send_buffer_size => |_| return error.Unsupported,
     }
+}
+
+fn cappedSocketBufferSize(size: usize) c_int {
+    return @intCast(@min(size, @as(usize, @intCast(glib.std.math.maxInt(c_int)))));
 }
 
 fn setOptResult(rc: c_int) runtime.SetSockOptError!void {
@@ -646,7 +917,11 @@ fn encodeAddr(addr: netip.Addr) error{ InvalidAddress, InvalidScopeId }!binding.
             .bytes = [_]u8{0} ** 16,
             .zone = 0,
         };
-        @memcpy(out.bytes[0..4], &addr.as4().?);
+        const v4 = addr.as4() orelse return error.InvalidAddress;
+        out.bytes[0] = v4[0];
+        out.bytes[1] = v4[1];
+        out.bytes[2] = v4[2];
+        out.bytes[3] = v4[3];
         return out;
     }
     if (addr.is6()) {

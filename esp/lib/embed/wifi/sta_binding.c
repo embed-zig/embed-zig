@@ -411,6 +411,10 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
             report.channel = event->channel;
             report.security = map_security(event->authmode);
         }
+        wifi_ap_record_t ap = { 0 };
+        if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+            report.rssi = ap.rssi;
+        }
         emit_event(&report);
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         const wifi_event_sta_disconnected_t *event = (const wifi_event_sta_disconnected_t *)event_data;

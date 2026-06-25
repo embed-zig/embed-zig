@@ -8,6 +8,7 @@ const Es8311 = embed.drivers.audio.Es8311;
 const I2c = esp.embed.I2c;
 
 pub const GainTableFunc = *const fn (gain_db: i8) i8;
+pub const SpeakerPowerFunc = *const fn (enabled: bool) embed.audio.AudioSystem.Error!void;
 
 pub const I2sConfig = struct {
     port: i32,
@@ -83,6 +84,7 @@ pub const Options = struct {
     default_mic_gain_db: i8 = 24,
     speaker_gain_table_func: ?GainTableFunc = null,
     mic_gain_table_func: ?GainTableFunc = null,
+    speaker_power_func: ?SpeakerPowerFunc = null,
     esp_sr: EspSrAfe.Options = .{},
     i2s_adapters: I2sAdapterConfig = .{},
 };
@@ -349,11 +351,14 @@ pub fn make(comptime options: Options) type {
 
             fn enable(self: *SpeakerDevice) embed.audio.AudioSystem.Error!void {
                 const speaker = self.state.i2s_speaker.?.speaker();
-                return speaker.enable();
+                if (options.speaker_power_func) |power| try power(true);
+                errdefer if (options.speaker_power_func) |power| power(false) catch {};
+                try speaker.enable();
             }
 
             fn disable(self: *SpeakerDevice) embed.audio.AudioSystem.Error!void {
                 const speaker = self.state.i2s_speaker.?.speaker();
+                defer if (options.speaker_power_func) |power| power(false) catch {};
                 return speaker.disable();
             }
         };

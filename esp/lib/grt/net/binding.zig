@@ -20,6 +20,8 @@ pub const netif_info = extern struct {
     netmask: [4]u8,
 };
 
+pub const modem_ppp = opaque {};
+
 pub const netconn_event_rcvplus: c_int = 0;
 pub const netconn_event_rcvminus: c_int = 1;
 pub const netconn_event_sendplus: c_int = 2;
@@ -49,9 +51,11 @@ pub const err_rst: c_int = -14;
 pub const err_clsd: c_int = -15;
 pub const err_arg: c_int = -16;
 
+pub extern fn espz_lwip_runtime_init() c_int;
 pub extern fn espz_lwip_netconn_new(netconn_type: u32, ctx: ?*anyopaque) ?*netconn;
 pub extern fn espz_lwip_netconn_set_callback_arg(conn: *netconn, ctx: ?*anyopaque) void;
 pub extern fn espz_lwip_netconn_set_nonblocking(conn: *netconn, enabled: u32) void;
+pub extern fn espz_lwip_netconn_set_recvbuf_size(conn: *netconn, size: c_int) c_int;
 pub extern fn espz_lwip_netconn_delete(conn: *netconn) c_int;
 pub extern fn espz_lwip_netconn_close(conn: *netconn) c_int;
 pub extern fn espz_lwip_netconn_shutdown(conn: *netconn, shut_rx: u32, shut_tx: u32) c_int;
@@ -63,6 +67,7 @@ pub extern fn espz_lwip_netconn_recv(conn: *netconn, out: **netbuf) c_int;
 pub extern fn espz_lwip_netconn_write(conn: *netconn, data: ?*const anyopaque, len: usize, written: *usize) c_int;
 pub extern fn espz_lwip_netconn_send_to(conn: *netconn, data: ?*const anyopaque, len: usize, addr: *const ip_addr, port: u16) c_int;
 pub extern fn espz_lwip_netconn_send(conn: *netconn, data: ?*const anyopaque, len: usize) c_int;
+pub extern fn espz_lwip_netconn_bind_default_netif(conn: *netconn, out_id: *usize, out_if_idx: *u8) c_int;
 pub extern fn espz_lwip_netconn_get_addr(conn: *netconn, local: u32, addr: *ip_addr, port: *u16) c_int;
 pub extern fn espz_lwip_netconn_err(conn: *netconn) c_int;
 pub extern fn espz_lwip_netbuf_delete(buf: *netbuf) void;
@@ -72,7 +77,13 @@ pub extern fn espz_lwip_netbuf_from_addr(buf: *netbuf, addr: *ip_addr, port: *u1
 pub extern fn espz_lwip_netconn_set_socket_reuse_addr(conn: *netconn, enabled: c_int) c_int;
 pub extern fn espz_lwip_netconn_set_socket_broadcast(conn: *netconn, enabled: c_int) c_int;
 pub extern fn espz_lwip_netconn_set_tcp_no_delay(conn: *netconn, enabled: c_int) c_int;
-
 pub extern fn espz_netif_list(out: [*]netif_info, cap: usize) usize;
 pub extern fn espz_netif_get_default(out_id: *usize) c_int;
 pub extern fn espz_netif_set_default(id: usize) c_int;
+pub extern fn espz_modem_ppp_create(ctx: ?*anyopaque) ?*modem_ppp;
+pub extern fn espz_modem_ppp_start(ppp: *modem_ppp) c_int;
+pub extern fn espz_modem_ppp_stop(ppp: *modem_ppp) c_int;
+pub extern fn espz_modem_ppp_destroy(ppp: *modem_ppp) void;
+pub extern fn espz_modem_ppp_input(ppp: *modem_ppp, data: ?*const anyopaque, len: usize) c_int;
+pub extern fn espz_modem_ppp_set_default(ppp: *modem_ppp) c_int;
+pub extern fn espz_modem_ppp_netif_id(ppp: *modem_ppp) usize;
