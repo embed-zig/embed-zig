@@ -19,6 +19,7 @@ const STT_FUNC = 2;
 const STT_SECTION = 3;
 const STT_FILE = 4;
 const top_code_symbol_limit = 40;
+const max_elf_layout_input_size = 512 * 1024 * 1024;
 
 const Elf32Header = extern struct {
     e_ident: [16]u8,
@@ -320,7 +321,7 @@ fn parseElf(allocator: std.mem.Allocator, path: []const u8) !struct {
 } {
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
-    const data = try file.readToEndAlloc(allocator, 64 * 1024 * 1024);
+    const data = try file.readToEndAlloc(allocator, max_elf_layout_input_size);
 
     if (data.len < @sizeOf(Elf32Header)) return error.TooSmall;
     if (!std.mem.eql(u8, data[0..4], "\x7fELF")) return error.NotElf;
