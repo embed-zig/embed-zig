@@ -23,6 +23,7 @@ const DesktopPlatformCtx = desktop.PlatformCtxWith(.{
 
 const PlatformCtx = struct {
     pub const AudioSystem = DesktopPlatformCtx.AudioSystem;
+    pub const Net = DesktopPlatformCtx.Net;
     pub const fs = DesktopPlatformCtx.fs;
 
     pub fn preferencesProvider(allocator: gstd.runtime.std.mem.Allocator) !desktop.system.preferences.Provider {

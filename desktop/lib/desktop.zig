@@ -6,6 +6,7 @@ pub const device = @import("device.zig");
 pub const http = @import("http.zig");
 pub const fs = @import("fs.zig");
 pub const log = @import("log.zig");
+pub const net = @import("net.zig");
 pub const system = @import("system.zig");
 pub const runtime = gstd.runtime;
 
@@ -20,6 +21,7 @@ pub const PlatformCtx = PlatformCtxWith(.{});
 pub fn PlatformCtxWith(comptime config: PlatformConfig) type {
     return struct {
         pub const AudioSystem = device.audio_system.AudioSystem;
+        pub const Net = net;
 
         pub fn preferencesProvider(allocator: anytype) !system.preferences.Provider {
             return system.preferences.Provider.init(.{

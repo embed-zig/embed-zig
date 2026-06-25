@@ -31,6 +31,7 @@ fn MinimalZuxApp(comptime platform_grt: type) type {
             poller_config: PollerConfig = .{},
         };
         pub const StartConfig = struct {};
+        pub const PeriphLabel = enum { none };
         pub const registries = .{
             .adc_button = EmptyRegistry(EmptyPeriph){},
             .bt = EmptyRegistry(EmptyPeriph){},
@@ -178,7 +179,7 @@ fn runSmoke(comptime platform_ctx: type, comptime platform_grt: type) !void {
         try platform_grt.net.Runtime.init();
     }
 
-    var interfaces_buf: [8]platform_net.InterfaceInfo = undefined;
+    var interfaces_buf: [32]platform_net.InterfaceInfo = undefined;
     const interfaces = try platform_net.interfaces.list(&interfaces_buf);
     log.info("net smoke interfaces={d}", .{interfaces.len});
 
