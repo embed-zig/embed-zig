@@ -196,6 +196,7 @@ pub fn addFlashCombinedImageTool(
     b: *std.Build,
     context: BuildContext.BuildContext,
     port: ?[]const u8,
+    baud: u32,
 ) *std.Build.Step {
     const run = b.addSystemCommand(&.{context.python_executable_path});
     context.applyIdfEnvironment(run);
@@ -204,6 +205,8 @@ pub fn addFlashCombinedImageTool(
     if (port) |resolved_port| {
         run.addArgs(&.{ "--port", resolved_port });
     }
+    run.addArgs(&.{ "-b", b.fmt("{d}", .{baud}) });
+    run.addArgs(&.{ "--before", "default_reset", "--after", "hard_reset" });
     run.addArgs(&.{ "write_flash", "0x0" });
     run.addArg(context.combined_binary_output_path);
     return &run.step;
@@ -321,10 +324,17 @@ fn addBuiltinHostTool(
     const key = computeBuiltinHostToolKey(b, name, root_source_file, imports);
 
     b.cache_root.handle.makePath("espz-host-tools") catch @panic("failed to create host tool cache dir");
-    const output_path = b.cache_root.join(
+    const output_name = b.fmt("{s}.{x}", .{ name, key });
+    const output_path_relative = b.cache_root.join(
         b.allocator,
-        &.{ "espz-host-tools", b.fmt("{s}.{x}", .{ name, key }) },
+        &.{ "espz-host-tools", output_name },
     ) catch @panic("OOM");
+    const output_path = if (std.fs.path.isAbsolute(output_path_relative))
+        output_path_relative
+    else blk: {
+        const cache_root = b.cache_root.handle.realpathAlloc(b.allocator, ".") catch @panic("failed to resolve build cache root");
+        break :blk b.pathJoin(&.{ cache_root, "espz-host-tools", output_name });
+    };
 
     const compile = b.addSystemCommand(&.{
         b.graph.zig_exe,

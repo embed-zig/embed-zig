@@ -42,6 +42,7 @@ const Module = std.Build.Module;
 pub const RuntimeOptions = struct {
     port: ?[]const u8 = null,
     jtag: ?[]const u8 = null,
+    baud: u32 = 2000000,
     timeout: u32 = 15,
 };
 
@@ -86,6 +87,7 @@ pub fn addApp(b: *std.Build, app_name: []const u8, opts: AddOptions) Self {
     const runtime: RuntimeOptions = .{
         .port = b.option([]const u8, "port", "Serial port used by flash/monitor"),
         .jtag = b.option([]const u8, "jtag", "OpenOCD JTAG adapter serial used by flash"),
+        .baud = b.option(u32, "baud", "Serial baud rate used by esptool flash") orelse 2000000,
         .timeout = b.option(u32, "timeout", "Auto-exit monitor after N seconds") orelse 15,
     };
 
@@ -141,7 +143,7 @@ pub fn addApp(b: *std.Build, app_name: []const u8, opts: AddOptions) Self {
             break :blk step;
         }
         if (runtime.port) |port| {
-            const step = tools.addFlashCombinedImageTool(b, opts.context, port);
+            const step = tools.addFlashCombinedImageTool(b, opts.context, port, runtime.baud);
             step.dependOn(combine_binaries);
             break :blk step;
         }
