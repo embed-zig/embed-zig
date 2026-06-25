@@ -14,6 +14,15 @@ pub fn build(b: *std.Build) void {
     const app_name = b.option([]const u8, "app", "App module exported by the apps package") orelse "zux_button-ledstrip";
     const port = b.option(u16, "port", "HTTP port for the desktop launcher") orelse 8080;
     const icon = b.option(std.Build.LazyPath, "icon", "macOS .icns icon path for the desktop launcher app bundle");
+    const resolved_bundle_name = b.option([]const u8, "desktop_bundle_name", "macOS app bundle name for the desktop launcher") orelse bundle_name;
+    const resolved_bundle_id = b.option([]const u8, "desktop_bundle_id", "macOS app bundle identifier for the desktop launcher") orelse bundle_id;
+    const resolved_display_name = b.option([]const u8, "desktop_display_name", "macOS display name for the desktop launcher") orelse resolved_bundle_name;
+    const resolved_systray_name = b.option([]const u8, "desktop_systray_name", "macOS menu bar name for the desktop launcher") orelse resolved_display_name;
+    const storage_root_option = b.option([]const u8, "desktop_storage_root", "Direct host storage root override for the desktop launcher") orelse "";
+    const home_dir_option = b.option([]const u8, "desktop_home_dir", "Host home directory used by the desktop platform for Application Support storage") orelse "";
+    const run_tray = b.option(bool, "desktop_run_tray", "Run macOS desktop launcher as a menu bar app") orelse true;
+    const storage_root = normalizeHostPath(b, storage_root_option);
+    const home_dir = normalizeHostPath(b, home_dir_option);
     const netperf_wifi_connect = b.option(bool, "netperf_wifi_connect", "Connect WiFi before running zux_netperf") orelse false;
     const netperf_wifi_ssid = b.option([]const u8, "netperf_wifi_ssid", "zux_netperf WiFi SSID") orelse "";
     const netperf_wifi_password = b.option([]const u8, "netperf_wifi_password", "zux_netperf WiFi password") orelse "";
@@ -65,6 +74,10 @@ pub fn build(b: *std.Build) void {
     const launcher_config = b.addOptions();
     launcher_config.addOption([]const u8, "app_name", app_name);
     launcher_config.addOption(u16, "port", port);
+    launcher_config.addOption([]const u8, "bundle_id", resolved_bundle_id);
+    launcher_config.addOption([]const u8, "home_dir", home_dir);
+    launcher_config.addOption([]const u8, "storage_root", storage_root);
+    launcher_config.addOption(bool, "run_tray", run_tray);
 
     const server_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
@@ -82,7 +95,10 @@ pub fn build(b: *std.Build) void {
     if (target.result.os.tag == .macos) {
         server_mod.addCSourceFile(.{
             .file = createStatusAppSource(b),
-            .flags = &.{"-fobjc-arc"},
+            .flags = &.{
+                "-fobjc-arc",
+                b.fmt("-DDESKTOP_LAUNCHER_SYSTRAY_NAME=\"{s}\"", .{resolved_systray_name}),
+            },
         });
         server_mod.linkFramework("Cocoa", .{});
     }
@@ -97,7 +113,14 @@ pub fn build(b: *std.Build) void {
     const build_step = b.step("build", "Build the desktop launcher example");
     switch (target.result.os.tag) {
         .macos => {
-            const app_bundle = createAppBundle(b, server_exe.getEmittedBin(), icon);
+            const app_bundle = createAppBundle(
+                b,
+                server_exe.getEmittedBin(),
+                icon,
+                resolved_bundle_name,
+                resolved_bundle_id,
+                resolved_display_name,
+            );
 
             const app_step = b.step("app", "Create a macOS status bar app for the desktop launcher");
             app_step.dependOn(app_bundle.step);
@@ -146,13 +169,16 @@ fn createAppBundle(
     b: *std.Build,
     app_exe: std.Build.LazyPath,
     icon: ?std.Build.LazyPath,
+    resolved_bundle_name: []const u8,
+    resolved_bundle_id: []const u8,
+    resolved_display_name: []const u8,
 ) desktop_build.macos.App {
     return desktop_build.macos.addAppFromPath(b, .{
         .executable = app_exe,
-        .bundle_name = bundle_name,
-        .bundle_identifier = bundle_id,
+        .bundle_name = resolved_bundle_name,
+        .bundle_identifier = resolved_bundle_id,
         .executable_name = app_exe_name,
-        .display_name = bundle_name,
+        .display_name = resolved_display_name,
         .minimum_system_version = "13.0",
         .usage_descriptions = .{
             .location = location_usage,
@@ -177,6 +203,10 @@ fn createStatusAppSource(b: *std.Build) std.Build.LazyPath {
         \\#include <unistd.h>
         \\
         \\extern void desktop_launcher_quit(void);
+        \\
+        \\#ifndef DESKTOP_LAUNCHER_SYSTRAY_NAME
+        \\#define DESKTOP_LAUNCHER_SYSTRAY_NAME "Embed"
+        \\#endif
         \\
         \\static int launcherPort = 8080;
         \\
@@ -205,15 +235,15 @@ fn createStatusAppSource(b: *std.Build) std.Build.LazyPath {
         \\    (void)notification;
         \\    [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
         \\    [self installStatusItem];
-        \\    [self openBrowser:nil];
         \\}
         \\
         \\- (void)installStatusItem {
+        \\    NSString *systrayName = [NSString stringWithUTF8String:DESKTOP_LAUNCHER_SYSTRAY_NAME];
         \\    self.statusItem = [[NSStatusBar systemStatusBar] statusItemWithLength:NSVariableStatusItemLength];
-        \\    self.statusItem.button.title = @"Embed";
-        \\    self.statusItem.button.toolTip = @"Embed Desktop Launcher";
+        \\    self.statusItem.button.title = systrayName;
+        \\    self.statusItem.button.toolTip = systrayName;
         \\
-        \\    NSMenu *menu = [[NSMenu alloc] initWithTitle:@"Embed Desktop Launcher"];
+        \\    NSMenu *menu = [[NSMenu alloc] initWithTitle:systrayName];
         \\    NSMenuItem *openItem = [[NSMenuItem alloc] initWithTitle:@"Open Browser" action:@selector(openBrowser:) keyEquivalent:@"o"];
         \\    openItem.target = self;
         \\    [menu addItem:openItem];
@@ -263,6 +293,11 @@ fn createStatusAppSource(b: *std.Build) std.Build.LazyPath {
         \\}
         \\
     );
+}
+
+fn normalizeHostPath(b: *std.Build, value: []const u8) []const u8 {
+    if (value.len == 0 or std.fs.path.isAbsolute(value)) return value;
+    return b.pathFromRoot(value);
 }
 
 fn createTestSource(b: *std.Build) std.Build.LazyPath {

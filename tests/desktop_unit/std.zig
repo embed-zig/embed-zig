@@ -21,6 +21,7 @@ test "desktop/unit/std" {
 
     t.run("desktop/device/unit/std", desktop.device.test_runner.unit.make(std));
     t.run("desktop/http/unit/std", desktop.http.test_runner.unit.make(std));
+    t.run("desktop/system/unit/std", desktop.system.test_runner.unit.make(gstd.runtime));
     t.run("desktop/app/unit/std", desktop.test_runner.unit.make(std));
     if (!t.wait()) return error.TestFailed;
 }

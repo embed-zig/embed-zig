@@ -625,10 +625,21 @@ pub fn make(comptime Launcher: type) type {
                     index += 1;
                 }
 
+                const app = try self.makeAppStateJson(allocator);
+                errdefer if (app) |value| allocator.free(value);
+
                 return .{
                     .gears = gears,
                     .ts_ms = ts_ms,
+                    .app = app,
                 };
+            }
+
+            fn makeAppStateJson(self: *Self, allocator: gstd.runtime.std.mem.Allocator) !?[]const u8 {
+                if (comptime @hasDecl(AppHost, "desktopStateJson")) {
+                    return try self.launcher.app().desktopStateJson(allocator);
+                }
+                return null;
             }
 
             fn deinitStateResponse(allocator: gstd.runtime.std.mem.Allocator, response: *Models.StateResponse) void {
@@ -641,10 +652,26 @@ pub fn make(comptime Launcher: type) type {
                     }
                 }
                 allocator.free(response.gears);
+                if (response.app) |app| allocator.free(app);
                 response.* = undefined;
             }
 
             fn emit(self: *Self, gear_label: []const u8, event_name: []const u8, ts_ms: i64, metadata: ?[]const u8, touch_point: ?TouchPointQuery, button_id: ?u32) EmitError!Models.EmitAck {
+                if (comptime @hasDecl(AppHost, "desktopEmit")) {
+                    if (gstd.runtime.std.mem.eql(u8, gear_label, "app")) {
+                        const accepted = self.launcher.app().desktopEmit(event_name, metadata) catch return error.InvalidEvent;
+                        if (!accepted) return error.InvalidEvent;
+                        self.bumpRevision();
+                        return .{
+                            .accepted = true,
+                            .event = event_name,
+                            .gear_label = gear_label,
+                            .metadata = metadata,
+                            .ts = ts_ms,
+                        };
+                    }
+                }
+
                 self.mutex.lock();
                 defer self.mutex.unlock();
                 return self.emitLocked(gear_label, event_name, ts_ms, metadata, touch_point, button_id);
@@ -1010,7 +1037,7 @@ pub fn make(comptime Launcher: type) type {
                 if (@hasField(ZuxApp.InitConfig, "poller_config")) {
                     init_config.poller_config = .{};
                 }
-                if (@hasField(ZuxApp.InitConfig, "initial_state")) {
+                if (@hasField(ZuxApp.InitConfig, "initial_state") and !@hasDecl(AppHost, "initialStateProvidedByLauncher")) {
                     init_config.initial_state = defaultInitialState(@FieldType(ZuxApp.InitConfig, "initial_state"));
                 }
                 if (comptime has_bt_host) {
@@ -1456,9 +1483,42 @@ fn makeErrorResponse(code: []const u8, message: []const u8) api.Models.ErrorResp
 fn defaultInitialState(comptime InitialState: type) InitialState {
     var initial_state: InitialState = undefined;
     inline for (@typeInfo(InitialState).@"struct".fields) |field| {
-        @field(initial_state, field.name) = .{};
+        @field(initial_state, field.name) = defaultValue(field.type);
     }
     return initial_state;
+}
+
+fn defaultValue(comptime T: type) T {
+    return switch (@typeInfo(T)) {
+        .@"struct" => |info| blk: {
+            var value: T = undefined;
+            inline for (info.fields) |field| {
+                @field(value, field.name) = if (field.default_value_ptr) |ptr|
+                    defaultFieldValue(field.type, ptr)
+                else
+                    defaultValue(field.type);
+            }
+            break :blk value;
+        },
+        .@"enum" => |info| @enumFromInt(info.fields[0].value),
+        .bool => false,
+        .int => 0,
+        .float => 0,
+        .optional => null,
+        .array => |info| blk: {
+            var value: T = undefined;
+            for (&value) |*item| {
+                item.* = defaultValue(info.child);
+            }
+            break :blk value;
+        },
+        else => @compileError("desktop ZuxServer cannot synthesize default value for " ++ @typeName(T)),
+    };
+}
+
+fn defaultFieldValue(comptime T: type, ptr: *const anyopaque) T {
+    const typed: *const T = @ptrCast(@alignCast(ptr));
+    return typed.*;
 }
 
 fn nowMs() i64 {

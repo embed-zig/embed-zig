@@ -19,6 +19,7 @@ test "desktop/unit/gstd" {
 
     t.run("desktop/device/unit/gstd", desktop.device.test_runner.unit.make(gstd.runtime.std));
     t.run("desktop/http/unit/gstd", desktop.http.test_runner.unit.make(gstd.runtime.std));
+    t.run("desktop/system/unit/gstd", desktop.system.test_runner.unit.make(gstd.runtime));
     t.run("desktop/app/unit/gstd", desktop.test_runner.unit.make(gstd.runtime.std));
     if (!t.wait()) return error.TestFailed;
 }

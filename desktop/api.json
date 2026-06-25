@@ -328,6 +328,10 @@
             "items": {
               "$ref": "#/components/schemas/GearState"
             }
+          },
+          "app": {
+            "type": "string",
+            "description": "Optional app-owned JSON projection for desktop/API tests. The schema is owned by the launched app."
           }
         }
       },

@@ -15,13 +15,23 @@ comptime {
     _ = lvgl_osal.make(gstd.runtime, std.heap.page_allocator);
 }
 
+const DesktopPlatformCtx = desktop.PlatformCtxWith(.{
+    .bundle_id = config.bundle_id,
+    .home_dir = config.home_dir,
+    .storage_root = config.storage_root,
+});
+
 const PlatformCtx = struct {
-    pub const AudioSystem = desktop.PlatformCtx.AudioSystem;
-    pub const fs = desktop.PlatformCtx.fs;
+    pub const AudioSystem = DesktopPlatformCtx.AudioSystem;
+    pub const fs = DesktopPlatformCtx.fs;
+
+    pub fn preferencesProvider(allocator: gstd.runtime.std.mem.Allocator) !desktop.system.preferences.Provider {
+        return DesktopPlatformCtx.preferencesProvider(allocator);
+    }
 };
 
 pub fn main() void {
-    if (comptime builtin.target.os.tag == .macos) {
+    if (comptime builtin.target.os.tag == .macos and config.run_tray) {
         runMacosApp();
         return;
     }
