@@ -99,7 +99,6 @@ fn runSmoke(comptime platform_ctx: type, comptime platform_grt: type) !void {
     const start = platform_grt.time.instant.now();
 
     platform_grt.time.sleep(0);
-    platform_grt.time.sleepNanos(0);
     platform_grt.time.sleepMillis(0);
     platform_grt.time.sleep(5 * glib.time.duration.MilliSecond);
 

@@ -84,7 +84,10 @@ capabilities.
 | Module Path | Task Name | Description |
 | --- | --- | --- |
 | `glib.context` | `context/deadline` | Deadline timer worker for cancelable contexts. |
+| `glib.net.Resolver` | `net/resolver/attempt_watch` | Watches one DNS lookup attempt race. |
 | `glib.net.Resolver` | `net/resolver/server` | DNS lookup worker for one resolver server. |
+| `glib.net.Resolver` | `net/resolver/cleanup` | Detached DNS lookup cleanup worker. |
+| `glib.net.cmux.Session` | `net/cmux/session` | CMUX session worker. |
 | `glib.net.http.Server` | `net/http/server/conn` | HTTP server connection worker. |
 | `glib.net.http.Transport` | `net/http/request_body` | HTTP request-body writer worker. |
 | `glib.net.ntp.Client` | `net/ntp/race` | NTP server race worker. |
