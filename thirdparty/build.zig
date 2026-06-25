@@ -3,6 +3,7 @@ const std = @import("std");
 const pkg_core_bluetooth = @import("build/pkg/core_bluetooth.zig");
 const pkg_core_wlan = @import("build/pkg/core_wlan.zig");
 const pkg_lvgl = @import("build/pkg/lvgl.zig");
+const pkg_lvgl_osal = @import("build/pkg/lvgl_osal.zig");
 const pkg_kcp = @import("build/pkg/kcp.zig");
 const pkg_mbedtls = @import("build/pkg/mbedtls.zig");
 const pkg_opus = @import("build/pkg/opus.zig");
@@ -11,12 +12,14 @@ const pkg_speexdsp = @import("build/pkg/speexdsp.zig");
 const pkg_stb_truetype = @import("build/pkg/stb_truetype.zig");
 
 pub const lvgl = pkg_lvgl;
+pub const lvgl_osal = pkg_lvgl_osal;
 
 const Packages = struct {
     pub const core_bluetooth = pkg_core_bluetooth;
     pub const core_wlan = pkg_core_wlan;
     pub const kcp = pkg_kcp;
     pub const lvgl = pkg_lvgl;
+    pub const lvgl_osal = pkg_lvgl_osal;
     pub const mbedtls = pkg_mbedtls;
     pub const opus = pkg_opus;
     pub const portaudio = pkg_portaudio;

@@ -1,20 +1,11 @@
 const std = @import("std");
-const buildtools = @import("buildtools");
+const common = @import("lvgl_common.zig");
 
 var library: ?*std.Build.Step.Compile = null;
-var osal_library: ?*std.Build.Step.Compile = null;
-var osal_module: ?*std.Build.Module = null;
-var resolved_target: ?std.Build.ResolvedTarget = null;
-var resolved_optimize: ?std.builtin.OptimizeMode = null;
-var has_custom_config_header: bool = false;
-var c_sysroot: ?[]const u8 = null;
-var c_short_enums: bool = false;
-var upstream_archive: ?buildtools.Archive = null;
 
 /// Pinned upstream tree, fetched over HTTPS from GitHub codeload.
-pub const upstream_version_key = "85aa60d18b3d5e5588d7b247abf90198f07c8a63";
-pub const upstream_tarball_url = "https://codeload.github.com/lvgl/lvgl/tar.gz/" ++ upstream_version_key;
-const bundled_custom_include = "lv_os_custom.h";
+pub const upstream_version_key = common.upstream_version_key;
+pub const upstream_tarball_url = common.upstream_tarball_url;
 
 pub const c_sources: []const []const u8 = &.{
     "src/core/lv_group.c",
@@ -487,31 +478,9 @@ pub fn create(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 ) void {
-    resolved_target = target;
-    resolved_optimize = optimize;
-
-    const repo = getUpstreamArchive(b);
-    const custom_config_header = b.option(
-        std.Build.LazyPath,
-        "lvgl_config_header",
-        "Optional path to a complete LVGL config header; otherwise use pkg/lvgl/config.default.h",
-    );
-    const selected_c_sysroot = b.option(
-        []const u8,
-        "lvgl_c_sysroot",
-        "Optional C sysroot used when compiling LVGL for freestanding embedded targets",
-    ) orelse "";
-    c_short_enums = b.option(
-        bool,
-        "lvgl_c_short_enums",
-        "Compile LVGL C sources with -fshort-enums to match embedded GCC ABI settings",
-    ) orelse false;
-    c_sysroot = if (selected_c_sysroot.len == 0) null else b.dupe(selected_c_sysroot);
-    has_custom_config_header = custom_config_header != null;
-    const config_header = createConfigHeader(
-        b,
-        custom_config_header orelse b.path("pkg/lvgl/config.default.h"),
-    );
+    const repo = common.getUpstreamArchive(b);
+    const config_header = common.getConfigHeader(b);
+    repo.dependOn(&config_header.step);
 
     const lib = b.addLibrary(.{
         .linkage = .static,
@@ -523,11 +492,8 @@ pub fn create(
             .sanitize_c = .off,
         }),
     });
-    addCommonIncludes(b, lib.root_module, repo, config_header);
-    const c_flags: []const []const u8 = if (c_short_enums)
-        &.{ "-g0", "-fshort-enums" }
-    else
-        &.{"-g0"};
+    common.addCommonIncludes(b, lib.root_module, repo, config_header);
+    const c_flags = common.cFlags(b);
     lib.root_module.addCSourceFiles(.{
         .root = repo.root(),
         .files = c_sources,
@@ -543,21 +509,10 @@ pub fn create(
         .optimize = optimize,
         .link_libc = true,
     });
-    addCommonIncludes(b, mod, repo, config_header);
+    common.addCommonIncludes(b, mod, repo, config_header);
     b.modules.put("lvgl", mod) catch @panic("OOM");
 
-    const osal_mod = b.createModule(.{
-        .root_source_file = b.path("pkg/lvgl_osal.zig"),
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
-    });
-    addCommonIncludes(b, osal_mod, repo, config_header);
-    osal_mod.addImport("glib", b.dependency("glib", .{ .target = target, .optimize = optimize }).module("glib"));
-    b.modules.put("lvgl_osal", osal_mod) catch @panic("OOM");
-
     library = lib;
-    osal_module = osal_mod;
 }
 
 pub fn link(
@@ -570,77 +525,4 @@ pub fn link(
     mod.addImport("glib", b.dependency("glib", .{ .target = target, .optimize = optimize }).module("glib"));
     mod.addImport("embed", b.dependency("embed", .{ .target = target, .optimize = optimize }).module("embed"));
     mod.addObjectFile(lib.getEmittedBin());
-}
-
-fn getUpstreamArchive(b: *std.Build) buildtools.Archive {
-    if (upstream_archive) |a| return a;
-    const a = buildtools.addFetchArchive(b, .{
-        .url = upstream_tarball_url,
-        .version_key = upstream_version_key,
-        .cache_namespace = "lvgl-upstream",
-        .step_name = "lvgl.fetch-archive.ensure",
-    });
-    upstream_archive = a;
-    return a;
-}
-
-fn addCommonIncludes(
-    b: *std.Build,
-    mod: *std.Build.Module,
-    repo: buildtools.Archive,
-    config_header: *std.Build.Step.ConfigHeader,
-) void {
-    mod.addConfigHeader(config_header);
-    mod.addIncludePath(repo.includePath("."));
-    mod.addIncludePath(b.path("pkg/lvgl/include"));
-    if (b.sysroot) |sysroot| {
-        mod.addSystemIncludePath(.{
-            .cwd_relative = b.pathJoin(&.{ sysroot, "include" }),
-        });
-    }
-    if (c_sysroot) |sysroot| {
-        mod.addSystemIncludePath(.{
-            .cwd_relative = b.pathJoin(&.{ sysroot, "include" }),
-        });
-    }
-}
-
-fn createConfigHeader(
-    b: *std.Build,
-    selected_header: std.Build.LazyPath,
-) *std.Build.Step.ConfigHeader {
-    const write_files = b.addWriteFiles();
-    const template = write_files.add("lvgl_config_header.template",
-        \\#ifndef EMBED_ZIG_LV_CONF_WRAPPER_H
-        \\#define EMBED_ZIG_LV_CONF_WRAPPER_H
-        \\
-        \\/* embed-zig fixes LVGL to the custom OS ABI used by lvgl_osal. */
-        \\#define LV_USE_OS LV_OS_CUSTOM
-        \\#define LV_OS_CUSTOM_INCLUDE "@LVGL_OS_CUSTOM_INCLUDE@"
-        \\
-        \\#include "@LVGL_SELECTED_CONFIG_HEADER@"
-        \\
-        \\#undef LV_USE_OS
-        \\#define LV_USE_OS LV_OS_CUSTOM
-        \\#undef LV_OS_CUSTOM_INCLUDE
-        \\#define LV_OS_CUSTOM_INCLUDE "@LVGL_OS_CUSTOM_INCLUDE@"
-        \\#endif
-        \\
-    );
-    return b.addConfigHeader(.{
-        .style = .{ .autoconf_at = template },
-        .include_path = "lv_conf.h",
-    }, .{
-        .LVGL_SELECTED_CONFIG_HEADER = normalizeIncludePath(b, selected_header),
-        .LVGL_OS_CUSTOM_INCLUDE = bundled_custom_include,
-    });
-}
-
-fn normalizeIncludePath(b: *std.Build, header: std.Build.LazyPath) []const u8 {
-    const raw = header.getPath(b);
-    const resolved = if (std.fs.path.isAbsolute(raw))
-        raw
-    else
-        b.pathFromRoot(raw);
-    return std.mem.replaceOwned(u8, b.allocator, resolved, "\\", "/") catch @panic("OOM");
 }
