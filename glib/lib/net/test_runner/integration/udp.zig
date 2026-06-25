@@ -17,6 +17,7 @@ const ipv6_listen_packet = @import("udp/ipv6_listen_packet.zig");
 const bound_port_rejects_ipv6_sockets = @import("udp/bound_port_rejects_ipv6_sockets.zig");
 const bound_port6_rejects_ipv4_sockets = @import("udp/bound_port6_rejects_ipv4_sockets.zig");
 const read_timeout = @import("udp/read_timeout.zig");
+const expired_deadline_prevents_ready_io = @import("udp/expired_deadline_prevents_ready_io.zig");
 const read_timeout_set_while_blocked_maps_timed_out = @import("udp/read_timeout_set_while_blocked_maps_timed_out.zig");
 const read_timeout_clear_while_blocked_allows_read_to_continue = @import("udp/read_timeout_clear_while_blocked_allows_read_to_continue.zig");
 const write_timeout_set_while_blocked_maps_timed_out = @import("udp/write_timeout_set_while_blocked_maps_timed_out.zig");
@@ -57,6 +58,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
             t.run("bound_port_rejects_ipv6_sockets", bound_port_rejects_ipv6_sockets.make(std, net));
             t.run("bound_port6_rejects_ipv4_sockets", bound_port6_rejects_ipv4_sockets.make(std, net));
             t.run("read_timeout", read_timeout.make(std, net));
+            t.run("expired_deadline_prevents_ready_io", expired_deadline_prevents_ready_io.make(std, net));
             t.run("read_timeout_set_while_blocked_maps_timed_out", read_timeout_set_while_blocked_maps_timed_out.make(std, net));
             t.run("read_timeout_clear_while_blocked_allows_read_to_continue", read_timeout_clear_while_blocked_allows_read_to_continue.make(std, net));
             t.run("write_timeout_set_while_blocked_maps_timed_out", write_timeout_set_while_blocked_maps_timed_out.make(std, net));

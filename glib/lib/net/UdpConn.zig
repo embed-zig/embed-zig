@@ -322,19 +322,33 @@ pub fn UdpConn(comptime std: type, comptime net: type) type {
 
         pub fn initFromSocket(allocator: Allocator, socket: UdpSocket) Allocator.Error!Conn {
             const self = try allocator.create(Self);
-            self.* = .{
-                .socket = socket,
-                .allocator = allocator,
-            };
+            self.socket = socket;
+            self.allocator = allocator;
+            self.closed = 0;
+            self.read_mu = .{};
+            self.write_mu = .{};
+            self.read_waiting = false;
+            self.write_waiting = false;
+            self.read_deadline = null;
+            self.write_deadline = null;
+            self.read_state_gen = 0;
+            self.write_state_gen = 0;
             return Conn.init(self);
         }
 
         pub fn initPacketFromSocket(allocator: Allocator, socket: UdpSocket) Allocator.Error!PacketConn {
             const self = try allocator.create(Self);
-            self.* = .{
-                .socket = socket,
-                .allocator = allocator,
-            };
+            self.socket = socket;
+            self.allocator = allocator;
+            self.closed = 0;
+            self.read_mu = .{};
+            self.write_mu = .{};
+            self.read_waiting = false;
+            self.write_waiting = false;
+            self.read_deadline = null;
+            self.write_deadline = null;
+            self.read_state_gen = 0;
+            self.write_state_gen = 0;
             return PacketConn.init(self);
         }
 
