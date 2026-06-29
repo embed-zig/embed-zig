@@ -54,21 +54,21 @@ pub const max_name_len: usize = 15;
 pub const default_stack_size: usize = 8192;
 
 pub fn spawn(config: SpawnConfig, routine: glib.task.Routine) SpawnError!Handle {
-    const Packet = PacketType();
-    const raw = heap_binding.espz_heap_caps_malloc(
-        @sizeOf(Packet),
+    const raw = heap_binding.espz_heap_caps_aligned_alloc(
+        @alignOf(TaskCommand),
+        @sizeOf(TaskCommand),
         defaultInternalCaps(),
     ) orelse return error.OutOfMemory;
-    const packet: *Packet = @ptrCast(@alignCast(raw));
+    const command: *TaskCommand = @ptrCast(@alignCast(raw));
     errdefer heap_binding.espz_heap_caps_free(raw);
 
     const done = binding.espz_semaphore_create_binary() orelse return error.SystemResources;
     errdefer binding.espz_semaphore_delete(done);
 
-    packet.* = .{
+    command.* = .{
         .shared = .{
             .done = done,
-            .destroy_fn = Packet.destroy,
+            .destroy_fn = TaskCommand.destroy,
         },
         .routine = routine,
     };
@@ -80,16 +80,16 @@ pub fn spawn(config: SpawnConfig, routine: glib.task.Routine) SpawnError!Handle 
         null;
     errdefer if (static_task) |allocation| allocation.free();
 
-    packet.shared.static_task = static_task;
+    command.shared.static_task = static_task;
 
     var handle: RawHandle = null;
     const core_id = if (config.core_id) |cpu| cpu else no_affinity;
     const created = if (static_task) |allocation|
         binding.espz_freertos_thread_spawn_static(
-            Packet.entry,
+            TaskCommand.entry,
             config.name,
             stack_size,
-            packet,
+            command,
             config.priority,
             allocation.stack.ptr,
             allocation.task_buffer.ptr,
@@ -98,10 +98,10 @@ pub fn spawn(config: SpawnConfig, routine: glib.task.Routine) SpawnError!Handle 
         )
     else
         binding.espz_freertos_thread_spawn_with_caps(
-            Packet.entry,
+            TaskCommand.entry,
             config.name,
             stack_size,
-            packet,
+            command,
             config.priority,
             &handle,
             core_id,
@@ -109,9 +109,9 @@ pub fn spawn(config: SpawnConfig, routine: glib.task.Routine) SpawnError!Handle 
         );
     if (created != pd_true) return error.SystemResources;
 
-    packet.shared.handle = handle;
-    packet.shared.uses_caps_delete = static_task == null;
-    return .{ .shared = &packet.shared };
+    command.shared.handle = handle;
+    command.shared.uses_caps_delete = static_task == null;
+    return .{ .shared = &command.shared };
 }
 
 pub fn join(self: Handle) void {
@@ -157,74 +157,70 @@ fn destroyShared(shared: *Shared) void {
     shared.destroy_fn(shared);
 }
 
-fn PacketType() type {
-    return struct {
-        shared: Shared,
-        routine: glib.task.Routine,
+const TaskCommand = struct {
+    shared: Shared,
+    routine: glib.task.Routine,
 
-        const Packet = @This();
+    fn entry(ctx: ?*anyopaque) callconv(.c) void {
+        const command: *TaskCommand = @ptrCast(@alignCast(ctx.?));
+        const is_static_task = command.shared.static_task != null;
+        const uses_caps_delete = command.shared.uses_caps_delete;
 
-        fn entry(ctx: ?*anyopaque) callconv(.c) void {
-            const packet: *Packet = @ptrCast(@alignCast(ctx.?));
-            const is_static_task = packet.shared.static_task != null;
-            const uses_caps_delete = packet.shared.uses_caps_delete;
+        command.routine.run();
+        const should_destroy = command.finish();
 
-            packet.routine.run();
-            const should_destroy = packet.finish();
-
-            if (is_static_task) {
-                binding.espz_freertos_task_suspend(null);
-                unreachable;
-            }
-
-            if (should_destroy) {
-                destroyShared(&packet.shared);
-            }
-
-            if (uses_caps_delete) {
-                binding.espz_freertos_task_delete_with_caps(null);
-            } else {
-                binding.espz_freertos_task_delete(null);
-            }
+        if (is_static_task) {
+            binding.espz_freertos_task_suspend(null);
             unreachable;
         }
 
-        fn finish(packet: *Packet) bool {
-            while (true) {
-                const state = packet.shared.state.load(.acquire);
-                switch (state) {
-                    running_joinable => {
-                        if (packet.shared.state.cmpxchgWeak(running_joinable, finished_pending_join, .acq_rel, .acquire) == null) {
-                            _ = binding.espz_semaphore_give(packet.shared.done);
-                            return false;
-                        }
-                    },
-                    running_detached => {
-                        if (packet.shared.state.cmpxchgWeak(running_detached, finished_detached, .acq_rel, .acquire) == null) {
-                            return !isStaticTask(packet);
-                        }
-                    },
-                    finished_detached => return false,
-                    finished_pending_join => return false,
-                    else => return false,
-                }
-            }
+        if (should_destroy) {
+            destroyShared(&command.shared);
         }
 
-        fn isStaticTask(packet: *Packet) bool {
-            return packet.shared.static_task != null;
+        if (uses_caps_delete) {
+            binding.espz_freertos_task_delete_with_caps(null);
+        } else {
+            binding.espz_freertos_task_delete(null);
         }
+        unreachable;
+    }
 
-        fn destroy(shared: *Shared) void {
-            const packet: *Packet = @alignCast(@fieldParentPtr("shared", shared));
-            binding.espz_semaphore_delete(packet.shared.done);
-            if (packet.shared.static_task) |allocation| {
-                allocation.free();
+    fn finish(command: *TaskCommand) bool {
+        while (true) {
+            const state = command.shared.state.load(.acquire);
+            switch (state) {
+                running_joinable => {
+                    if (command.shared.state.cmpxchgWeak(running_joinable, finished_pending_join, .acq_rel, .acquire) == null) {
+                        _ = binding.espz_semaphore_give(command.shared.done);
+                        return false;
+                    }
+                },
+                running_detached => {
+                    if (command.shared.state.cmpxchgWeak(running_detached, finished_detached, .acq_rel, .acquire) == null) {
+                        return !isStaticTask(command);
+                    }
+                },
+                finished_detached => return false,
+                finished_pending_join => return false,
+                else => return false,
             }
-            heap_binding.espz_heap_caps_free(packet);
         }
-    };
-}
+    }
+
+    fn isStaticTask(command: *TaskCommand) bool {
+        return command.shared.static_task != null;
+    }
+
+    fn destroy(shared: *Shared) void {
+        const command: *TaskCommand = @alignCast(@fieldParentPtr("shared", shared));
+        binding.espz_semaphore_delete(command.shared.done);
+        if (command.shared.static_task) |allocation| {
+            allocation.free();
+        }
+        heap_binding.espz_heap_caps_free(command);
+    }
+};
 
 fn allocateStaticTask(
     allocator: glib.std.mem.Allocator,
