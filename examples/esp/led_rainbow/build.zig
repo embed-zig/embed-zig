@@ -68,10 +68,14 @@ fn createBoardBuildConfigModule(
     esp_dep: *std.Build.Dependency,
     esp_module: *std.Build.Module,
 ) *std.Build.Module {
+    const esp32s3_boards_common = b.createModule(.{
+        .root_source_file = esp_dep.path("lib/boards/common/esp32s3.zig"),
+    });
     return b.createModule(.{
         .root_source_file = esp_dep.path(board_root ++ "/build_config.zig"),
         .imports = &.{
             .{ .name = "esp", .module = esp_module },
+            .{ .name = "esp32s3_boards_common", .module = esp32s3_boards_common },
         },
     });
 }

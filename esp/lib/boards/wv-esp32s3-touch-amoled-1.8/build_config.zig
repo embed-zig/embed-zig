@@ -1,4 +1,5 @@
 const esp_idf = @import("esp").idf;
+const esp32s3_common = @import("esp32s3_boards_common");
 
 pub const chip = "esp32s3";
 
@@ -32,46 +33,7 @@ pub const partition_table = esp_idf.PartitionTable.make(.{
     },
 });
 
-pub const task_policy = .{
-    .zux = .{
-        .priority = 5,
-    },
-    .audio = .{
-        .priority = 10,
-        .core_id = 1,
-    },
-    .kcp = .{
-        .priority = 6,
-        .core_id = 1,
-    },
-    .netperf = .{
-        .priority = 5,
-        .core_id = 1,
-    },
-    .esp = .{
-        .priority = 7,
-        .core_id = 1,
-    },
-    .lvgl = .{
-        .priority = 5,
-        .core_id = 1,
-    },
-    .gizclaw = .{
-        .priority = 5,
-        .core_id = 1,
-    },
-    .giznet = .{
-        .priority = 5,
-        .core_id = 1,
-    },
-    .sync = .{
-        .priority = 5,
-        .core_id = 1,
-    },
-    .testing = .{
-        .priority = 5,
-    },
-};
+pub const task_policy = esp32s3_common.task_policy;
 
 pub const sdk_config = esp_idf.SdkConfig.make(.{
     .ESPTOOLPY_FLASHSIZE = "4MB",
@@ -115,12 +77,13 @@ pub const sdk_config = esp_idf.SdkConfig.make(.{
     .ESP_WIFI_DYNAMIC_RX_BUFFER_NUM = 64,
     .ESP_WIFI_STATIC_TX_BUFFER = true,
     .ESP_WIFI_DYNAMIC_TX_BUFFER = false,
-    .ESP_WIFI_STATIC_TX_BUFFER_NUM = 64,
-    .ESP_WIFI_CACHE_TX_BUFFER_NUM = 128,
+    .ESP_WIFI_STATIC_TX_BUFFER_NUM = esp32s3_common.wifi.static_tx_buffer_num,
+    .ESP_WIFI_CACHE_TX_BUFFER_NUM = esp32s3_common.wifi.cache_tx_buffer_num,
     .ESP_WIFI_AMPDU_TX_ENABLED = true,
     .ESP_WIFI_TX_BA_WIN = 32,
     .ESP_WIFI_AMPDU_RX_ENABLED = true,
     .ESP_WIFI_RX_BA_WIN = 10,
+    .LWIP_TCPIP_TASK_AFFINITY_NO_AFFINITY = esp32s3_common.lwip.tcpip_task_affinity_no_affinity,
     .LWIP_TCP_SND_BUF_DEFAULT = 32 * 1440,
     .LWIP_TCP_WND_DEFAULT = 32 * 1440,
     .LWIP_TCP_RECVMBOX_SIZE = 48,
