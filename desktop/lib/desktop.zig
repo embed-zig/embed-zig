@@ -20,26 +20,59 @@ pub const PlatformCtx = PlatformCtxWith(.{});
 
 pub fn PlatformCtxWith(comptime config: PlatformConfig) type {
     return struct {
+        const Self = @This();
+
         pub const AudioSystem = device.audio_system.AudioSystem;
         pub const Net = net;
 
-        pub fn preferencesProvider(allocator: anytype) !system.preferences.Provider {
-            return system.preferences.Provider.init(.{
-                .allocator = allocator,
-            });
+        var preferences_provider: system.preferences.Provider = .{};
+        var preferences_provider_ready = false;
+        var preferences_provider_mu: gstd.runtime.sync.Mutex = .{};
+
+        pub fn preferencesProvider(config_arg: anytype) !system.Preferences.Provider {
+            preferences_provider_mu.lock();
+            defer preferences_provider_mu.unlock();
+            try Self.fs.mountStorage();
+            if (!preferences_provider_ready) {
+                preferences_provider = system.preferences.Provider.init(.{
+                    .allocator = preferenceAllocator(config_arg),
+                });
+                preferences_provider_ready = true;
+            }
+            return preferences_provider.handle();
+        }
+
+        fn preferenceAllocator(config_arg: anytype) ?std.mem.Allocator {
+            const ConfigArg = @TypeOf(config_arg);
+            if (comptime ConfigArg == std.mem.Allocator) return config_arg;
+            switch (@typeInfo(ConfigArg)) {
+                .@"struct" => {
+                    if (comptime @hasField(ConfigArg, "allocator")) {
+                        const allocator = config_arg.allocator;
+                        const Allocator = @TypeOf(allocator);
+                        if (comptime Allocator == std.mem.Allocator) return allocator;
+                        if (comptime Allocator == ?std.mem.Allocator) return allocator;
+                    }
+                },
+                else => {},
+            }
+            return null;
         }
 
         pub const fs = struct {
             pub const storage_path = "/storage";
             var host_storage_root: ?[]const u8 = null;
+            var storage_mounted = false;
 
             pub fn hasStoragePartition() bool {
                 return true;
             }
 
             pub fn mountStorage() !void {
+                if (storage_mounted) return;
                 const root = try ensureHostStorageRoot();
                 gstd.fs.setHostMount(storage_path, root);
+                storage_mounted = true;
                 std.log.info("desktop storage mounted {s} -> {s}", .{ storage_path, root });
             }
 

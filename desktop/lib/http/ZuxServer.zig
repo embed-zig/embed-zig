@@ -726,8 +726,10 @@ pub fn make(comptime Launcher: type) type {
                     const label_name = comptime labelText(periph.label);
                     if (gstd.runtime.std.mem.eql(u8, gear_label, label_name)) {
                         if (gstd.runtime.std.mem.eql(u8, event_name, "press")) {
+                            self.launcher.zux().press_single_button(@field(ZuxApp.PeriphLabel, label_name)) catch return error.InvalidEvent;
                             self.buttons[i].press();
                         } else if (gstd.runtime.std.mem.eql(u8, event_name, "release")) {
+                            self.launcher.zux().release_single_button(@field(ZuxApp.PeriphLabel, label_name)) catch return error.InvalidEvent;
                             self.buttons[i].release();
                         } else {
                             return error.InvalidEvent;
@@ -752,8 +754,10 @@ pub fn make(comptime Launcher: type) type {
                         if (gstd.runtime.std.mem.eql(u8, event_name, "press")) {
                             const id = button_id orelse return error.InvalidEvent;
                             if (id >= periph.button_count) return error.InvalidEvent;
+                            self.launcher.zux().press_grouped_button(@field(ZuxApp.PeriphLabel, label_name), id) catch return error.InvalidEvent;
                             self.grouped_buttons[i].press(id);
                         } else if (gstd.runtime.std.mem.eql(u8, event_name, "release")) {
+                            self.launcher.zux().release_grouped_button(@field(ZuxApp.PeriphLabel, label_name)) catch return error.InvalidEvent;
                             self.grouped_buttons[i].release();
                         } else {
                             return error.InvalidEvent;

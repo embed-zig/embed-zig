@@ -26,7 +26,7 @@ const PlatformCtx = struct {
     pub const Net = DesktopPlatformCtx.Net;
     pub const fs = DesktopPlatformCtx.fs;
 
-    pub fn preferencesProvider(allocator: gstd.runtime.std.mem.Allocator) !desktop.system.preferences.Provider {
+    pub fn preferencesProvider(allocator: gstd.runtime.std.mem.Allocator) !desktop.system.Preferences.Provider {
         return DesktopPlatformCtx.preferencesProvider(allocator);
     }
 };
