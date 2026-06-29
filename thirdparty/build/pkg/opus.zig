@@ -2,8 +2,6 @@ const std = @import("std");
 const buildtools = @import("buildtools");
 
 var library: ?*std.Build.Step.Compile = null;
-var osal_module: ?*std.Build.Module = null;
-
 /// Upstream tree from GitHub codeload; `ref` may be a release tag, branch, or commit SHA.
 const upstream_tarball_url = "https://codeload.github.com/xiph/opus/tar.gz/v1.6.1";
 const upstream_version_key = "v1.6.1";
@@ -162,14 +160,7 @@ pub fn create(
         .cache_namespace = "opus-upstream",
         .step_name = "opus.fetch-archive.ensure",
     });
-    const config_header = createConfigHeader(
-        b,
-        b.option(
-            std.Build.LazyPath,
-            "opus_config_header",
-            "Optional path to a complete Opus config header; otherwise includes pkg/opus/config.default.h",
-        ) orelse b.path("pkg/opus/config.default.h"),
-    );
+    const config_header = createConfigHeader(b);
     const lib = b.addLibrary(.{
         .linkage = .static,
         .name = "opus",
@@ -198,22 +189,7 @@ pub fn create(
     const mod = createOpusModule(b, target, optimize, config_header, upstream);
     b.modules.put("opus", mod) catch @panic("OOM");
 
-    const glib_dep = b.dependency("glib", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    const osal_mod = b.createModule(.{
-        .root_source_file = b.path("pkg/opus_osal.zig"),
-        .target = target,
-        .optimize = optimize,
-        .imports = &.{
-            .{ .name = "glib", .module = glib_dep.module("glib") },
-        },
-    });
-    b.modules.put("opus_osal", osal_mod) catch @panic("OOM");
-
     library = lib;
-    osal_module = osal_mod;
 }
 
 pub fn link(
@@ -229,7 +205,6 @@ pub fn link(
     const lib = library orelse @panic("opus library missing");
     mod.addImport("glib", glib_dep.module("glib"));
     mod.addObjectFile(lib.getEmittedBin());
-    _ = osal_module orelse @panic("opus_osal module missing");
 }
 
 fn createOpusModule(
@@ -260,12 +235,9 @@ fn addSysrootInclude(b: *std.Build, mod: *std.Build.Module) void {
     }
 }
 
-fn createConfigHeader(
-    b: *std.Build,
-    selected_header: std.Build.LazyPath,
-) *std.Build.Step.ConfigHeader {
+fn createConfigHeader(b: *std.Build) *std.Build.Step.ConfigHeader {
     const write_files = b.addWriteFiles();
-    const template = write_files.add("opus_config_header.template",
+    const template = write_files.add("opus_config.template",
         \\#ifndef EMBED_ZIG_OPUS_CONFIG_H
         \\#define EMBED_ZIG_OPUS_CONFIG_H
         \\#include "@OPUS_SELECTED_CONFIG_HEADER@"
@@ -276,7 +248,7 @@ fn createConfigHeader(
         .style = .{ .autoconf_at = template },
         .include_path = "config.h",
     }, .{
-        .OPUS_SELECTED_CONFIG_HEADER = normalizeIncludePath(b, selected_header),
+        .OPUS_SELECTED_CONFIG_HEADER = normalizeIncludePath(b, b.path("pkg/opus/config.default.h")),
     });
 }
 

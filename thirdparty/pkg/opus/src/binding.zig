@@ -36,18 +36,18 @@ pub const OPUS_SET_BANDWIDTH_REQUEST = c.OPUS_SET_BANDWIDTH_REQUEST;
 pub const OPUS_SET_VBR_REQUEST = c.OPUS_SET_VBR_REQUEST;
 pub const OPUS_SET_DTX_REQUEST = c.OPUS_SET_DTX_REQUEST;
 pub const OPUS_GET_SAMPLE_RATE_REQUEST = c.OPUS_GET_SAMPLE_RATE_REQUEST;
+pub const OPUS_SET_IGNORE_EXTENSIONS_REQUEST = c.OPUS_SET_IGNORE_EXTENSIONS_REQUEST;
+pub const OPUS_GET_IGNORE_EXTENSIONS_REQUEST = c.OPUS_GET_IGNORE_EXTENSIONS_REQUEST;
 pub const OPUS_RESET_STATE = c.OPUS_RESET_STATE;
 
 pub const opus_encoder_get_size = c.opus_encoder_get_size;
 pub const opus_encoder_init = c.opus_encoder_init;
 pub const opus_encode = c.opus_encode;
-pub const opus_encode_float = c.opus_encode_float;
 pub const opus_encoder_ctl = c.opus_encoder_ctl;
 
 pub const opus_decoder_get_size = c.opus_decoder_get_size;
 pub const opus_decoder_init = c.opus_decoder_init;
 pub const opus_decode = c.opus_decode;
-pub const opus_decode_float = c.opus_decode_float;
 pub const opus_decoder_ctl = c.opus_decoder_ctl;
 
 pub const opus_packet_get_nb_samples = c.opus_packet_get_nb_samples;

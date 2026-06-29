@@ -70,19 +70,6 @@ pub fn encode(self: *Self, pcm: []const i16, frame_size: u32, out: []u8) Error![
     return out[0..n];
 }
 
-pub fn encodeFloat(self: *Self, pcm: []const f32, frame_size: u32, out: []u8) Error![]const u8 {
-    try self.validatePcmLen(pcm.len, frame_size);
-    try validateOutLen(out.len);
-    const n = try opus_error.checkedPositive(binding.opus_encode_float(
-        self.handle,
-        pcm.ptr,
-        @intCast(frame_size),
-        out.ptr,
-        @intCast(out.len),
-    ));
-    return out[0..n];
-}
-
 pub fn setBitrate(self: *Self, bitrate: u32) Error!void {
     try opus_error.checkError(binding.opus_encoder_ctl(
         self.handle,

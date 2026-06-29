@@ -60,29 +60,9 @@ pub fn decode(self: *Self, data: []const u8, pcm: []i16, fec: bool) Error![]cons
     return pcm[0..try self.totalSamples(n, pcm.len)];
 }
 
-pub fn decodeFloat(self: *Self, data: []const u8, pcm: []f32, fec: bool) Error![]const f32 {
-    try validatePacketData(data);
-    const frame_size = try self.frameSizeFromPcmLen(pcm.len);
-    const n = try opus_error.checkedPositive(binding.opus_decode_float(
-        self.handle,
-        data.ptr,
-        @intCast(data.len),
-        pcm.ptr,
-        frame_size,
-        @intFromBool(fec),
-    ));
-    return pcm[0..try self.totalSamples(n, pcm.len)];
-}
-
 pub fn plc(self: *Self, pcm: []i16) Error![]const i16 {
     const frame_size = try self.frameSizeFromPcmLen(pcm.len);
     const n = try opus_error.checkedPositive(binding.opus_decode(self.handle, null, 0, pcm.ptr, frame_size, 0));
-    return pcm[0..try self.totalSamples(n, pcm.len)];
-}
-
-pub fn plcFloat(self: *Self, pcm: []f32) Error![]const f32 {
-    const frame_size = try self.frameSizeFromPcmLen(pcm.len);
-    const n = try opus_error.checkedPositive(binding.opus_decode_float(self.handle, null, 0, pcm.ptr, frame_size, 0));
     return pcm[0..try self.totalSamples(n, pcm.len)];
 }
 
@@ -90,6 +70,20 @@ pub fn getSampleRate(self: *Self) Error!u32 {
     var value: i32 = 0;
     try opus_error.checkError(binding.opus_decoder_ctl(self.handle, binding.OPUS_GET_SAMPLE_RATE_REQUEST, &value));
     return @intCast(value);
+}
+
+pub fn setIgnoreExtensions(self: *Self, enable: bool) Error!void {
+    try opus_error.checkError(binding.opus_decoder_ctl(
+        self.handle,
+        binding.OPUS_SET_IGNORE_EXTENSIONS_REQUEST,
+        @as(c_int, @intFromBool(enable)),
+    ));
+}
+
+pub fn getIgnoreExtensions(self: *Self) Error!bool {
+    var value: i32 = 0;
+    try opus_error.checkError(binding.opus_decoder_ctl(self.handle, binding.OPUS_GET_IGNORE_EXTENSIONS_REQUEST, &value));
+    return value != 0;
 }
 
 pub fn resetState(self: *Self) Error!void {
@@ -183,10 +177,8 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             const empty = [_]u8{};
             var pcm_i16: [960]i16 = undefined;
-            var pcm_f32: [960]f32 = undefined;
 
             try grt.std.testing.expectError(Error.InvalidPacket, decoder.decode(empty[0..], pcm_i16[0..], false));
-            try grt.std.testing.expectError(Error.InvalidPacket, decoder.decodeFloat(empty[0..], pcm_f32[0..], false));
         }
 
         fn rejectsNonEmptyInvalidPacketInput() !void {
@@ -195,7 +187,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             const invalid = [_]u8{ 0xff, 0xff };
             var pcm_i16: [960]i16 = undefined;
-            var pcm_f32: [960]f32 = undefined;
 
             if (decoder.decode(invalid[0..], pcm_i16[0..], false)) |_| {
                 return error.TestUnexpectedResult;
@@ -203,44 +194,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 Error.InvalidPacket, Error.BadArg, Error.InternalError => {},
                 else => return err,
             }
-
-            if (decoder.decodeFloat(invalid[0..], pcm_f32[0..], false)) |_| {
-                return error.TestUnexpectedResult;
-            } else |err| switch (err) {
-                Error.InvalidPacket, Error.BadArg, Error.InternalError => {},
-                else => return err,
-            }
-        }
-
-        fn floatRoundtripSmoke() !void {
-            const Encoder = @import("Encoder.zig");
-
-            var encoder = try Encoder.init(grt.std.testing.allocator, 48_000, 1, .audio);
-            defer encoder.deinit(grt.std.testing.allocator);
-            var decoder = try Self.init(grt.std.testing.allocator, 48_000, 1);
-            defer decoder.deinit(grt.std.testing.allocator);
-
-            var pcm: [960]f32 = undefined;
-            for (&pcm, 0..) |*sample, i| {
-                const centered = @as(f32, @floatFromInt(@as(i32, @intCast(i % 64)) - 32));
-                sample.* = centered / 32.0;
-            }
-
-            var packet_buf: [1500]u8 = undefined;
-            const packet = try encoder.encodeFloat(pcm[0..], 960, packet_buf[0..]);
-
-            var decoded: [960]f32 = undefined;
-            const samples = try decoder.decodeFloat(packet, decoded[0..], false);
-            try grt.std.testing.expectEqual(@as(usize, 960), samples.len);
-            const fec_samples = try decoder.decodeFloat(packet, decoded[0..], true);
-            try grt.std.testing.expectEqual(@as(usize, 960), fec_samples.len);
-
-            var energy: f32 = 0;
-            for (samples) |sample| energy += @abs(sample);
-            try grt.std.testing.expect(energy > 1.0);
-
-            const concealed = try decoder.plcFloat(decoded[0..]);
-            try grt.std.testing.expectEqual(@as(usize, 960), concealed.len);
         }
     };
 
@@ -271,10 +224,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 return false;
             };
             TestCase.rejectsNonEmptyInvalidPacketInput() catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            TestCase.floatRoundtripSmoke() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

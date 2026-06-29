@@ -23,7 +23,6 @@ pub const thirdparty_modules = [_]ModuleSpec{
     module2("thirdparty", "mbedtls"),
     module2("thirdparty", "mbedtls_osal"),
     module2("thirdparty", "opus"),
-    module2("thirdparty", "opus_osal"),
     module2("thirdparty", "portaudio"),
     module2("thirdparty", "speexdsp"),
     module2("thirdparty", "stb_truetype"),

@@ -14,8 +14,6 @@ const gstd = @import("gstd");
 const opus = @import("opus");
 
 test "thirdparty/opus/integration/std" {
-    _ = @import("../utils/thirdparty_opus_osal.zig");
-
     var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .opus_integration_std);
     defer t.deinit();
     t.run("integration", opus.test_runner.integration.make(gstd.runtime));
