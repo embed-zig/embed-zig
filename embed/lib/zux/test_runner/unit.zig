@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const assembler_builder = @import("../assembler/Builder.zig");
 const Component = @import("../spec/Component.zig");
 const JsonParser = @import("../spec/JsonParser.zig");
+const Render = @import("../component/audio_system/Render.zig");
 const Spec = @import("../Spec.zig");
 const StoreObject = @import("../spec/StoreObject.zig");
 const UserStory = @import("../spec/UserStory.zig");
@@ -44,6 +45,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
             t.run("spec/Component", Component.TestRunner(grt));
             t.run("spec/StoreObject", StoreObject.TestRunner(grt));
             t.run("spec/UserStory", UserStory.TestRunner(grt));
+            t.run("component/audio_system/Render", Render.TestRunner(grt));
             t.run("button", button.make(grt));
             t.run("bt", bt.make(grt));
             t.run("event", event.make(grt));

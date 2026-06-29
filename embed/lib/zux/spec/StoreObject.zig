@@ -302,6 +302,7 @@ fn typeFromName(comptime name: []const u8) type {
     if (comptimeEql(name, "[64]u8")) return [64]u8;
     if (comptimeEql(name, "[80]u8")) return [80]u8;
     if (comptimeEql(name, "[96]u8")) return [96]u8;
+    if (comptimeEql(name, "[512]u8")) return [512]u8;
 
     @compileError("zux.spec.StoreObject encountered an unsupported type name in JSON");
 }
@@ -387,6 +388,19 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expect(@FieldType(Spec.StateType, "connected_at") == glib.time.instant.Time);
         }
 
+        fn parse_from_slice_generates_512_byte_array_state_type() !void {
+            const Spec = parseSlice(
+                \\{
+                \\  "label": "storage",
+                \\  "state": {
+                \\    "scratch": "[512]u8"
+                \\  }
+                \\}
+            );
+
+            try grt.std.testing.expect(@FieldType(Spec.StateType, "scratch") == [512]u8);
+        }
+
         fn parse_from_slice_generates_nested_state_type() !void {
             const Spec = parseSlice(
                 \\{
@@ -458,6 +472,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 return false;
             };
             TestCase.parse_from_slice_generates_glib_instant_time_state_type() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.parse_from_slice_generates_512_byte_array_state_type() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

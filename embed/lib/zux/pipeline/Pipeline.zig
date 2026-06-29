@@ -29,6 +29,7 @@ pub fn make(comptime grt: type, comptime CustomEventRegistarType: type) type {
         pub const Worker = grt.task.Handle;
         pub const default_poll_timeout: glib.time.duration.Duration = 10 * glib.time.duration.MilliSecond;
         pub const default_config: Self.Config = .{};
+        const run_log = grt.std.log.scoped(.zux_pipeline);
         const BoolAtomic = grt.std.atomic.Value(bool);
         const PollerList = grt.std.ArrayList(PollWorker);
         const ReceiverList = grt.std.ArrayList(ReceiverBinding);
@@ -102,6 +103,9 @@ pub fn make(comptime grt: type, comptime CustomEventRegistarType: type) type {
                 return err;
             };
             if (!sent.ok) {
+                if (message.body != .tick) {
+                    run_log.warn("pipeline drop message kind={s} origin={s}", .{ @tagName(message.kind()), @tagName(message.origin) });
+                }
                 message.deinit();
                 return false;
             }
@@ -275,7 +279,6 @@ pub fn make(comptime grt: type, comptime CustomEventRegistarType: type) type {
         }
 
         fn reportAsyncFailure(comptime label: []const u8, err: anyerror) noreturn {
-            const run_log = grt.std.log.scoped(.zux_pipeline);
             run_log.err("{s}: {s}", .{ label, @errorName(err) });
             @panic("zux.pipeline.Pipeline background worker failed");
         }
@@ -288,7 +291,16 @@ pub fn make(comptime grt: type, comptime CustomEventRegistarType: type) type {
                 defer message.deinit();
                 if (self.stopping.load(.acquire)) continue;
                 const out = self.outbound orelse return error.OutputNotBound;
+                const started_at = grt.time.instant.now();
                 try out.emit(message);
+                const elapsed = grt.time.instant.now() - started_at;
+                if (elapsed > 20 * glib.time.duration.MilliSecond) {
+                    run_log.warn("pipeline slow message kind={s} origin={s} elapsed_ms={}", .{
+                        @tagName(message.kind()),
+                        @tagName(message.origin),
+                        @divTrunc(elapsed, glib.time.duration.MilliSecond),
+                    });
+                }
             }
         }
 
