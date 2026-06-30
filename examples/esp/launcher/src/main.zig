@@ -58,6 +58,14 @@ const PlatformCtx = struct {
             .allocator = allocator,
         });
     }
+
+    pub fn resetPreferencesStats() void {
+        esp.embed.system.preferences.resetStats();
+    }
+
+    pub fn preferencesStats() esp.embed.system.preferences.Stats {
+        return esp.embed.system.preferences.stats();
+    }
 };
 
 const App = if (launcher_mode == .app)

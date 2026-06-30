@@ -197,11 +197,29 @@ fn runSmoke(comptime platform_ctx: type, comptime platform_grt: type, allocator:
     defer store.deinit();
 
     try store.clear();
+    resetPreferencesStats(platform_ctx);
+
+    const small_write_started_ns = platform_grt.time.instant.now();
     try store.put(key, "alpha");
     try store.sync();
+    const small_write_elapsed_ns = elapsedSince(platform_grt, small_write_started_ns);
 
-    const perf_value = [_]u8{'p'} ** 128;
-    const perf_iters = 64;
+    var buf: [32]u8 = undefined;
+    const small_read_started_ns = platform_grt.time.instant.now();
+    var len = try store.get(key, &buf);
+    const small_read_elapsed_ns = elapsedSince(platform_grt, small_read_started_ns);
+    try expectEqualStrings(platform_grt, "alpha", buf[0..len]);
+    log.info(
+        "preferences small string len={} write={}us read={}us",
+        .{
+            len,
+            nsToUs(small_write_elapsed_ns),
+            nsToUs(small_read_elapsed_ns),
+        },
+    );
+
+    const perf_value = [_]u8{'p'} ** 64;
+    const perf_iters = 16;
     const write_started_ns = platform_grt.time.instant.now();
     for (0..perf_iters) |_| {
         try store.put("perf", &perf_value);
@@ -213,7 +231,10 @@ fn runSmoke(comptime platform_ctx: type, comptime platform_grt: type, allocator:
     const read_started_ns = platform_grt.time.instant.now();
     for (0..perf_iters) |_| {
         const perf_len = try store.get("perf", &perf_buf);
-        if (perf_len != perf_value.len) return error.UnexpectedPreferenceValue;
+        if (perf_len != perf_value.len) {
+            log.err("preferences perf read length mismatch expected={} actual={}", .{ perf_value.len, perf_len });
+            return error.UnexpectedPreferenceValue;
+        }
     }
     const read_elapsed_ns = elapsedSince(platform_grt, read_started_ns);
     log.info(
@@ -228,9 +249,65 @@ fn runSmoke(comptime platform_ctx: type, comptime platform_grt: type, allocator:
         },
     );
 
-    var buf: [32]u8 = undefined;
-    var len = try store.get(key, &buf);
-    try expectEqualStrings(platform_grt, "alpha", buf[0..len]);
+    const large_value = try allocator.alloc(u8, 2048);
+    defer allocator.free(large_value);
+    const large_buf = try allocator.alloc(u8, large_value.len);
+    defer allocator.free(large_buf);
+    fillPattern(large_value, 0x31);
+
+    const large_iters = 4;
+    const large_write_started_ns = platform_grt.time.instant.now();
+    for (0..large_iters) |_| {
+        try store.put("large2k", large_value);
+    }
+    try store.sync();
+    const large_write_elapsed_ns = elapsedSince(platform_grt, large_write_started_ns);
+
+    const large_read_started_ns = platform_grt.time.instant.now();
+    for (0..large_iters) |_| {
+        const large_len = try store.get("large2k", large_buf);
+        if (large_len != large_value.len) return error.UnexpectedPreferenceValue;
+        try expectEqualBytes(platform_grt, large_value, large_buf[0..large_len]);
+    }
+    const large_read_elapsed_ns = elapsedSince(platform_grt, large_read_started_ns);
+    log.info(
+        "preferences large value len={} write={}ops/{}ms read={}ops/{}ms",
+        .{
+            large_value.len,
+            large_iters,
+            nsToMs(large_write_elapsed_ns),
+            large_iters,
+            nsToMs(large_read_elapsed_ns),
+        },
+    );
+
+    const huge_value = try allocator.alloc(u8, 4096);
+    defer allocator.free(huge_value);
+    const huge_buf = try allocator.alloc(u8, huge_value.len);
+    defer allocator.free(huge_buf);
+    fillPattern(huge_value, 0x55);
+
+    const huge_write_started_ns = platform_grt.time.instant.now();
+    try store.put("large4k", huge_value);
+    try store.sync();
+    const huge_write_elapsed_ns = elapsedSince(platform_grt, huge_write_started_ns);
+
+    const huge_read_started_ns = platform_grt.time.instant.now();
+    const huge_len = try store.get("large4k", huge_buf);
+    const huge_read_elapsed_ns = elapsedSince(platform_grt, huge_read_started_ns);
+    if (huge_len != huge_value.len) return error.UnexpectedPreferenceValue;
+    try expectEqualBytes(platform_grt, huge_value, huge_buf[0..huge_len]);
+    log.info(
+        "preferences huge value len={} write={}ms read={}ms",
+        .{
+            huge_value.len,
+            nsToMs(huge_write_elapsed_ns),
+            nsToMs(huge_read_elapsed_ns),
+        },
+    );
+
+    logPreferencesStats(platform_ctx, platform_grt);
+
     if (!store.contains(key)) return error.PreferenceMissingAfterPut;
 
     try store.put(key, "beta-value");
@@ -245,6 +322,8 @@ fn runSmoke(comptime platform_ctx: type, comptime platform_grt: type, allocator:
     defer allocator.free(entries);
     if (!containsEntry(entries, namespace, key)) return error.PreferenceListMissingKey;
     if (!containsEntry(entries, namespace, "perf")) return error.PreferenceListMissingKey;
+    if (!containsEntry(entries, namespace, "large2k")) return error.PreferenceListMissingKey;
+    if (!containsEntry(entries, namespace, "large4k")) return error.PreferenceListMissingKey;
 
     const namespaces = try provider.list(allocator);
     defer allocator.free(namespaces);
@@ -273,6 +352,37 @@ fn elapsedSince(comptime platform_grt: type, started_ns: glib.time.instant.Time)
 
 fn nsToMs(ns: glib.time.duration.Duration) u64 {
     return @intCast(@divTrunc(ns, glib.time.duration.MilliSecond));
+}
+
+fn nsToUs(ns: glib.time.duration.Duration) u64 {
+    return @intCast(@divTrunc(ns, glib.time.duration.MicroSecond));
+}
+
+fn fillPattern(out: []u8, seed: u8) void {
+    for (out, 0..) |*byte, index| {
+        byte.* = seed +% @as(u8, @truncate(index));
+    }
+}
+
+fn resetPreferencesStats(comptime platform_ctx: type) void {
+    if (comptime @hasDecl(platform_ctx, "resetPreferencesStats")) {
+        platform_ctx.resetPreferencesStats();
+    }
+}
+
+fn logPreferencesStats(comptime platform_ctx: type, comptime platform_grt: type) void {
+    if (comptime !@hasDecl(platform_ctx, "preferencesStats")) return;
+
+    const log = platform_grt.std.log.scoped(.zux_preferences_smoke);
+    const stats = platform_ctx.preferencesStats();
+    log.info(
+        "preferences request tasks count={} stack={}B min_free={}B",
+        .{
+            stats.request_count,
+            stats.request_stack_size,
+            stats.min_stack_free_bytes,
+        },
+    );
 }
 
 fn containsNamespace(namespaces: []const Preferences.Namespace, name: []const u8) bool {
@@ -321,6 +431,10 @@ fn deinitIfPresent(value: anytype) void {
 }
 
 fn expectEqualStrings(comptime platform_grt: type, expected: []const u8, actual: []const u8) !void {
+    if (!platform_grt.std.mem.eql(u8, expected, actual)) return error.UnexpectedPreferenceValue;
+}
+
+fn expectEqualBytes(comptime platform_grt: type, expected: []const u8, actual: []const u8) !void {
     if (!platform_grt.std.mem.eql(u8, expected, actual)) return error.UnexpectedPreferenceValue;
 }
 
@@ -389,11 +503,11 @@ const TestStore = struct {
     active: bool = false,
     namespace_buf: [16]u8 = [_]u8{0} ** 16,
     namespace_len: usize = 0,
-    entries: [4]Entry = [_]Entry{.{}} ** 4,
+    entries: [6]Entry = [_]Entry{.{}} ** 6,
 
     const Entry = struct {
         const key_buf_len = 16;
-        const value_buf_len = 128;
+        const value_buf_len = 4096;
 
         key_buf: [key_buf_len]u8 = [_]u8{0} ** key_buf_len,
         key_len: usize = 0,

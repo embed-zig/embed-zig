@@ -242,6 +242,11 @@ uint32_t espz_freertos_task_count(void)
     return (uint32_t)uxTaskGetNumberOfTasks();
 }
 
+uint32_t espz_freertos_current_stack_high_water_mark_bytes(void)
+{
+    return (uint32_t)uxTaskGetStackHighWaterMark(NULL);
+}
+
 bool espz_freertos_idle_runtime_counter_supported(void)
 {
 #if (!CONFIG_FREERTOS_SMP && CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS == 1 && INCLUDE_xTaskGetIdleTaskHandle == 1)

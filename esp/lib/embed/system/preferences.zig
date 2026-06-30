@@ -5,13 +5,33 @@ const binding = @import("preferences_binding.zig");
 const NativeTask = esp.native_task;
 
 const Preferences = embed.system.Preferences;
-const Mutex = esp.grt.sync.Mutex;
-const Condition = esp.grt.sync.Condition;
-const log = esp.grt.std.log.scoped(.esp_preferences);
 const allocator_default = esp.heap.Allocator(.{ .caps = .internal_8bit, .alignment = .align_u32 });
 const max_name_len = 15;
-const worker_stack_size = 6 * 1024;
-const worker_call_timeout_ns = glib.time.duration.magnitude(5 * glib.time.duration.Second);
+const request_stack_size = 3 * 1024;
+const max_usize = glib.std.math.maxInt(usize);
+
+var request_count = glib.std.atomic.Value(usize).init(0);
+var min_stack_free_bytes = glib.std.atomic.Value(usize).init(max_usize);
+
+pub const Stats = struct {
+    request_count: usize,
+    request_stack_size: usize,
+    min_stack_free_bytes: usize,
+};
+
+pub fn resetStats() void {
+    request_count.store(0, .release);
+    min_stack_free_bytes.store(max_usize, .release);
+}
+
+pub fn stats() Stats {
+    const min_stack = min_stack_free_bytes.load(.acquire);
+    return .{
+        .request_count = request_count.load(.acquire),
+        .request_stack_size = request_stack_size,
+        .min_stack_free_bytes = if (min_stack == max_usize) 0 else min_stack,
+    };
+}
 
 pub const Provider = struct {
     allocator: esp.grt.std.mem.Allocator = allocator_default,
@@ -27,20 +47,23 @@ pub const Provider = struct {
     }
 
     pub fn open(self: *Provider, namespace: []const u8, options: Preferences.OpenOptions) Preferences.OpenError!Preferences.Store {
-        try checkInit(preferences_worker.call(.{ .op = .init }).rc);
+        try checkInit(runPreferenceRequest(.{ .op = .init }).rc);
 
         if (!options.create and !options.read_only) {
-            const probe = preferences_worker.call(.{
+            const probe = runPreferenceRequest(.{
                 .op = .open,
                 .namespace = namespace,
                 .read_only = true,
             });
             const probe_rc = probe.rc;
             try checkOpen(probe_rc);
-            _ = closeOnWorker(probe.handle);
+            _ = runPreferenceRequest(.{
+                .op = .close,
+                .handle = probe.handle,
+            });
         }
 
-        const opened = preferences_worker.call(.{
+        const opened = runPreferenceRequest(.{
             .op = .open,
             .namespace = namespace,
             .read_only = options.read_only,
@@ -59,7 +82,7 @@ pub const Provider = struct {
 
     pub fn list(self: *Provider, allocator: esp.grt.std.mem.Allocator) Preferences.ListError![]Preferences.Namespace {
         _ = self;
-        try checkListInit(preferences_worker.call(.{ .op = .init }).rc);
+        try checkListInit(runPreferenceRequest(.{ .op = .init }).rc);
         return namespaceListAlloc(allocator, .{ .op = .list_namespaces });
     }
 
@@ -73,7 +96,7 @@ pub const Store = struct {
     handle: binding.Handle,
 
     pub fn get(self: *Store, key: []const u8, out: []u8) Preferences.GetError!usize {
-        const result = preferences_worker.call(.{
+        const result = runPreferenceRequest(.{
             .op = .get,
             .handle = self.handle,
             .key = key,
@@ -84,7 +107,7 @@ pub const Store = struct {
     }
 
     pub fn getAlloc(self: *Store, allocator: esp.grt.std.mem.Allocator, key: []const u8) Preferences.GetAllocError![]u8 {
-        const len_result = preferences_worker.call(.{
+        const len_result = runPreferenceRequest(.{
             .op = .get,
             .handle = self.handle,
             .key = key,
@@ -96,7 +119,7 @@ pub const Store = struct {
         errdefer allocator.free(value);
         if (value.len == 0) return value;
 
-        const read_result = preferences_worker.call(.{
+        const read_result = runPreferenceRequest(.{
             .op = .get,
             .handle = self.handle,
             .key = key,
@@ -108,7 +131,7 @@ pub const Store = struct {
     }
 
     pub fn put(self: *Store, key: []const u8, value: []const u8) Preferences.PutError!void {
-        const rc = preferences_worker.call(.{
+        const rc = runPreferenceRequest(.{
             .op = .put,
             .handle = self.handle,
             .key = key,
@@ -118,7 +141,7 @@ pub const Store = struct {
     }
 
     pub fn remove(self: *Store, key: []const u8) Preferences.RemoveError!void {
-        const rc = preferences_worker.call(.{
+        const rc = runPreferenceRequest(.{
             .op = .remove,
             .handle = self.handle,
             .key = key,
@@ -127,7 +150,7 @@ pub const Store = struct {
     }
 
     pub fn contains(self: *Store, key: []const u8) bool {
-        return preferences_worker.call(.{
+        return runPreferenceRequest(.{
             .op = .contains,
             .handle = self.handle,
             .key = key,
@@ -142,104 +165,25 @@ pub const Store = struct {
     }
 
     pub fn clear(self: *Store) Preferences.ClearError!void {
-        return checkClear(preferences_worker.call(.{
+        return checkClear(runPreferenceRequest(.{
             .op = .clear,
             .handle = self.handle,
         }).rc);
     }
 
     pub fn sync(self: *Store) Preferences.SyncError!void {
-        return checkSync(preferences_worker.call(.{
+        return checkSync(runPreferenceRequest(.{
             .op = .sync,
             .handle = self.handle,
         }).rc);
     }
 
     pub fn deinit(self: *Store) void {
-        _ = closeOnWorker(self.handle);
+        _ = runPreferenceRequest(.{
+            .op = .close,
+            .handle = self.handle,
+        });
         self.allocator.destroy(self);
-    }
-};
-
-const Worker = struct {
-    mutex: Mutex = .{},
-    cond: Condition = .{},
-    started: bool = false,
-    pending: ?*Request = null,
-
-    fn call(self: *Worker, spec: RequestSpec) RequestResult {
-        self.ensureStarted() catch |err| {
-            return .{ .rc = spawnErrorCode(err) };
-        };
-
-        var request = Request{
-            .spec = spec,
-        };
-
-        self.mutex.lock();
-        defer self.mutex.unlock();
-
-        while (self.pending != null) {
-            self.cond.timedWait(&self.mutex, worker_call_timeout_ns) catch {
-                log.err("preferences worker busy timeout op={s}", .{@tagName(spec.op)});
-                return .{ .rc = binding.esp_embed_preferences_err_invalid_state };
-            };
-        }
-
-        self.pending = &request;
-        self.cond.signal();
-
-        while (!request.done) {
-            self.cond.timedWait(&self.mutex, worker_call_timeout_ns) catch {
-                log.err("preferences worker response timeout op={s}", .{@tagName(spec.op)});
-                continue;
-            };
-        }
-
-        return request.result;
-    }
-
-    fn ensureStarted(self: *Worker) NativeTask.SpawnError!void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-
-        if (self.started) return;
-
-        const handle = try NativeTask.spawn(.{
-            .name = "esp_prefs",
-            .stack_size = worker_stack_size,
-            .priority = 7,
-            .allocator = allocator_default,
-        }, glib.task.Routine.init(self, run));
-        handle.detach();
-        self.started = true;
-        log.info("preferences worker started stack={}", .{worker_stack_size});
-    }
-
-    fn run(self: *Worker) void {
-        while (true) {
-            self.mutex.lock();
-            while (self.pending == null) {
-                self.cond.wait(&self.mutex);
-            }
-            const request = self.pending.?;
-            self.mutex.unlock();
-
-            log.debug("preferences worker op begin {s}", .{@tagName(request.spec.op)});
-            const result = process(request.spec);
-            if (result.rc == binding.esp_embed_preferences_ok) {
-                log.debug("preferences worker op done {s} len={}", .{ @tagName(request.spec.op), result.len });
-            } else {
-                log.warn("preferences worker op failed {s} rc={}", .{ @tagName(request.spec.op), result.rc });
-            }
-
-            self.mutex.lock();
-            request.result = result;
-            request.done = true;
-            self.pending = null;
-            self.cond.broadcast();
-            self.mutex.unlock();
-        }
     }
 };
 
@@ -279,10 +223,26 @@ const RequestResult = struct {
 const Request = struct {
     spec: RequestSpec,
     result: RequestResult = .{},
-    done: bool = false,
 };
 
-var preferences_worker: Worker = .{};
+fn runPreferenceRequest(spec: RequestSpec) RequestResult {
+    var request = Request{ .spec = spec };
+    const handle = NativeTask.spawn(.{
+        .name = "esp_prefs",
+        .stack_size = request_stack_size,
+        .priority = 7,
+        .stack_memory = .internal,
+    }, glib.task.Routine.init(&request, runPreferenceRequestTask)) catch |err| {
+        return .{ .rc = spawnErrorCode(err) };
+    };
+    handle.join();
+    return request.result;
+}
+
+fn runPreferenceRequestTask(request: *Request) void {
+    request.result = process(request.spec);
+    recordRequestStack();
+}
 
 fn process(spec: RequestSpec) RequestResult {
     return switch (spec.op) {
@@ -300,8 +260,19 @@ fn process(spec: RequestSpec) RequestResult {
     };
 }
 
+fn recordRequestStack() void {
+    _ = request_count.fetchAdd(1, .acq_rel);
+
+    const stack_free = NativeTask.currentStackHighWaterMarkBytes();
+    while (true) {
+        const current = min_stack_free_bytes.load(.acquire);
+        if (stack_free >= current) return;
+        if (min_stack_free_bytes.cmpxchgWeak(current, stack_free, .acq_rel, .acquire) == null) return;
+    }
+}
+
 fn listAlloc(allocator: esp.grt.std.mem.Allocator, spec: RequestSpec) Preferences.ListError![]Preferences.Entry {
-    const count_result = preferences_worker.call(spec);
+    const count_result = runPreferenceRequest(spec);
     try checkList(count_result.rc);
 
     const entries = allocator.alloc(Preferences.Entry, count_result.len) catch return error.OutOfMemory;
@@ -310,14 +281,14 @@ fn listAlloc(allocator: esp.grt.std.mem.Allocator, spec: RequestSpec) Preference
 
     var fill_spec = spec;
     fill_spec.entries = entries;
-    const fill_result = preferences_worker.call(fill_spec);
+    const fill_result = runPreferenceRequest(fill_spec);
     try checkList(fill_result.rc);
     if (fill_result.len > entries.len) return error.OutOfMemory;
     return entries;
 }
 
 fn namespaceListAlloc(allocator: esp.grt.std.mem.Allocator, spec: RequestSpec) Preferences.ListError![]Preferences.Namespace {
-    const count_result = preferences_worker.call(spec);
+    const count_result = runPreferenceRequest(spec);
     try checkList(count_result.rc);
 
     const namespaces = allocator.alloc(Preferences.Namespace, count_result.len) catch return error.OutOfMemory;
@@ -326,7 +297,7 @@ fn namespaceListAlloc(allocator: esp.grt.std.mem.Allocator, spec: RequestSpec) P
 
     var fill_spec = spec;
     fill_spec.namespaces = namespaces;
-    const fill_result = preferences_worker.call(fill_spec);
+    const fill_result = runPreferenceRequest(fill_spec);
     try checkList(fill_result.rc);
     if (fill_result.len > namespaces.len) return error.OutOfMemory;
     return namespaces;
@@ -357,14 +328,33 @@ fn getOnWorker(handle: binding.Handle, key: []const u8, out: []u8) RequestResult
     const safe_key = copyNvsName(&key_buf, key) orelse
         return .{ .rc = binding.esp_embed_preferences_err_nvs_invalid_name };
 
+    if (out.len == 0) {
+        var len: usize = 0;
+        const rc = binding.esp_embed_preferences_get(
+            handle,
+            safe_key.ptr,
+            safe_key.len,
+            null,
+            &len,
+        );
+        return .{ .rc = rc, .len = len };
+    }
+
+    const internal_out = allocator_default.alloc(u8, out.len) catch
+        return .{ .rc = binding.esp_embed_preferences_err_no_mem };
+    defer allocator_default.free(internal_out);
+
     var len = out.len;
     const rc = binding.esp_embed_preferences_get(
         handle,
         safe_key.ptr,
         safe_key.len,
-        if (out.len == 0) null else out.ptr,
+        internal_out.ptr,
         &len,
     );
+    if (rc == binding.esp_embed_preferences_ok) {
+        @memcpy(out[0..@min(out.len, len)], internal_out[0..@min(internal_out.len, len)]);
+    }
     return .{ .rc = rc, .len = len };
 }
 
@@ -373,12 +363,17 @@ fn putOnWorker(handle: binding.Handle, key: []const u8, value: []const u8) Reque
     const safe_key = copyNvsName(&key_buf, key) orelse
         return .{ .rc = binding.esp_embed_preferences_err_nvs_invalid_name };
 
+    const internal_value = allocator_default.alloc(u8, value.len) catch
+        return .{ .rc = binding.esp_embed_preferences_err_no_mem };
+    defer allocator_default.free(internal_value);
+    @memcpy(internal_value, value);
+
     return .{ .rc = binding.esp_embed_preferences_put(
         handle,
         safe_key.ptr,
         safe_key.len,
-        value.ptr,
-        value.len,
+        internal_value.ptr,
+        internal_value.len,
     ) };
 }
 

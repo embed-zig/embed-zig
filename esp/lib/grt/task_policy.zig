@@ -23,7 +23,7 @@ const Entry = struct {
     stack_size: ?usize = null,
     priority: ?u8 = null,
     core_id: ?i32 = null,
-    allocator: ?glib.std.mem.Allocator = null,
+    stack_memory: ?Native.StackMemory = null,
 };
 
 fn PolicyHandler(comptime grt: type, comptime entry: Entry) type {
@@ -45,7 +45,7 @@ fn PolicyHandler(comptime grt: type, comptime entry: Entry) type {
             };
             if (entry.priority) |priority| spawn_config.priority = priority;
             if (entry.core_id) |core_id| spawn_config.core_id = core_id;
-            if (entry.allocator) |allocator| spawn_config.allocator = allocator;
+            if (entry.stack_memory) |stack_memory| spawn_config.stack_memory = stack_memory;
 
             return Native.spawn(spawn_config, routine);
         }
@@ -74,7 +74,7 @@ fn policyEntry(comptime value: anytype) Entry {
             .stack_size = if (@hasField(Value, "stack_size")) value.stack_size else null,
             .priority = if (@hasField(Value, "priority")) value.priority else null,
             .core_id = if (@hasField(Value, "core_id")) value.core_id else null,
-            .allocator = if (@hasField(Value, "allocator")) value.allocator else null,
+            .stack_memory = if (@hasField(Value, "stack_memory")) value.stack_memory else null,
         },
         else => @compileError("task policy entry must be a struct"),
     };
