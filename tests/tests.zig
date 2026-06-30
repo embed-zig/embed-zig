@@ -198,8 +198,6 @@ const thirdparty_unit_macos_modules = .{
 };
 
 const thirdparty_integration_base_modules = .{
-    @import("thirdparty_integration/kcp.zig"),
-    @import("thirdparty_integration/kcp_benchmark.zig"),
     @import("thirdparty_integration/lvgl.zig"),
     @import("thirdparty_integration/opus_embed_std.zig"),
     @import("thirdparty_integration/opus_std.zig"),

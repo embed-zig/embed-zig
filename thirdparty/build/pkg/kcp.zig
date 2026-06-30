@@ -3,9 +3,6 @@ const buildtools = @import("buildtools");
 
 const upstream_remote_url = "https://github.com/skywind3000/kcp.git";
 const upstream_revision = "c102b9b7f51012ca8253ab1cca596e560a8e0319";
-const integration_patch_files: []const []const u8 = &.{
-    "pkg/kcp/patches/0001-embed-zig-kcp-integration.patch",
-};
 const optimized_patch_files: []const []const u8 = &.{
     "pkg/kcp/patches/0001-embed-zig-kcp-integration.patch",
     "pkg/kcp/patches/0002-embed-zig-kcp-optimizations.patch",
@@ -25,9 +22,7 @@ pub fn create(
         .cache_namespace = "kcp-upstream",
         .step_name = "kcp.git-repo.ensure",
     });
-    const integration = addPatchedUpstream(b, upstream, "integration-v1", integration_patch_files);
     const optimized = addPatchedUpstream(b, upstream, "optimized-v1", optimized_patch_files);
-    addBenchmarkStep(b, target, optimize, upstream, integration, optimized);
 
     const lib = b.addLibrary(.{
         .linkage = .static,
@@ -80,104 +75,6 @@ fn addCommonInputs(
     if (b.sysroot) |sysroot| {
         mod.addSystemIncludePath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "include" }) });
     }
-}
-
-fn addBenchmarkStep(
-    b: *std.Build,
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
-    upstream: buildtools.GitCheckout,
-    integration: PatchedUpstream,
-    optimized: PatchedUpstream,
-) void {
-    const benchmark_step = b.step("kcp-benchmark-c", "Run upstream and patched ikcp.c benchmark matrix");
-
-    const upstream_benchmark = addBenchmarkRun(b, target, optimize, "kcp-benchmark-upstream", "upstream", upstream.includePath("."), upstream.sourcePath("ikcp.c"), &.{});
-    upstream.dependOn(&upstream_benchmark.exe.step);
-    benchmark_step.dependOn(&upstream_benchmark.run.step);
-
-    const integration_benchmark = addBenchmarkRun(b, target, optimize, "kcp-benchmark-integration", "integration", integration.includePath("."), integration.sourcePath("ikcp.c"), &.{});
-    integration.dependOn(&integration_benchmark.exe.step);
-    integration_benchmark.run.step.dependOn(&upstream_benchmark.run.step);
-    benchmark_step.dependOn(&integration_benchmark.run.step);
-
-    const segment_pool_benchmark = addBenchmarkRun(b, target, optimize, "kcp-benchmark-opt-segment-pool", "opt-segment-pool", optimized.includePath("."), optimized.sourcePath("ikcp.c"), &.{
-        .{ .name = "IKCP_OPT_SEGMENT_POOL", .value = "1" },
-        .{ .name = "IKCP_OPT_STREAM_APPEND", .value = "0" },
-        .{ .name = "IKCP_OPT_FLUSH_SKIP", .value = "0" },
-    });
-    optimized.dependOn(&segment_pool_benchmark.exe.step);
-    segment_pool_benchmark.run.step.dependOn(&integration_benchmark.run.step);
-    benchmark_step.dependOn(&segment_pool_benchmark.run.step);
-
-    const stream_append_benchmark = addBenchmarkRun(b, target, optimize, "kcp-benchmark-opt-stream-append", "opt-stream-append", optimized.includePath("."), optimized.sourcePath("ikcp.c"), &.{
-        .{ .name = "IKCP_OPT_SEGMENT_POOL", .value = "0" },
-        .{ .name = "IKCP_OPT_STREAM_APPEND", .value = "1" },
-        .{ .name = "IKCP_OPT_FLUSH_SKIP", .value = "0" },
-    });
-    optimized.dependOn(&stream_append_benchmark.exe.step);
-    stream_append_benchmark.run.step.dependOn(&segment_pool_benchmark.run.step);
-    benchmark_step.dependOn(&stream_append_benchmark.run.step);
-
-    const flush_skip_benchmark = addBenchmarkRun(b, target, optimize, "kcp-benchmark-opt-flush-skip", "opt-flush-skip", optimized.includePath("."), optimized.sourcePath("ikcp.c"), &.{
-        .{ .name = "IKCP_OPT_SEGMENT_POOL", .value = "0" },
-        .{ .name = "IKCP_OPT_STREAM_APPEND", .value = "0" },
-        .{ .name = "IKCP_OPT_FLUSH_SKIP", .value = "1" },
-    });
-    optimized.dependOn(&flush_skip_benchmark.exe.step);
-    flush_skip_benchmark.run.step.dependOn(&stream_append_benchmark.run.step);
-    benchmark_step.dependOn(&flush_skip_benchmark.run.step);
-
-    const optimized_benchmark = addBenchmarkRun(b, target, optimize, "kcp-benchmark-optimized", "optimized", optimized.includePath("."), optimized.sourcePath("ikcp.c"), &.{});
-    optimized.dependOn(&optimized_benchmark.exe.step);
-    optimized_benchmark.run.step.dependOn(&flush_skip_benchmark.run.step);
-    benchmark_step.dependOn(&optimized_benchmark.run.step);
-}
-
-const CMacro = struct {
-    name: []const u8,
-    value: []const u8,
-};
-
-const BenchmarkRun = struct {
-    exe: *std.Build.Step.Compile,
-    run: *std.Build.Step.Run,
-};
-
-fn addBenchmarkRun(
-    b: *std.Build,
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
-    name: []const u8,
-    label: []const u8,
-    include_path: std.Build.LazyPath,
-    ikcp_source: std.Build.LazyPath,
-    c_macros: []const CMacro,
-) BenchmarkRun {
-    const exe = b.addExecutable(.{
-        .name = name,
-        .root_module = b.createModule(.{
-            .target = target,
-            .optimize = optimize,
-            .link_libc = true,
-            .sanitize_c = .off,
-        }),
-    });
-    exe.root_module.addIncludePath(include_path);
-    exe.root_module.addCMacro("IKCP_BENCH_LABEL", b.fmt("\"{s}\"", .{label}));
-    for (c_macros) |macro| {
-        exe.root_module.addCMacro(macro.name, macro.value);
-    }
-    exe.root_module.addCSourceFile(.{
-        .file = b.path("pkg/kcp/test_runner/benchmark/ikcp_benchmark.c"),
-    });
-    exe.root_module.addCSourceFile(.{
-        .file = ikcp_source,
-    });
-    return .{
-        .exe = exe,
-        .run = b.addRunArtifact(exe),
-    };
 }
 
 const PatchedUpstream = struct {

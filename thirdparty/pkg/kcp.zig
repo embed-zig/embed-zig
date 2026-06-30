@@ -1,5 +1,7 @@
 //! KCP bindings backed by the local C KCP implementation.
 
+const glib = @import("glib");
+
 pub const c = @cImport({
     @cInclude("ikcp.h");
 });
@@ -73,25 +75,72 @@ pub fn nodelay(inst: *Kcp, nodelay_: c_int, interval: c_int, resend: c_int, no_c
 
 pub const allocator = c.ikcp_allocator;
 
-pub const BytesRing = @import("kcp/BytesRing.zig");
-pub const PacketRing = @import("kcp/PacketRing.zig");
-pub const SegmentPool = @import("kcp/SegmentPool.zig");
-pub const Session = @import("kcp/Session.zig");
-pub const PerfProtocol = @import("kcp/PerfProtocol.zig");
-pub const PerfEndpoint = @import("kcp/PerfEndpoint.zig");
-pub const PerfServer = @import("kcp/PerfServer.zig");
-pub const PerfClient = @import("kcp/PerfClient.zig");
-
-pub fn NetperfServer(comptime grt: type) type {
-    return PerfServer.make(grt);
-}
-
-pub fn NetperfClient(comptime grt: type) type {
-    return PerfClient.make(grt);
-}
-
 pub const test_runner = struct {
-    pub const unit = @import("kcp/test_runner/unit.zig");
-    pub const integration = @import("kcp/test_runner/integration.zig");
-    pub const benchmark = @import("kcp/test_runner/benchmark.zig");
+    pub const unit = struct {
+        pub fn make(comptime grt: type) glib.testing.TestRunner {
+            const TestCase = struct {
+                const OutputState = struct {
+                    packets: usize = 0,
+                    bytes: usize = 0,
+                };
+
+                fn output(buf: [*c]const u8, len: c_int, _: [*c]Kcp, user: ?*anyopaque) callconv(.c) c_int {
+                    _ = buf;
+                    const state: *OutputState = @ptrCast(@alignCast(user.?));
+                    state.packets += 1;
+                    state.bytes += @intCast(len);
+                    return 0;
+                }
+
+                fn createConfigureAndFlush() !void {
+                    var state = OutputState{};
+                    const inst = create(42, &state) orelse return error.TestUnexpectedResult;
+                    defer release(inst);
+
+                    setOutput(inst, output);
+                    try grt.std.testing.expectEqual(@as(c_int, 0), setMtu(inst, 1200));
+                    try grt.std.testing.expectEqual(@as(c_int, 0), wndsize(inst, 32, 32));
+                    try grt.std.testing.expectEqual(@as(c_int, 0), nodelay(inst, 1, 10, 2, 1));
+
+                    const payload = [_]u8{ 'h', 'e', 'l', 'l', 'o' };
+                    try grt.std.testing.expectEqual(@as(c_int, @intCast(payload.len)), send(inst, payload[0..].ptr, payload.len));
+                    update(inst, 0);
+                    flush(inst);
+
+                    try grt.std.testing.expect(state.packets > 0);
+                    try grt.std.testing.expect(state.bytes > OVERHEAD);
+                    try grt.std.testing.expect(waitsnd(inst) >= 0);
+                    _ = check(inst, 0);
+                }
+            };
+
+            const Runner = struct {
+                pub fn init(self: *@This(), allocator_: glib.std.mem.Allocator) !void {
+                    _ = self;
+                    _ = allocator_;
+                }
+
+                pub fn run(self: *@This(), t: *glib.testing.T, allocator_: glib.std.mem.Allocator) bool {
+                    _ = self;
+                    _ = allocator_;
+
+                    TestCase.createConfigureAndFlush() catch |err| {
+                        t.logFatal(@errorName(err));
+                        return false;
+                    };
+                    return true;
+                }
+
+                pub fn deinit(self: *@This(), allocator_: glib.std.mem.Allocator) void {
+                    _ = self;
+                    _ = allocator_;
+                }
+            };
+
+            const Holder = struct {
+                var runner: Runner = .{};
+            };
+            return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
+        }
+    };
 };

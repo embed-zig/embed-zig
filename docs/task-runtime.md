@@ -59,7 +59,6 @@ Examples:
 
 ```text
 audio/processor -> audio
-kcp/read        -> kcp
 netperf/send    -> netperf
 zux/test        -> zux
 ```
@@ -123,10 +122,6 @@ capabilities.
 | `apps.zux.sync_smoke` | `zux/sync_smoke/wait` | Sync smoke wait worker. |
 | `apps.zux.task_smoke` | `zux/task_smoke/alpha` | Task smoke worker. |
 | `apps.zux.task_smoke` | `zux/task_smoke/beta` | Task smoke worker. |
-| `thirdparty.kcp` | `kcp/read` | KCP receive/read loop. |
-| `thirdparty.kcp` | `kcp/drive` | KCP update/drive loop. |
-| `thirdparty.kcp.PerfClient` | `netperf/send` | Throughput sender. |
-| `thirdparty.kcp.PerfServer` | `netperf/recv` | Throughput receiver. |
 | `examples.zux.netperf` | `netperf/run` | Netperf app worker. |
 | `esp.net.ModemPpp` | `net/modem_ppp_rx` | PPP receive bridge. |
 | `examples.esp.wifi_led_threads` | `wifi_led/led` | LED state loop. |
