@@ -8,6 +8,7 @@ const Mutex = @import("../Mutex.zig");
 const Pool = @import("../Pool.zig");
 const Racer = @import("../Racer.zig");
 const RwLock = @import("../RwLock.zig");
+const Semaphore = @import("../Semaphore.zig");
 const Timer = @import("../Timer.zig");
 const WakeFd = @import("../WakeFd.zig");
 
@@ -26,6 +27,7 @@ pub fn make(comptime std: type, comptime time: type) testing_api.TestRunner {
             t.run("Arc", Arc.TestRunner(std));
             t.run("Mutex", Mutex.TestRunner(std));
             t.run("Condition", Condition.TestRunner(std));
+            t.run("Semaphore", Semaphore.TestRunner(std));
             t.run("RwLock", RwLock.TestRunner(std));
             t.run("Channel", Channel.TestRunner(std));
             t.run("Pool", Pool.TestRunner(std));

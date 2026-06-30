@@ -119,7 +119,9 @@ capabilities.
 | `apps.zux.ble_speed.runtime.ui.Lvgl` | `zux/ble_speed/ui` | LVGL UI runtime. |
 | `apps.zux.ble_speed.runtime.ble.client` | `zux/ble_speed/client` | BLE client loop. |
 | `apps.zux.ble_speed.runtime.ble.server` | `zux/ble_speed/server` | BLE server loop. |
-| `apps.zux.sync_smoke` | `zux/sync_smoke/wait` | Sync smoke wait worker. |
+| `apps.zux.sync_smoke` | `zux/sync_smoke/wait` | Sync smoke condition wait worker. |
+| `apps.zux.sync_smoke` | `zux/sync_smoke/semaphore_wait` | Sync smoke semaphore wait worker. |
+| `apps.zux.sync_smoke` | `zux/sync_smoke/channel_send` | Sync smoke unbuffered channel send worker. |
 | `apps.zux.task_smoke` | `zux/task_smoke/alpha` | Task smoke worker. |
 | `apps.zux.task_smoke` | `zux/task_smoke/beta` | Task smoke worker. |
 | `examples.zux.netperf` | `netperf/run` | Netperf app worker. |

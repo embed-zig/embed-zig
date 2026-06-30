@@ -99,6 +99,7 @@ fn runSmoke(comptime platform_ctx: type, comptime platform_grt: type, allocator:
     try smokeMutex(platform_grt);
     try smokeRwLock(platform_grt);
     try smokeCondition(platform_grt);
+    try smokeSemaphore(platform_grt);
     try smokeChannel(platform_grt, allocator);
 
     log.info("sync smoke passed", .{});
@@ -143,8 +144,8 @@ fn smokeCondition(comptime platform_grt: type) !void {
     var timeout_mutex: platform_grt.sync.Mutex = .{};
     var timeout_condition: platform_grt.sync.Condition = .{};
     timeout_mutex.lock();
-    try platform_grt.std.testing.expectError(error.Timeout, timeout_condition.timedWait(&timeout_mutex, 10 * glib.time.duration.MilliSecond));
-    timeout_mutex.unlock();
+    defer timeout_mutex.unlock();
+    try assertTimeout(timeout_condition.timedWait(&timeout_mutex, 10 * glib.time.duration.MilliSecond));
 
     var state: SyncState = .{};
     const routine = glib.task.Routine.init(&state, conditionWaiter(SyncState).run);
@@ -163,6 +164,41 @@ fn smokeCondition(comptime platform_grt: type) !void {
     handle.join();
 
     if (!state.woke) return error.ConditionWaitFailed;
+}
+
+fn smokeSemaphore(comptime platform_grt: type) !void {
+    var timeout_sem: platform_grt.sync.Semaphore = .{};
+    try assertTimeout(timeout_sem.timedWait(10 * glib.time.duration.MilliSecond));
+
+    var count_sem: platform_grt.sync.Semaphore = .{};
+    count_sem.post();
+    count_sem.post();
+    count_sem.wait();
+    count_sem.wait();
+    try assertTimeout(count_sem.timedWait(10 * glib.time.duration.MilliSecond));
+
+    const SyncState = struct {
+        semaphore: platform_grt.sync.Semaphore = .{},
+        woke: bool = false,
+    };
+
+    var state: SyncState = .{};
+    const handle = try platform_grt.task.go("zux/sync_smoke/semaphore_wait", .{
+        .min_stack_size = 4 * 1024,
+    }, glib.task.Routine.init(&state, semaphoreWaiter(SyncState).run));
+
+    platform_grt.time.sleep(10 * glib.time.duration.MilliSecond);
+    state.semaphore.post();
+    handle.join();
+
+    if (!state.woke) return error.SemaphoreWaitFailed;
+}
+
+fn assertTimeout(result: error{Timeout}!void) !void {
+    result catch |err| switch (err) {
+        error.Timeout => return,
+    };
+    return error.ExpectedTimeout;
 }
 
 fn smokeChannel(comptime platform_grt: type, allocator: platform_grt.std.mem.Allocator) !void {
@@ -210,6 +246,15 @@ fn conditionWaiter(comptime SyncState: type) type {
             }
             state.woke = true;
             state.mutex.unlock();
+        }
+    };
+}
+
+fn semaphoreWaiter(comptime SyncState: type) type {
+    return struct {
+        pub fn run(state: *SyncState) void {
+            state.semaphore.wait();
+            state.woke = true;
         }
     };
 }

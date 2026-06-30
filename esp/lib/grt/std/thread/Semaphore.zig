@@ -1,48 +1,78 @@
+const glib = @import("glib");
 const binding = @import("binding.zig");
 
 const Handle = binding.Handle;
 const pd_true = binding.pd_true;
+const uninitialized: usize = 0;
+const initializing: usize = 1;
+const semaphore_max_count = glib.std.math.maxInt(u32);
+const ns_per_s: u64 = 1_000_000_000;
 
-pub const Error = error{CreateFailed};
+permits: usize = 0,
+handle_bits: glib.std.atomic.Value(usize) = glib.std.atomic.Value(usize).init(uninitialized),
 
-handle: Handle = null,
+const Semaphore = @This();
 
-const Self = @This();
+pub fn wait(self: *Semaphore) void {
+    const handle = self.ensureHandle();
+    while (binding.espz_semaphore_take(handle, binding.max_delay) != pd_true) {}
+}
 
-pub fn initBinary(initially_available: bool) Error!Self {
-    var self = Self{
-        .handle = binding.espz_semaphore_create_binary() orelse return error.CreateFailed,
-    };
-    errdefer self.deinit();
+pub fn timedWait(self: *Semaphore, timeout_ns: u64) error{Timeout}!void {
+    const handle = self.ensureHandle();
+    if (binding.espz_semaphore_take(handle, nsToTicksCeil(timeout_ns)) == pd_true) return;
+    return error.Timeout;
+}
 
-    if (initially_available) {
-        _ = binding.espz_semaphore_give(self.handle);
+pub fn post(self: *Semaphore) void {
+    const handle = self.ensureHandle();
+    _ = binding.espz_semaphore_give(handle);
+}
+
+pub fn rawHandle(self: *Semaphore) Handle {
+    return self.currentHandle();
+}
+
+fn ensureHandle(self: *Semaphore) Handle {
+    while (true) {
+        const bits = self.handle_bits.load(.acquire);
+        switch (bits) {
+            uninitialized => {
+                if (self.handle_bits.cmpxchgWeak(uninitialized, initializing, .acq_rel, .acquire) == null) {
+                    const initial: u32 = @intCast(@min(self.permits, semaphore_max_count));
+                    const handle = binding.espz_semaphore_create_counting(semaphore_max_count, initial) orelse
+                        @panic("freertos.thread.Semaphore: xSemaphoreCreateCounting failed");
+                    self.handle_bits.store(@intFromPtr(handle), .release);
+                    return handle;
+                }
+            },
+            initializing => binding.espz_freertos_thread_yield(),
+            else => return @ptrFromInt(bits),
+        }
     }
-    return self;
 }
 
-pub fn initCounting(max_count: u32, initial_count: u32) Error!Self {
-    return .{
-        .handle = binding.espz_semaphore_create_counting(max_count, initial_count) orelse
-            return error.CreateFailed,
+fn currentHandle(self: *Semaphore) Handle {
+    const bits = self.handle_bits.load(.acquire);
+    return switch (bits) {
+        uninitialized, initializing => null,
+        else => @ptrFromInt(bits),
     };
 }
 
-pub fn deinit(self: *Self) void {
-    if (self.handle) |handle| {
-        binding.espz_semaphore_delete(handle);
-        self.handle = null;
-    }
-}
+fn nsToTicksCeil(timeout_ns: u64) u32 {
+    if (timeout_ns == 0) return 0;
 
-pub fn take(self: *Self, ticks: u32) bool {
-    return binding.espz_semaphore_take(self.handle, ticks) == pd_true;
-}
+    const tick_rate_hz = binding.espz_freertos_tick_rate_hz();
+    if (tick_rate_hz == 0) return binding.max_delay;
 
-pub fn give(self: *Self) bool {
-    return binding.espz_semaphore_give(self.handle) == pd_true;
-}
+    const tick_ns = ns_per_s / tick_rate_hz;
+    if (tick_ns == 0) return binding.max_delay;
 
-pub fn rawHandle(self: *const Self) Handle {
-    return self.handle;
+    const extra = tick_ns - 1;
+    const adjusted, const overflow = @addWithOverflow(timeout_ns, extra);
+    if (overflow != 0) return binding.max_delay;
+    const ticks = adjusted / tick_ns;
+    if (ticks > binding.max_delay) return binding.max_delay;
+    return @intCast(ticks);
 }

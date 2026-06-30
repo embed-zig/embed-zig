@@ -185,6 +185,7 @@ pub const runtime = struct {
                 pub const Arc = @import("sync").Arc;
                 pub const Mutex = @import("sync").Mutex.make(runtime_sync.Mutex);
                 pub const Condition = @import("sync").Condition.make(runtime_sync.Condition);
+                pub const Semaphore = @import("sync").Semaphore.make(runtime_sync.Semaphore);
                 pub const RwLock = @import("sync").RwLock.make(runtime_sync.RwLock);
                 pub const ChannelFactory = channel_factory;
                 pub const Channel = @import("sync").Channel(Self.std, channel_factory);
@@ -217,6 +218,7 @@ pub const runtime = struct {
             pub const sync = struct {
                 pub const Mutex = @import("sync").Mutex.make(SyncImpl.Mutex);
                 pub const Condition = @import("sync").Condition.make(SyncImpl.Condition);
+                pub const Semaphore = @import("sync").Semaphore.make(SyncImpl.Semaphore);
                 pub const RwLock = @import("sync").RwLock.make(SyncImpl.RwLock);
             };
             pub const log = RawStd.log;
@@ -296,6 +298,7 @@ pub const runtime = struct {
         pub const SpawnError = RemovedThreadMember("SpawnError", "the selected grt.task.SpawnError");
         pub const Mutex = RemovedThreadMember("Mutex", "grt.sync.Mutex");
         pub const Condition = RemovedThreadMember("Condition", "grt.sync.Condition");
+        pub const Semaphore = RemovedThreadMember("Semaphore", "grt.sync.Semaphore");
         pub const RwLock = RemovedThreadMember("RwLock", "grt.sync.RwLock");
 
         pub fn spawn(_: anytype, comptime _: anytype, _: anytype) void {

@@ -22,6 +22,7 @@ const racer_mod = @import("sync/Racer.zig");
 pub const Arc = @import("sync/Arc.zig");
 pub const Mutex = @import("sync/Mutex.zig");
 pub const Condition = @import("sync/Condition.zig");
+pub const Semaphore = @import("sync/Semaphore.zig");
 pub const RwLock = @import("sync/RwLock.zig");
 pub const Pool = @import("sync/Pool.zig");
 pub const Timer = @import("sync/Timer.zig");
