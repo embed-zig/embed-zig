@@ -4,9 +4,6 @@ const glib = @import("glib");
 
 const bt = @import("../../bt.zig");
 const att = @import("att.zig");
-const Chunk = @import("xfer.zig").Chunk;
-const sender_mod = @import("server/Sender.zig");
-const receiver_mod = @import("server/Receiver.zig");
 
 const root = @This();
 
@@ -194,14 +191,6 @@ pub fn make(comptime grt: type) type {
             onSubscription: ?OnSubscriptionFn = null,
         };
         pub const Subscription = root.Subscription(grt, Self);
-        pub const Sender = sender_mod.make(grt, Self);
-        pub const Receiver = receiver_mod.make(grt, Self);
-        pub const XferReadRequest = sender_mod.Request;
-        pub const XferWriteRequest = receiver_mod.Request;
-        pub const XferHandler = struct {
-            onRead: ?Sender.HandlerFn = null,
-            onWrite: ?receiver_mod.HandlerFn = null,
-        };
         pub const HandleError = error{
             DuplicateRoute,
             Unexpected,
@@ -213,188 +202,6 @@ pub fn make(comptime grt: type) type {
         const Route = struct {
             handler: Handler,
             ctx: ?*anyopaque,
-        };
-        const XferRoute = struct {
-            allocator: glib.std.mem.Allocator,
-            sender: Sender,
-            receiver: Receiver,
-            has_read_handler: bool,
-            has_write_handler: bool,
-            pending_subscriptions: grt.std.AutoHashMapUnmanaged(u16, Self.Subscription) = .{},
-            mutex: grt.sync.Mutex = .{},
-
-            fn init(
-                allocator: glib.std.mem.Allocator,
-                xfer_handler: XferHandler,
-                ctx: ?*anyopaque,
-            ) !XferRoute {
-                var sender = Sender.init(allocator);
-                errdefer sender.deinit();
-                var receiver = Receiver.init(allocator);
-                errdefer receiver.deinit();
-
-                if (xfer_handler.onRead) |read_handler| {
-                    try sender.handle(read_handler, ctx);
-                }
-                if (xfer_handler.onWrite) |write_handler| {
-                    try receiver.handle(write_handler, ctx);
-                }
-
-                return .{
-                    .allocator = allocator,
-                    .sender = sender,
-                    .receiver = receiver,
-                    .has_read_handler = xfer_handler.onRead != null,
-                    .has_write_handler = xfer_handler.onWrite != null,
-                };
-            }
-
-            fn deinit(self: *XferRoute) void {
-                self.mutex.lock();
-                var pending = self.pending_subscriptions;
-                self.pending_subscriptions = .{};
-                self.mutex.unlock();
-
-                var pending_iter = pending.iterator();
-                while (pending_iter.next()) |entry| {
-                    var subscription = entry.value_ptr.*;
-                    subscription.deinit();
-                }
-                pending.deinit(self.allocator);
-                self.sender.deinit();
-                self.receiver.deinit();
-            }
-
-            fn handler(self: *XferRoute) Handler {
-                _ = self;
-                return .{
-                    .onRequest = xferOnRequest,
-                    .onSubscription = xferOnSubscription,
-                };
-            }
-
-            fn xferOnRequest(ctx: ?*anyopaque, req: *const bt.Peripheral.Request, rw: *bt.Peripheral.ResponseWriter) void {
-                const self: *XferRoute = @ptrCast(@alignCast(ctx.?));
-                self.dispatchRequest(req, rw);
-            }
-
-            fn xferOnSubscription(ctx: ?*anyopaque, subscription: Self.Subscription) void {
-                const self: *XferRoute = @ptrCast(@alignCast(ctx.?));
-                self.replaceSubscription(subscription);
-            }
-
-            fn dispatchRequest(self: *XferRoute, req: *const bt.Peripheral.Request, rw: *bt.Peripheral.ResponseWriter) void {
-                if (self.sender.hasActiveSession(req.conn_handle)) {
-                    if (Chunk.isWriteStartMagic(req.data)) {
-                        rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
-                        return;
-                    }
-                    self.sender.dispatchRequest(req, rw);
-                    return;
-                }
-
-                if (self.receiver.hasActiveSession(req.conn_handle)) {
-                    if (req.data.len == Chunk.read_start_magic.len and Chunk.isReadStartMagic(req.data)) {
-                        rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
-                        return;
-                    }
-                    self.receiver.dispatchRequest(req, rw);
-                    return;
-                }
-
-                if (req.data.len == Chunk.read_start_magic.len and Chunk.isReadStartMagic(req.data)) {
-                    if (!self.has_read_handler) {
-                        rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
-                        return;
-                    }
-                    var subscription = self.takePendingSubscription(req.conn_handle) orelse {
-                        rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
-                        return;
-                    };
-                    if (Self.Subscription.isClosed(subscription.state)) {
-                        subscription.deinit();
-                        rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
-                        return;
-                    }
-                    self.sender.start(subscription) catch {
-                        rw.err(@intFromEnum(att.ErrorCode.insufficient_resources));
-                        return;
-                    };
-                    self.sender.dispatchRequest(req, rw);
-                    return;
-                }
-
-                if (req.data.len == Chunk.write_start_magic.len and Chunk.isWriteStartMagic(req.data)) {
-                    if (!self.has_write_handler) {
-                        rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
-                        return;
-                    }
-                    var subscription = self.takePendingSubscription(req.conn_handle) orelse {
-                        rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
-                        return;
-                    };
-                    if (Self.Subscription.isClosed(subscription.state)) {
-                        subscription.deinit();
-                        rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
-                        return;
-                    }
-                    self.receiver.start(subscription) catch {
-                        rw.err(@intFromEnum(att.ErrorCode.insufficient_resources));
-                        return;
-                    };
-                    self.receiver.dispatchRequest(req, rw);
-                    return;
-                }
-
-                rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
-            }
-
-            fn replaceSubscription(self: *XferRoute, sub: Self.Subscription) void {
-                var subscription = sub;
-                const conn_handle = subscription.connHandle();
-
-                self.sender.closeSession(conn_handle);
-                self.receiver.closeSession(conn_handle);
-
-                self.mutex.lock();
-                const existing = self.pending_subscriptions.get(conn_handle);
-                const gop = self.pending_subscriptions.getOrPut(self.allocator, conn_handle) catch {
-                    self.mutex.unlock();
-                    subscription.deinit();
-                    return;
-                };
-                gop.value_ptr.* = subscription;
-                self.mutex.unlock();
-
-                if (existing) |old| {
-                    var old_subscription = old;
-                    old_subscription.deinit();
-                }
-            }
-
-            fn takePendingSubscription(self: *XferRoute, conn_handle: u16) ?Self.Subscription {
-                self.mutex.lock();
-                defer self.mutex.unlock();
-
-                const subscription = self.pending_subscriptions.get(conn_handle) orelse return null;
-                _ = self.pending_subscriptions.remove(conn_handle);
-                return subscription;
-            }
-
-            fn disconnectConn(self: *XferRoute, conn_handle: u16) void {
-                self.sender.closeSession(conn_handle);
-                self.receiver.closeSession(conn_handle);
-
-                self.mutex.lock();
-                if (self.pending_subscriptions.get(conn_handle)) |sub| {
-                    _ = self.pending_subscriptions.remove(conn_handle);
-                    self.mutex.unlock();
-                    var sub_mut = sub;
-                    sub_mut.deinit();
-                } else {
-                    self.mutex.unlock();
-                }
-            }
         };
         const ConnState = struct {
             att_mtu: u16 = att.DEFAULT_MTU,
@@ -422,7 +229,6 @@ pub fn make(comptime grt: type) type {
         hook_installed: bool = false,
         mutex: grt.sync.Mutex = .{},
         routes: grt.std.AutoHashMapUnmanaged(CharKey, Route) = .{},
-        xfer_routes: grt.std.AutoHashMapUnmanaged(CharKey, *XferRoute) = .{},
         conns: grt.std.AutoHashMapUnmanaged(u16, ConnState) = .{},
 
         pub fn init(allocator: glib.std.mem.Allocator) !Self {
@@ -457,21 +263,11 @@ pub fn make(comptime grt: type) type {
             }
 
             self.mutex.lock();
-            var xfer_routes = self.xfer_routes;
-            self.xfer_routes = .{};
             var conns = self.conns;
             self.conns = .{};
             var routes = self.routes;
             self.routes = .{};
             self.mutex.unlock();
-
-            var xfer_iter = xfer_routes.iterator();
-            while (xfer_iter.next()) |entry| {
-                const route = entry.value_ptr.*;
-                route.deinit();
-                self.allocator.destroy(route);
-            }
-            xfer_routes.deinit(self.allocator);
 
             var conn_iter = conns.iterator();
             while (conn_iter.next()) |entry| {
@@ -513,36 +309,6 @@ pub fn make(comptime grt: type) type {
 
         pub fn handle(self: *Self, service_uuid: u16, char_uuid: u16, handler: Handler, ctx: ?*anyopaque) HandleError!void {
             return self.registerRoute(service_uuid, char_uuid, handler, ctx);
-        }
-
-        pub fn handleX(
-            self: *Self,
-            service_uuid: u16,
-            char_uuid: u16,
-            xfer_handler: XferHandler,
-            ctx: ?*anyopaque,
-        ) HandleError!void {
-            const route = self.allocator.create(XferRoute) catch return error.Unexpected;
-            errdefer self.allocator.destroy(route);
-
-            route.* = XferRoute.init(self.allocator, xfer_handler, ctx) catch return error.Unexpected;
-            errdefer route.deinit();
-
-            const key = charKey(service_uuid, char_uuid);
-            self.mutex.lock();
-            defer self.mutex.unlock();
-
-            if (self.routes.contains(key)) {
-                return error.DuplicateRoute;
-            }
-            self.routes.put(self.allocator, key, .{
-                .handler = route.handler(),
-                .ctx = route,
-            }) catch return error.Unexpected;
-            self.xfer_routes.put(self.allocator, key, route) catch {
-                _ = self.routes.remove(key);
-                return error.Unexpected;
-            };
         }
 
         fn unregisterSubscription(self: *Self, state: *Self.Subscription.State) bool {
@@ -588,28 +354,6 @@ pub fn make(comptime grt: type) type {
             return conn;
         }
 
-        fn cleanupXferRoutesForDisconnect(self: *Self, conn_handle: u16) void {
-            var routes = grt.std.ArrayListUnmanaged(*XferRoute).empty;
-            defer routes.deinit(self.allocator);
-
-            self.mutex.lock();
-            var xfer_it = self.xfer_routes.iterator();
-            while (xfer_it.next()) |entry| {
-                routes.append(self.allocator, entry.value_ptr.*) catch {
-                    self.mutex.unlock();
-                    for (routes.items) |route| {
-                        route.disconnectConn(conn_handle);
-                    }
-                    return;
-                };
-            }
-            self.mutex.unlock();
-
-            for (routes.items) |route| {
-                route.disconnectConn(conn_handle);
-            }
-        }
-
         fn onRequest(ctx: ?*anyopaque, req: *const bt.Peripheral.Request, rw: *bt.Peripheral.ResponseWriter) void {
             const self: *Self = @ptrCast(@alignCast(ctx.?));
             self.dispatchRequest(req, rw);
@@ -650,11 +394,7 @@ pub fn make(comptime grt: type) type {
             self.mutex.lock();
             self.closeMatchingLocked(info.conn_handle, info.service_uuid, info.char_uuid);
             if (info.cccd_value == 0) {
-                const xfer_route = self.xfer_routes.get(charKey(info.service_uuid, info.char_uuid));
                 self.mutex.unlock();
-                if (xfer_route) |route| {
-                    route.disconnectConn(info.conn_handle);
-                }
                 return;
             }
 
@@ -696,8 +436,6 @@ pub fn make(comptime grt: type) type {
         }
 
         fn handleDisconnect(self: *Self, conn_handle: u16) void {
-            self.cleanupXferRoutesForDisconnect(conn_handle);
-
             self.mutex.lock();
             if (self.takeConnLocked(conn_handle)) |conn_state| {
                 var conn = conn_state;
@@ -792,20 +530,24 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             const Impl = make(grt);
 
             const HandlerState = struct {
-                read_calls: usize = 0,
-                write_calls: usize = 0,
+                request_calls: usize = 0,
+                subscription_calls: usize = 0,
 
-                fn onRead(ctx: ?*anyopaque, allocator: glib.std.mem.Allocator, req: *const sender_mod.Request) ![]u8 {
+                fn onRequest(ctx: ?*anyopaque, req: *const bt.Peripheral.Request, rw: *bt.Peripheral.ResponseWriter) void {
                     const self: *@This() = @ptrCast(@alignCast(ctx.?));
-                    self.read_calls += 1;
-                    if (req.service_uuid != 0x180D or req.char_uuid != 0x2A58) return error.UnexpectedRequest;
-                    return allocator.dupe(u8, "ok");
+                    self.request_calls += 1;
+                    if (req.service_uuid != 0x180D or req.char_uuid != 0x2A58) {
+                        rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
+                        return;
+                    }
+                    rw.ok();
                 }
 
-                fn onWrite(ctx: ?*anyopaque, req: *const receiver_mod.Request) void {
+                fn onSubscription(ctx: ?*anyopaque, subscription: Impl.Subscription) void {
                     const self: *@This() = @ptrCast(@alignCast(ctx.?));
-                    self.write_calls += 1;
-                    _ = req;
+                    self.subscription_calls += 1;
+                    var sub = subscription;
+                    sub.deinit();
                 }
             };
             const request_not_supported = @as(?u8, @intFromEnum(att.ErrorCode.request_not_supported));
@@ -815,11 +557,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 defer server.deinit();
 
                 var handler_state = HandlerState{};
-                try server.handleX(0x180D, 0x2A58, .{
-                    .onRead = HandlerState.onRead,
+                try server.handle(0x180D, 0x2A58, .{
+                    .onRequest = HandlerState.onRequest,
                 }, &handler_state);
-                try grt.std.testing.expectError(error.DuplicateRoute, server.handleX(0x180D, 0x2A58, .{
-                    .onWrite = HandlerState.onWrite,
+                try grt.std.testing.expectError(error.DuplicateRoute, server.handle(0x180D, 0x2A58, .{
+                    .onRequest = HandlerState.onRequest,
                 }, &handler_state));
             }
 
@@ -828,15 +570,9 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 defer server.deinit();
 
                 var handler_state = HandlerState{};
-                try server.handleX(0x180D, 0x2A58, .{
-                    .onRead = HandlerState.onRead,
+                try server.handle(0x180D, 0x2A58, .{
+                    .onRequest = HandlerState.onRequest,
                 }, &handler_state);
-                server.handleSubscriptionChanged(.{
-                    .conn_handle = 1,
-                    .service_uuid = 0x180D,
-                    .char_uuid = 0x2A58,
-                    .cccd_value = 0x0001,
-                });
 
                 var writer_state = WriterState{};
                 var rw = bt.Peripheral.ResponseWriter{
@@ -850,29 +586,18 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     .conn_handle = 1,
                     .service_uuid = 0x180D,
                     .char_uuid = 0x2A58,
-                    .data = &Chunk.write_start_magic,
+                    .data = "ok",
                 };
                 server.dispatchRequest(&write_req, &rw);
 
-                try grt.std.testing.expectEqual(request_not_supported, writer_state.err_code);
-                try grt.std.testing.expectEqual(@as(usize, 0), writer_state.ok_count);
-                try grt.std.testing.expectEqual(@as(usize, 0), handler_state.write_calls);
+                try grt.std.testing.expectEqual(@as(?u8, null), writer_state.err_code);
+                try grt.std.testing.expectEqual(@as(usize, 1), writer_state.ok_count);
+                try grt.std.testing.expectEqual(@as(usize, 1), handler_state.request_calls);
             }
 
             {
                 var server = try Impl.init(grt.std.testing.allocator);
                 defer server.deinit();
-
-                var handler_state = HandlerState{};
-                try server.handleX(0x180D, 0x2A58, .{
-                    .onWrite = HandlerState.onWrite,
-                }, &handler_state);
-                server.handleSubscriptionChanged(.{
-                    .conn_handle = 1,
-                    .service_uuid = 0x180D,
-                    .char_uuid = 0x2A58,
-                    .cccd_value = 0x0001,
-                });
 
                 var writer_state = WriterState{};
                 var rw = bt.Peripheral.ResponseWriter{
@@ -886,13 +611,12 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     .conn_handle = 1,
                     .service_uuid = 0x180D,
                     .char_uuid = 0x2A58,
-                    .data = &Chunk.read_start_magic,
+                    .data = "ok",
                 };
                 server.dispatchRequest(&read_req, &rw);
 
                 try grt.std.testing.expectEqual(request_not_supported, writer_state.err_code);
                 try grt.std.testing.expectEqual(@as(usize, 0), writer_state.ok_count);
-                try grt.std.testing.expectEqual(@as(usize, 0), handler_state.read_calls);
             }
 
             {
@@ -900,119 +624,16 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 defer server.deinit();
 
                 var handler_state = HandlerState{};
-                try server.handleX(0x180D, 0x2A58, .{
-                    .onRead = HandlerState.onRead,
+                try server.handle(0x180D, 0x2A58, .{
+                    .onSubscription = HandlerState.onSubscription,
                 }, &handler_state);
                 server.handleSubscriptionChanged(.{
-                    .conn_handle = 7,
+                    .conn_handle = 1,
                     .service_uuid = 0x180D,
                     .char_uuid = 0x2A58,
                     .cccd_value = 0x0001,
                 });
-                server.handleDisconnect(7);
-
-                var writer_state = WriterState{};
-                var rw = bt.Peripheral.ResponseWriter{
-                    ._impl = &writer_state,
-                    ._write_fn = WriterState.writeFn,
-                    ._ok_fn = WriterState.okFn,
-                    ._err_fn = WriterState.errFn,
-                };
-                const read_req = bt.Peripheral.Request{
-                    .op = .write,
-                    .conn_handle = 7,
-                    .service_uuid = 0x180D,
-                    .char_uuid = 0x2A58,
-                    .data = &Chunk.read_start_magic,
-                };
-                server.dispatchRequest(&read_req, &rw);
-
-                try grt.std.testing.expectEqual(request_not_supported, writer_state.err_code);
-                try grt.std.testing.expectEqual(@as(usize, 0), writer_state.ok_count);
-                try grt.std.testing.expectEqual(@as(usize, 0), handler_state.read_calls);
-            }
-
-            {
-                var server = try Impl.init(grt.std.testing.allocator);
-                defer server.deinit();
-
-                var handler_state = HandlerState{};
-                try server.handleX(0x180D, 0x2A58, .{
-                    .onWrite = HandlerState.onWrite,
-                }, &handler_state);
-                server.handleSubscriptionChanged(.{
-                    .conn_handle = 9,
-                    .service_uuid = 0x180D,
-                    .char_uuid = 0x2A58,
-                    .cccd_value = 0x0001,
-                });
-                server.handleSubscriptionChanged(.{
-                    .conn_handle = 9,
-                    .service_uuid = 0x180D,
-                    .char_uuid = 0x2A58,
-                    .cccd_value = 0x0000,
-                });
-
-                var writer_state = WriterState{};
-                var rw = bt.Peripheral.ResponseWriter{
-                    ._impl = &writer_state,
-                    ._write_fn = WriterState.writeFn,
-                    ._ok_fn = WriterState.okFn,
-                    ._err_fn = WriterState.errFn,
-                };
-                const write_req = bt.Peripheral.Request{
-                    .op = .write,
-                    .conn_handle = 9,
-                    .service_uuid = 0x180D,
-                    .char_uuid = 0x2A58,
-                    .data = &Chunk.write_start_magic,
-                };
-                server.dispatchRequest(&write_req, &rw);
-
-                try grt.std.testing.expectEqual(request_not_supported, writer_state.err_code);
-                try grt.std.testing.expectEqual(@as(usize, 0), writer_state.ok_count);
-                try grt.std.testing.expectEqual(@as(usize, 0), handler_state.write_calls);
-            }
-
-            {
-                var server = try Impl.init(grt.std.testing.allocator);
-                defer server.deinit();
-
-                var handler_state = HandlerState{};
-                try server.handleX(0x180D, 0x2A58, .{
-                    .onRead = HandlerState.onRead,
-                }, &handler_state);
-                server.handleSubscriptionChanged(.{
-                    .conn_handle = 11,
-                    .service_uuid = 0x180D,
-                    .char_uuid = 0x2A58,
-                    .cccd_value = 0x0001,
-                });
-
-                const route = server.xfer_routes.get(Impl.charKey(0x180D, 0x2A58)).?;
-                const stale = route.takePendingSubscription(11).?;
-                Impl.Subscription.close(stale.state);
-                route.replaceSubscription(stale);
-
-                var writer_state = WriterState{};
-                var rw = bt.Peripheral.ResponseWriter{
-                    ._impl = &writer_state,
-                    ._write_fn = WriterState.writeFn,
-                    ._ok_fn = WriterState.okFn,
-                    ._err_fn = WriterState.errFn,
-                };
-                const read_req = bt.Peripheral.Request{
-                    .op = .write,
-                    .conn_handle = 11,
-                    .service_uuid = 0x180D,
-                    .char_uuid = 0x2A58,
-                    .data = &Chunk.read_start_magic,
-                };
-                server.dispatchRequest(&read_req, &rw);
-
-                try grt.std.testing.expectEqual(request_not_supported, writer_state.err_code);
-                try grt.std.testing.expectEqual(@as(usize, 0), writer_state.ok_count);
-                try grt.std.testing.expectEqual(@as(usize, 0), handler_state.read_calls);
+                try grt.std.testing.expectEqual(@as(usize, 1), handler_state.subscription_calls);
             }
         }
     };

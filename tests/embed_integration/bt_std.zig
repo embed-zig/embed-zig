@@ -24,7 +24,7 @@ test "embed/bt/integration/std" {
 
     std.testing.log_level = .info;
 
-    // The BT integration pair/xfer runners share in-process mock host state.
+    // The BT integration pair runner shares in-process mock host state.
     const TestStd = glib.testing.std.make(gstd.runtime.std, .{ .isolate_thread = false });
     var t = glib.testing.T.new(TestStd, gstd.runtime.time, .bt);
     defer t.deinit();

@@ -11,7 +11,6 @@ pub const test_runner = struct {
     pub const unit = @import("bt/test_runner/unit.zig");
     pub const integration = @import("bt/test_runner/integration.zig");
     pub const pair = @import("bt/test_runner/pair.zig");
-    pub const pair_xfer = @import("bt/test_runner/pair_xfer.zig");
 };
 
 const Server = @import("bt/host/Server.zig");

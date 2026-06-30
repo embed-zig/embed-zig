@@ -1,11 +1,9 @@
 //! host.client.Characteristic — resolved characteristic bound to one connection.
 
-const glib = @import("glib");
-const att = @import("../att.zig");
 const bt = @import("../../../bt.zig");
-const xfer = @import("../xfer.zig");
 
 pub fn Characteristic(comptime grt: type, comptime ClientType: type, comptime SubscriptionType: type) type {
+    _ = grt;
     return struct {
         client: *ClientType,
         conn_handle: u16,
@@ -22,84 +20,6 @@ pub fn Characteristic(comptime grt: type, comptime ClientType: type, comptime Su
         const PROP_WRITE: u8 = 0x08;
         const PROP_NOTIFY: u8 = 0x10;
         const PROP_INDICATE: u8 = 0x20;
-        const default_read_timeout: glib.time.duration.Duration = glib.time.duration.Second;
-        const default_read_max_retries: u8 = 5;
-        const default_write_timeout: glib.time.duration.Duration = 5 * glib.time.duration.Second;
-        const default_send_redundancy: u8 = 3;
-        const control_write_max_attempts: u32 = 3;
-        const control_write_retry_delay: glib.time.duration.Duration = glib.time.duration.MilliSecond;
-        const ReadTx = struct {
-            characteristic: *Self,
-            subscription: SubscriptionType,
-
-            const Transport = @This();
-
-            pub fn init(characteristic: *Self) !Transport {
-                return .{
-                    .characteristic = characteristic,
-                    .subscription = try characteristic.subscribe(),
-                };
-            }
-
-            pub fn read(self: *Transport, timeout: glib.time.duration.Duration, out: []u8) !usize {
-                const notif = self.subscription.next(timeout) catch |err| switch (err) {
-                    error.TimedOut => return error.Timeout,
-                    else => return err,
-                } orelse return error.Closed;
-
-                const payload = notif.payload();
-                if (payload.len > out.len) return error.NoSpaceLeft;
-                @memcpy(out[0..payload.len], payload);
-                return payload.len;
-            }
-
-            pub fn write(self: *Transport, data: []const u8) !usize {
-                try self.characteristic.writeControl(data);
-                return data.len;
-            }
-
-            pub fn deinit(self: *Transport) void {
-                self.subscription.deinit();
-            }
-        };
-        const WriteTx = struct {
-            characteristic: *Self,
-            subscription: SubscriptionType,
-
-            const Transport = @This();
-
-            pub fn init(characteristic: *Self) !Transport {
-                return .{
-                    .characteristic = characteristic,
-                    .subscription = try characteristic.subscribe(),
-                };
-            }
-
-            pub fn read(self: *Transport, timeout: glib.time.duration.Duration, out: []u8) anyerror!usize {
-                const notif = (try self.subscription.next(timeout)) orelse return error.Closed;
-                const payload = notif.payload();
-                if (payload.len > out.len) return error.NoSpaceLeft;
-                @memcpy(out[0..payload.len], payload);
-                return payload.len;
-            }
-
-            pub fn write(self: *Transport, payload: []const u8) !usize {
-                try self.characteristic.writeControl(payload);
-                return payload.len;
-            }
-
-            pub fn writeNoResp(self: *Transport, payload: []const u8) !usize {
-                self.characteristic.writeNoResp(payload) catch |err| switch (err) {
-                    error.AttError => try self.characteristic.write(payload),
-                    else => return err,
-                };
-                return payload.len;
-            }
-
-            pub fn deinit(self: *Transport) void {
-                self.subscription.deinit();
-            }
-        };
 
         pub fn init(client: *ClientType, conn_handle: u16, service_uuid: u16, characteristic_uuid: u16, desc: bt.Central.DiscoveredChar) Self {
             return .{
@@ -133,29 +53,6 @@ pub fn Characteristic(comptime grt: type, comptime ClientType: type, comptime Su
             return self.client.attMtu(self.conn_handle);
         }
 
-        pub fn writeX(self: *Self, data: []const u8) !void {
-            var transport = try WriteTx.init(self);
-            const mtu = effectiveMtu(self);
-            return xfer.write(grt, self.client.allocator, &transport, data, .{
-                .att_mtu = mtu,
-                .timeout = default_write_timeout,
-                .send_redundancy = default_send_redundancy,
-            });
-        }
-
-        pub fn readX(self: *Self, allocator: glib.std.mem.Allocator) ![]u8 {
-            var transport = try ReadTx.init(self);
-            const mtu = effectiveMtu(self);
-            return xfer.read(grt, allocator, &transport, .{
-                .att_mtu = mtu,
-                .timeout = default_read_timeout,
-                .max_timeout_retries = default_read_max_retries,
-            }) catch |err| switch (err) {
-                error.Closed => return error.SubscriptionClosed,
-                else => return err,
-            };
-        }
-
         pub fn subscribe(self: *Self) ClientType.GattError!SubscriptionType {
             if (self.cccd_handle == 0) return error.AttError;
             if (self.hasNotify()) {
@@ -185,31 +82,6 @@ pub fn Characteristic(comptime grt: type, comptime ClientType: type, comptime Su
 
         pub fn hasIndicate(self: *const Self) bool {
             return (self.properties & PROP_INDICATE) != 0;
-        }
-
-        fn effectiveMtu(self: *Self) u16 {
-            const raw_mtu = self.attMtu();
-            if (raw_mtu < att.DEFAULT_MTU) return att.DEFAULT_MTU;
-            return @min(raw_mtu, @as(u16, @intCast(xfer.Chunk.max_mtu)));
-        }
-
-        // xfer control packets (`read_start`, `write_start`, loss lists, ACKs) are
-        // idempotent and can safely tolerate one noisy ATT write round-trip.
-        fn writeControl(self: *Self, data: []const u8) ClientType.GattError!void {
-            var attempt: u32 = 0;
-            while (attempt < control_write_max_attempts) : (attempt += 1) {
-                self.write(data) catch |err| switch (err) {
-                    error.AttError, error.Timeout => {
-                        if (attempt + 1 < control_write_max_attempts) {
-                            grt.time.sleep(control_write_retry_delay);
-                            continue;
-                        }
-                        return err;
-                    },
-                    else => return err,
-                };
-                return;
-            }
         }
     };
 }

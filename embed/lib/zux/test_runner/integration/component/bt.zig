@@ -106,7 +106,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
         }
     };
 
-    // Mocker world + polling loop; similar stack demand to BT xfer harness glue.
+    // Mocker world + polling loop needs a larger integration-test stack.
     return glib.testing.TestRunner.fromFn(grt.std, 96 * 1024, struct {
         fn run(t: *glib.testing.T, allocator: glib.std.mem.Allocator) !void {
             _ = t;

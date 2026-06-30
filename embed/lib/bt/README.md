@@ -27,7 +27,6 @@ is planned as a future addition under the same package.
   - [Hci](#hci)
   - [Host facade](#host-facade)
   - [Client and Server](#client-and-server)
-  - [Transfer extensions](#transfer-extensions)
   - [hci (codec)](#hci-codec)
   - [l2cap](#l2cap)
   - [att](#att)
@@ -145,17 +144,7 @@ lib/bt/
     att.zig                   ATT PDU codec, UUID, opcodes (Vol 3 Part F)
     Gap.zig                   LE GAP state machine: adv, scan, connect
     client/
-      Characteristic.zig      Host-level characteristic helpers including readX/writeX
-    server/
-      Sender.zig              Chunked read responder bound to one characteristic
-      Receiver.zig            Chunked write receiver bound to one characteristic
-    xfer/
-      // host.Server / host.Client protocol helpers
-      Chunk.zig               Shared xfer wire helpers
-      read.zig                Client read-side transfer loop
-      write.zig               Client write-side transfer loop
-      send.zig                Server send-side transfer loop
-      recv.zig                Server receive-side transfer loop
+      Characteristic.zig      Host-level characteristic helpers
     gatt/
       server.zig              GATT server: comptime service table, PDU dispatch
       client.zig              GATT client: discovery, read, write, subscribe
@@ -180,10 +169,6 @@ lib/bt/
 │      └───────┬───────┘             no host/ needed)          │
 │              │                                               │
 │        host.Client    host.Server                            │
-│              │             │                                 │
-│              └───────┬─────┘                                 │
-│                      │                                       │
-│                     host/xfer                                │
 │                      │                                       │
 │          bt/host/Hci ─────────────────────────────┐          │
 │              │                                    │          │
@@ -335,7 +320,7 @@ The direction for the HCI backend is to expose two layers:
 
 1. A **portable role layer**: `bt.Central` and `bt.Peripheral`.
 2. A **host-only extension layer**: `bt.Host`, `host.Client`,
-   `host.Server`, and transfer-oriented helpers under `host/xfer/`.
+   and `host.Server`.
 
 This keeps the public portable surface small while still allowing richer
 host-side protocols to be built once and reused across raw-HCI targets.
@@ -405,43 +390,6 @@ bt.Host
   -> host.Central -> host.Client
   -> host.Peripheral -> host.Server
 ```
-
-### Transfer extensions
-
-The existing transfer-oriented helpers such as `readX` and `writeX` live
-under the host-only `host/xfer/` package instead of as a
-top-level `bt/xfer` package.
-
-Reasoning:
-
-- They are not backend-agnostic transport primitives.
-- They build on host client/server connection semantics and GATT conventions.
-- Future higher-level RPC or routing helpers should build above the existing
-  xfer engine rather than inside generic client or server wrappers.
-
-The layout is:
-
-```text
-host/xfer/
-  Chunk.zig
-  read.zig
-  write.zig
-  send.zig
-  recv.zig
-
-host/server/
-  Sender.zig
-  Receiver.zig
-```
-
-In other words, `xfer` becomes a **host-only transfer extension layer**,
-not a separate top-level Bluetooth abstraction.
-
-`host/client/Characteristic.zig` exposes the client convenience methods
-`readX` and `writeX`. On the server side, `host.Server.handleX(...)` bridges
-`host/server/Sender.zig` and `host/server/Receiver.zig` onto one xfer
-characteristic, while `host/xfer/send.zig` and `host/xfer/recv.zig` carry the
-shared protocol loops.
 
 Internally, `Hci` orchestrates:
 1. Send HCI commands via `Transport.send`
