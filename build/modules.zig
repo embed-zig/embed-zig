@@ -49,6 +49,7 @@ pub const apps_modules = [_]ModuleSpec{
     module2("apps", "zux_compress-smoke"),
     module2("apps", "zux_colorbar"),
     module2("apps", "zux_colorbar-adc"),
+    module2("apps", "zux_command-console"),
     module2("apps", "zux_fs-smoke"),
     module2("apps", "zux_kcp-test"),
     module2("apps", "zux_net-smoke"),

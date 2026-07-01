@@ -3,6 +3,7 @@ const std = @import("std");
 const lib_audio = @import("audio.zig");
 const lib_board = @import("board.zig");
 const lib_bt = @import("bt.zig");
+const lib_cmd = @import("cmd.zig");
 const lib_drivers = @import("drivers.zig");
 const lib_ledstrip = @import("ledstrip.zig");
 const lib_motion = @import("motion.zig");
@@ -19,6 +20,7 @@ pub fn create(
     const audio = lib_audio.create(b, target, optimize);
     const board = lib_board.create(b, target, optimize);
     const bt = lib_bt.create(b, target, optimize);
+    const cmd = lib_cmd.create(b, target, optimize);
     const drivers = lib_drivers.create(b, target, optimize);
     const ledstrip = lib_ledstrip.create(b, target, optimize);
     const motion = lib_motion.create(b, target, optimize);
@@ -38,6 +40,7 @@ pub fn create(
         .ledstrip = ledstrip,
     });
     lib_bt.link(b, target, optimize, bt);
+    lib_cmd.link(b, target, optimize, cmd);
     lib_drivers.link(b, target, optimize, drivers, .{
         .nfc = nfc,
     });
@@ -59,6 +62,7 @@ pub fn create(
     mod.addImport("audio", audio);
     mod.addImport("board", board);
     mod.addImport("bt", bt);
+    mod.addImport("cmd", cmd);
     mod.addImport("drivers", drivers);
     mod.addImport("ledstrip", ledstrip);
     mod.addImport("motion", motion);

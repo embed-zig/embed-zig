@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const buildtools = @import("buildtools");
 
 const upstream_remote_url = "https://github.com/skywind3000/kcp.git";
@@ -38,6 +39,9 @@ pub fn create(
     lib.root_module.addCSourceFile(.{
         .file = optimized.sourcePath("ikcp.c"),
     });
+    if (!isNativeTarget(target)) {
+        b.installArtifact(lib);
+    }
     optimized.dependOn(&lib.step);
 
     const mod = b.createModule(.{
@@ -75,6 +79,10 @@ fn addCommonInputs(
     if (b.sysroot) |sysroot| {
         mod.addSystemIncludePath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "include" }) });
     }
+}
+
+fn isNativeTarget(target: std.Build.ResolvedTarget) bool {
+    return target.result.cpu.arch == builtin.cpu.arch and target.result.os.tag == builtin.os.tag;
 }
 
 const PatchedUpstream = struct {
@@ -220,7 +228,11 @@ fn ensurePatched(
     for (patch_paths) |patch_path| {
         const patch_abs = try absolutePath(gpa, patch_path);
         defer gpa.free(patch_abs);
-        try runCommand(gpa, dest_abs, &.{ "patch", "-p1", "-i", patch_abs });
+        if (builtin.os.tag == .windows) {
+            try runCommand(gpa, dest_abs, &.{ "git", "apply", "--unsafe-paths", patch_abs });
+        } else {
+            try runCommand(gpa, dest_abs, &.{ "patch", "-p1", "-i", patch_abs });
+        }
     }
 
     var dest_dir = try std.fs.openDirAbsolute(dest_abs, .{});

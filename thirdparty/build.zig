@@ -36,6 +36,7 @@ pub fn build(b: *std.Build) void {
         "lvgl_c_sysroot",
         "Optional C sysroot used when compiling LVGL for freestanding embedded targets",
     ) orelse "";
+    if (lvgl_c_sysroot.len != 0) b.sysroot = lvgl_c_sysroot;
     const lvgl_c_short_enums = b.option(
         bool,
         "lvgl_c_short_enums",

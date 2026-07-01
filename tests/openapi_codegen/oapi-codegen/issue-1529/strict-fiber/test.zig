@@ -150,7 +150,7 @@ fn startServer(server: *ServerApi) !ServerRun {
 fn run_zig_semantic_equivalent_for_strict_framework_response_handli(t: *glib.testing.T, allocator: std.mem.Allocator) !void {
     _ = t;
     _ = allocator;
-    var ctx_ns = try glib.context.make(lib, gstd.runtime.time).init(std.testing.allocator);
+    var ctx_ns = try gstd.runtime.context.init(std.testing.allocator);
     defer ctx_ns.deinit();
     const bg = ctx_ns.background();
 

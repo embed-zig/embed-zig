@@ -92,6 +92,8 @@ var unsupported_central = UnsupportedCentral{};
 var unsupported_peripheral = UnsupportedPeripheral{};
 
 const UnsupportedCentral = struct {
+    pub fn deinit(_: *@This()) void {}
+
     pub fn start(_: *@This()) embed.bt.Central.StartError!void {
         return error.BluetoothUnavailable;
     }
@@ -99,7 +101,7 @@ const UnsupportedCentral = struct {
     pub fn stop(_: *@This()) void {}
 
     pub fn startScanning(_: *@This(), _: embed.bt.Central.ScanConfig) embed.bt.Central.ScanError!void {
-        return error.BluetoothUnavailable;
+        return error.Unexpected;
     }
 
     pub fn stopScanning(_: *@This()) void {}
@@ -110,45 +112,45 @@ const UnsupportedCentral = struct {
         _: embed.bt.Central.AddrType,
         _: embed.bt.Central.ConnParams,
     ) embed.bt.Central.ConnectError!embed.bt.Central.ConnectionInfo {
-        return error.BluetoothUnavailable;
+        return error.Unexpected;
     }
 
     pub fn disconnect(_: *@This(), _: u16) void {}
 
     pub fn discoverServices(_: *@This(), _: u16, _: []embed.bt.Central.DiscoveredService) embed.bt.Central.GattError!usize {
-        return error.NotConnected;
+        return error.Disconnected;
     }
 
     pub fn discoverChars(_: *@This(), _: u16, _: u16, _: u16, _: []embed.bt.Central.DiscoveredChar) embed.bt.Central.GattError!usize {
-        return error.NotConnected;
+        return error.Disconnected;
     }
 
     pub fn gattRead(_: *@This(), _: u16, _: u16, _: []u8) embed.bt.Central.GattError!usize {
-        return error.NotConnected;
+        return error.Disconnected;
     }
 
     pub fn gattWrite(_: *@This(), _: u16, _: u16, _: []const u8) embed.bt.Central.GattError!void {
-        return error.NotConnected;
+        return error.Disconnected;
     }
 
     pub fn gattWriteNoResp(_: *@This(), _: u16, _: u16, _: []const u8) embed.bt.Central.GattError!void {
-        return error.NotConnected;
+        return error.Disconnected;
     }
 
     pub fn exchangeMtu(_: *@This(), _: u16, _: u16) embed.bt.Central.GattError!u16 {
-        return error.NotConnected;
+        return error.Disconnected;
     }
 
     pub fn subscribe(_: *@This(), _: u16, _: u16) embed.bt.Central.GattError!void {
-        return error.NotConnected;
+        return error.Disconnected;
     }
 
     pub fn subscribeIndications(_: *@This(), _: u16, _: u16) embed.bt.Central.GattError!void {
-        return error.NotConnected;
+        return error.Disconnected;
     }
 
     pub fn unsubscribe(_: *@This(), _: u16, _: u16) embed.bt.Central.GattError!void {
-        return error.NotConnected;
+        return error.Disconnected;
     }
 
     pub fn getAttMtu(_: *@This(), _: u16) u16 {
@@ -169,6 +171,8 @@ const UnsupportedCentral = struct {
 };
 
 const UnsupportedPeripheral = struct {
+    pub fn deinit(_: *@This()) void {}
+
     pub fn start(_: *@This()) embed.bt.Peripheral.StartError!void {
         return error.BluetoothUnavailable;
     }
@@ -176,7 +180,7 @@ const UnsupportedPeripheral = struct {
     pub fn stop(_: *@This()) void {}
 
     pub fn startAdvertising(_: *@This(), _: embed.bt.Peripheral.AdvConfig) embed.bt.Peripheral.AdvError!void {
-        return error.BluetoothUnavailable;
+        return error.Unexpected;
     }
 
     pub fn stopAdvertising(_: *@This()) void {}
@@ -192,6 +196,8 @@ const UnsupportedPeripheral = struct {
     pub fn indicate(_: *@This(), _: u16, _: u16, _: []const u8) embed.bt.Peripheral.GattError!void {
         return error.NotConnected;
     }
+
+    pub fn disconnect(_: *@This(), _: u16) void {}
 
     pub fn getState(_: *@This()) embed.bt.Peripheral.State {
         return .idle;

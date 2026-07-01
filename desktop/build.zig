@@ -91,7 +91,7 @@ fn createUiBundle(
         \\EOF
     ;
 
-    const run = b.addSystemCommand(&.{ "/bin/sh", "-c", script, "desktop-ui-bundle" });
+    const run = b.addSystemCommand(&.{ "sh", "-c", script, "desktop-ui-bundle" });
     run.setCwd(b.path("ui"));
     run.addFileInput(b.path("api.json"));
     run.addFileInput(b.path("ui/bun.lock"));
@@ -135,6 +135,13 @@ fn useNativeToolPath(b: *std.Build, run: *std.Build.Step.Run) void {
                 system_path;
             run.setEnvironmentVariable("PATH", path);
         },
+        .windows => {
+            if (b.graph.env_map.get("PATH")) |system_path| {
+                if (b.graph.env_map.get("ProgramFiles")) |program_files| {
+                    run.setEnvironmentVariable("PATH", b.fmt("{s}\\Git\\usr\\bin;{s}", .{ program_files, system_path }));
+                }
+            }
+        },
         else => {},
     }
 }
@@ -153,9 +160,10 @@ fn createApiSpecModule(
         \\EOF
     ;
 
-    const run = b.addSystemCommand(&.{ "/bin/sh", "-c", script, "desktop-api-spec" });
+    const run = b.addSystemCommand(&.{ "sh", "-c", script, "desktop-api-spec" });
     run.setCwd(b.path("."));
     run.addFileInput(b.path("api.json"));
+    useNativeToolPath(b, run);
     const output_dir = run.addOutputDirectoryArg("desktop-api-spec");
 
     const spec_module = b.createModule(.{

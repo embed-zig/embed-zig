@@ -34,6 +34,10 @@ const PlatformCtx = struct {
 
     pub fn teardown() void {}
 
+    pub fn attachCommandConsole(executor: bk.embed.cmd.Executor) !void {
+        try bk.embed.cmd_console.attach(executor);
+    }
+
     pub fn bleSpeedTaskOptions() glib.task.Options {
         return .{
             .min_stack_size = 32 * 1024,

@@ -89,7 +89,7 @@ pub fn addAppFromPath(b: *std.Build, config: AppPathConfig) App {
     const bundle_path = b.fmt("zig-out/{s}/{s}.app", .{ config.output_subdir, config.bundle_name });
     const display_name = config.display_name orelse config.bundle_name;
 
-    const make_app = b.addSystemCommand(&.{ "/bin/sh", "-c", make_app_script, "desktop-macos-app" });
+    const make_app = b.addSystemCommand(&.{ "sh", "-c", make_app_script, "desktop-macos-app" });
     make_app.addFileArg(config.executable);
     if (config.icon) |icon| {
         make_app.addFileArg(icon);

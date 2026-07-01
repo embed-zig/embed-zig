@@ -144,7 +144,7 @@ defer api.deinit();
 `send` takes `context.Context` as the first argument. The example test uses the glib testing harness: `t.context()`. In ordinary code, create a background context the same way as `tests/openapi_codegen/oapi-codegen/strict-server/test.zig`:
 
 ```zig
-var ctx_ns = try glib.context.make(lib, gstd.runtime.time).init(alloc);
+var ctx_ns = try gstd.runtime.context.init(alloc);
 defer ctx_ns.deinit();
 const bg = ctx_ns.background();
 // use `bg` wherever the example uses `t.context()`
