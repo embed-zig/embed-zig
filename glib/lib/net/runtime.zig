@@ -56,6 +56,7 @@ pub const CreateError = error{
 
 pub const SocketError = error{
     WouldBlock,
+    OutOfMemory,
     Closed,
     AccessDenied,
     AddressInUse,

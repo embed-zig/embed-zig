@@ -139,9 +139,9 @@ lib/
 ```
 
 Internally, the returned net namespace binds the public transport types to a
-concrete runtime implementation through `make(lib, time, impl)`. The default host path uses
-`runtime_posix`, while public callers still work with `Dialer`, `TcpConn`,
-`TcpListener`, `UdpConn`, `Conn`, `Listener`, and `PacketConn`.
+concrete runtime implementation through `make(lib, time, impl)`. The default
+host path uses `runtime_posix`, while public callers still work with `Dialer`,
+`TcpConn`, `TcpListener`, `UdpConn`, `Conn`, `Listener`, and `PacketConn`.
 
 Context-aware stream waits and `connectContext(...)` now reuse each runtime
 socket's own wake primitive: `close()` signals that primitive directly, and
@@ -188,7 +188,7 @@ pub const VTable = struct {
 };
 
 pub const ReadError = error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected };
-pub const WriteError = error{ ConnectionRefused, ConnectionReset, BrokenPipe, TimedOut, Unexpected };
+pub const WriteError = error{ OutOfMemory, ConnectionRefused, ConnectionReset, BrokenPipe, TimedOut, Unexpected };
 ```
 
 Concrete implementations: **TcpConn** (runtime-backed TCP), **UdpConn** (connected UDP), **tls.Conn** (TLS client), **tls.ServerConn** (TLS server).
@@ -259,7 +259,7 @@ pub const ReadFromResult = struct {
 };
 
 pub const ReadFromError = error{ ConnectionReset, Closed, ConnectionRefused, TimedOut, Unexpected };
-pub const WriteToError = error{ Closed, MessageTooLong, NetworkUnreachable, AccessDenied, TimedOut, Unexpected };
+pub const WriteToError = error{ OutOfMemory, Closed, MessageTooLong, NetworkUnreachable, AccessDenied, TimedOut, Unexpected };
 
 pub fn as(self: PacketConn, comptime T: type) error{TypeMismatch}!*T { ... }
 pub fn readFrom(self: PacketConn, buf: []u8) ReadFromError!ReadFromResult { ... }

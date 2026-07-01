@@ -104,6 +104,7 @@ pub fn UdpConn(comptime std: type, comptime net: type) type {
                     error.ConnectionRefused => return error.ConnectionRefused,
                     error.ConnectionReset => return error.ConnectionReset,
                     error.BrokenPipe => return error.BrokenPipe,
+                    error.OutOfMemory => return error.OutOfMemory,
                     error.TimedOut => return error.TimedOut,
                     else => return error.Unexpected,
                 };
@@ -163,6 +164,7 @@ pub fn UdpConn(comptime std: type, comptime net: type) type {
                     error.MessageTooLong => return error.MessageTooLong,
                     error.NetworkUnreachable => return error.NetworkUnreachable,
                     error.AccessDenied => return error.AccessDenied,
+                    error.OutOfMemory => return error.OutOfMemory,
                     error.TimedOut => return error.TimedOut,
                     else => return error.Unexpected,
                 };

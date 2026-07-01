@@ -107,6 +107,7 @@ pub fn TcpConn(comptime std: type, comptime net: type) type {
                     error.ConnectionRefused => return error.ConnectionRefused,
                     error.ConnectionReset => return error.ConnectionReset,
                     error.BrokenPipe => return error.BrokenPipe,
+                    error.OutOfMemory => return error.OutOfMemory,
                     error.TimedOut => return error.TimedOut,
                     else => {
                         if (self.isClosed()) return error.BrokenPipe;

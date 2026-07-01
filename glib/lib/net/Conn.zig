@@ -48,6 +48,7 @@ pub const ReadError = error{
 };
 
 pub const WriteError = error{
+    OutOfMemory,
     ConnectionRefused,
     ConnectionReset,
     BrokenPipe,

@@ -49,6 +49,7 @@ pub const ReadFromError = error{
 };
 
 pub const WriteToError = error{
+    OutOfMemory,
     Closed,
     MessageTooLong,
     NetworkUnreachable,
