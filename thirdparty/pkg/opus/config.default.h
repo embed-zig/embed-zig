@@ -19,6 +19,10 @@
 #define HAVE_LRINTF 1
 #define USE_ALLOCA 1
 
+#if defined(__XTENSA__)
+#define OPUS_XTENSA_LX7 1
+#endif
+
 #if defined(__has_builtin)
 #if __has_builtin(__builtin_lrint)
 #define lrint __builtin_lrint

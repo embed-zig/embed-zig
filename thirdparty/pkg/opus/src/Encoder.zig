@@ -89,6 +89,13 @@ pub fn setComplexity(self: *Self, complexity: u4) Error!void {
     try opus_error.checkError(binding.opus_encoder_ctl(self.handle, binding.OPUS_SET_COMPLEXITY_REQUEST, @as(c_int, complexity)));
 }
 
+pub fn getComplexity(self: *Self) Error!u4 {
+    var value: i32 = 0;
+    try opus_error.checkError(binding.opus_encoder_ctl(self.handle, binding.OPUS_GET_COMPLEXITY_REQUEST, &value));
+    if (value < 0 or value > 10) return Error.InternalError;
+    return @intCast(value);
+}
+
 pub fn setSignal(self: *Self, signal: Signal) Error!void {
     try opus_error.checkError(binding.opus_encoder_ctl(self.handle, binding.OPUS_SET_SIGNAL_REQUEST, @intFromEnum(signal)));
 }
@@ -99,6 +106,12 @@ pub fn setBandwidth(self: *Self, bandwidth: Bandwidth) Error!void {
 
 pub fn setVbr(self: *Self, enable: bool) Error!void {
     try opus_error.checkError(binding.opus_encoder_ctl(self.handle, binding.OPUS_SET_VBR_REQUEST, @as(c_int, @intFromBool(enable))));
+}
+
+pub fn getVbr(self: *Self) Error!bool {
+    var value: i32 = 0;
+    try opus_error.checkError(binding.opus_encoder_ctl(self.handle, binding.OPUS_GET_VBR_REQUEST, &value));
+    return value != 0;
 }
 
 pub fn setDtx(self: *Self, enable: bool) Error!void {
@@ -148,9 +161,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try encoder.setBitrate(64_000);
             try grt.std.testing.expect(try encoder.getBitrate() > 0);
             try encoder.setComplexity(10);
+            try grt.std.testing.expectEqual(@as(u4, 10), try encoder.getComplexity());
             try encoder.setSignal(.music);
             try encoder.setBandwidth(.fullband);
             try encoder.setVbr(false);
+            try grt.std.testing.expectEqual(false, try encoder.getVbr());
             try encoder.setDtx(false);
             try encoder.resetState();
         }
