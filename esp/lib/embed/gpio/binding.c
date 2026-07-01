@@ -47,7 +47,14 @@ int esp_embed_gpio_write(int pin, uint32_t level)
 int esp_embed_gpio_set_direction(int pin, uint32_t direction)
 {
     if (pin < 0 || pin >= GPIO_NUM_MAX) return ESP_ERR_INVALID_ARG;
-    return gpio_set_direction((gpio_num_t)pin, direction == 0 ? GPIO_MODE_OUTPUT : GPIO_MODE_INPUT);
+    const gpio_config_t config = {
+        .pin_bit_mask = 1ULL << pin,
+        .mode = direction == 0 ? GPIO_MODE_INPUT_OUTPUT : GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    return gpio_config(&config);
 }
 
 int esp_embed_gpio_configure_interrupt(int pin, uint32_t edge)
