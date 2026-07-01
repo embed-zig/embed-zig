@@ -142,7 +142,7 @@ defer api.deinit();
 示例测试里使用 harness 的 `t.context()`。在普通程序里可像 `tests/openapi_codegen/oapi-codegen/strict-server/test.zig` 那样：
 
 ```zig
-var ctx_ns = try glib.context.make(lib, gstd.runtime.time).init(alloc);
+var ctx_ns = try gstd.runtime.context.init(alloc);
 defer ctx_ns.deinit();
 const bg = ctx_ns.background();
 // 下面凡示例写 `t.context()` 的地方可换成 `bg`

@@ -228,7 +228,11 @@ fn ensurePatched(
     for (patch_paths) |patch_path| {
         const patch_abs = try absolutePath(gpa, patch_path);
         defer gpa.free(patch_abs);
-        try runCommand(gpa, dest_abs, &.{ "patch", "-p1", "-i", patch_abs });
+        if (builtin.os.tag == .windows) {
+            try runCommand(gpa, dest_abs, &.{ "git", "apply", "--unsafe-paths", patch_abs });
+        } else {
+            try runCommand(gpa, dest_abs, &.{ "patch", "-p1", "-i", patch_abs });
+        }
     }
 
     var dest_dir = try std.fs.openDirAbsolute(dest_abs, .{});

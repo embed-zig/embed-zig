@@ -77,7 +77,7 @@ fn runRawOwnershipTest(allocator: lib.mem.Allocator) !void {
     });
     defer api.deinit();
 
-    var ctx_ns = try glib.context.make(lib, gstd.runtime.time).init(allocator);
+    var ctx_ns = try gstd.runtime.context.init(allocator);
     defer ctx_ns.deinit();
     const bg = ctx_ns.background();
     const resp = try api.operations.streamDownload.send(bg, allocator, .{});
@@ -113,7 +113,7 @@ fn runSseOwnershipTest(allocator: lib.mem.Allocator) !void {
     });
     defer api.deinit();
 
-    var ctx_ns = try glib.context.make(lib, gstd.runtime.time).init(allocator);
+    var ctx_ns = try gstd.runtime.context.init(allocator);
     defer ctx_ns.deinit();
     const bg = ctx_ns.background();
     const resp = try api.operations.watchEvents.send(bg, allocator, .{});
