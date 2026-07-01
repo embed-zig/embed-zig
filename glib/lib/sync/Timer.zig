@@ -286,11 +286,11 @@ fn resetNullCase(comptime std: type, comptime time: type, comptime sync: type, c
     const timer = try TimerImpl.init(std.testing.allocator, CallbackState(time, sync).fire, &callback_state, .{});
     defer timer.deinit();
 
-    timer.reset(time.instant.add(time.instant.now(), 50 * time.duration.MilliSecond));
-    time.sleep(10 * time.duration.MilliSecond);
+    timer.reset(time.instant.add(time.instant.now(), 500 * time.duration.MilliSecond));
+    time.sleep(50 * time.duration.MilliSecond);
     timer.reset(null);
 
-    try callback_state.expectStable(0, 100 * time.duration.MilliSecond);
+    try callback_state.expectStable(0, 200 * time.duration.MilliSecond);
 }
 
 fn earlierResetCase(comptime std: type, comptime time: type, comptime sync: type, comptime task: type) !void {
@@ -312,12 +312,12 @@ fn laterResetCase(comptime std: type, comptime time: type, comptime sync: type, 
     const timer = try TimerImpl.init(std.testing.allocator, CallbackState(time, sync).fire, &callback_state, .{});
     defer timer.deinit();
 
-    timer.reset(time.instant.add(time.instant.now(), 40 * time.duration.MilliSecond));
-    time.sleep(10 * time.duration.MilliSecond);
-    timer.reset(time.instant.add(time.instant.now(), 80 * time.duration.MilliSecond));
+    timer.reset(time.instant.add(time.instant.now(), 500 * time.duration.MilliSecond));
+    time.sleep(50 * time.duration.MilliSecond);
+    timer.reset(time.instant.add(time.instant.now(), 200 * time.duration.MilliSecond));
 
-    try callback_state.expectStable(0, 40 * time.duration.MilliSecond);
-    _ = try callback_state.waitForCount(1, 100 * time.duration.MilliSecond);
+    try callback_state.expectStable(0, 100 * time.duration.MilliSecond);
+    _ = try callback_state.waitForCount(1, 250 * time.duration.MilliSecond);
 }
 
 fn rearmCase(comptime std: type, comptime time: type, comptime sync: type, comptime task: type) !void {

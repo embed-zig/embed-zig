@@ -337,9 +337,16 @@ pub fn make(comptime Launcher: type) type {
 
                 try self.launcher.zux().start(start_config);
                 errdefer self.launcher.zux().stop() catch {};
+                if (comptime @hasDecl(AppHost, "startDesktopHost")) {
+                    try self.launcher.app().startDesktopHost();
+                    errdefer if (@hasDecl(AppHost, "stopDesktopHost")) self.launcher.app().stopDesktopHost();
+                }
             }
 
             fn deinit(self: *Self) void {
+                if (comptime @hasDecl(AppHost, "stopDesktopHost")) {
+                    self.launcher.app().stopDesktopHost();
+                }
                 self.launcher.zux().stop() catch {};
                 self.launcher.deinit();
                 self.deinitDisplayEvents();

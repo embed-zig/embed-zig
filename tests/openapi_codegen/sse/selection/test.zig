@@ -77,7 +77,7 @@ fn runParameterizedSseSelectionTest(allocator: lib.mem.Allocator) !void {
     });
     defer api.deinit();
 
-    var ctx_ns = try glib.context.make(lib, gstd.runtime.time).init(allocator);
+    var ctx_ns = try gstd.runtime.context.init(allocator);
     defer ctx_ns.deinit();
     const bg = ctx_ns.background();
     const resp = try api.operations.watchEventsParameterized.send(bg, allocator, .{});
@@ -112,7 +112,7 @@ fn runMixedResponseSelectionTest(allocator: lib.mem.Allocator) !void {
     });
     defer api.deinit();
 
-    var ctx_ns = try glib.context.make(lib, gstd.runtime.time).init(allocator);
+    var ctx_ns = try gstd.runtime.context.init(allocator);
     defer ctx_ns.deinit();
     const bg = ctx_ns.background();
     const resp = try api.operations.getMixedResponse.send(bg, allocator, .{});

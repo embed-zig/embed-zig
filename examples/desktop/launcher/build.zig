@@ -21,12 +21,18 @@ pub fn build(b: *std.Build) void {
     const storage_root_option = b.option([]const u8, "desktop_storage_root", "Direct host storage root override for the desktop launcher") orelse "";
     const home_dir_option = b.option([]const u8, "desktop_home_dir", "Host home directory used by the desktop platform for Application Support storage") orelse "";
     const run_tray = b.option(bool, "desktop_run_tray", "Run macOS desktop launcher as a menu bar app") orelse true;
+    const command_console_desktop_tcp = b.option(
+        bool,
+        "command_console_desktop_tcp",
+        "Enable the command-console app desktop TCP pseudo-serial endpoint",
+    ) orelse true;
     const storage_root = normalizeHostPath(b, storage_root_option);
     const home_dir = normalizeHostPath(b, home_dir_option);
 
     const apps_dep = b.dependency("apps", .{
         .target = target,
         .optimize = optimize,
+        .command_console_desktop_tcp = command_console_desktop_tcp,
     });
     const desktop_dep = b.dependency("desktop", .{
         .target = target,

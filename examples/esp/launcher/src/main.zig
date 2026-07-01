@@ -53,6 +53,10 @@ const PlatformCtx = struct {
 
     pub fn teardown() void {}
 
+    pub fn attachCommandConsole(executor: esp.embed.cmd.Executor) !void {
+        try esp.embed.cmd_console.attach(executor);
+    }
+
     pub fn preferencesProvider(allocator: esp.grt.std.mem.Allocator) !esp.embed.system.preferences.Provider {
         return esp.embed.system.preferences.Provider.init(.{
             .allocator = allocator,

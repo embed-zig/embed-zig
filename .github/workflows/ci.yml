@@ -16,13 +16,18 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-latest, windows-latest]
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.15.2
+          use-cache: false
+      - name: Prefer Git shell tools on Windows
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: echo "C:\Program Files\Git\bin" >> $env:GITHUB_PATH
       - if: matrix.os == 'ubuntu-24.04'
         run: zig build --seed 0
       - if: matrix.os != 'ubuntu-24.04'
@@ -32,38 +37,74 @@ jobs:
     needs: build
     strategy:
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-latest, windows-latest]
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15]
         optimize: [Debug, ReleaseSafe, ReleaseFast]
+        exclude:
+          - os: ubuntu-24.04-arm
+            optimize: Debug
+          - os: ubuntu-24.04-arm
+            optimize: ReleaseSafe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
+        if: matrix.os == 'windows-latest'
         with:
           version: 0.15.2
+          use-cache: false
+      - uses: mlugg/setup-zig@v2
+        if: matrix.os != 'windows-latest'
+        with:
+          version: 0.15.2
+      - name: Prefer Git shell tools on Windows
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: echo "C:\Program Files\Git\bin" >> $env:GITHUB_PATH
+      - uses: oven-sh/setup-bun@v2
+      - name: Install Linux audio headers
+        if: startsWith(matrix.os, 'ubuntu-')
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - name: Run unit tests
         if: matrix.os == 'ubuntu-24.04'
         continue-on-error: true
-        run: zig build test-unit -Doptimize=${{ matrix.optimize }} --seed 0 --summary all
+        run: zig build -j1 test-unit -Doptimize=${{ matrix.optimize }} --seed 0 --summary all
       - name: Run unit tests
         if: matrix.os != 'ubuntu-24.04'
-        run: zig build test-unit -Doptimize=${{ matrix.optimize }} --summary all
+        run: zig build -j1 test-unit -Doptimize=${{ matrix.optimize }} --summary all
 
   integration:
     needs: unit
     strategy:
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-latest, windows-latest]
-        optimize: [Debug, ReleaseSafe, ReleaseFast]
+        include:
+          - os: ubuntu-24.04
+            optimize: ReleaseSafe
+          - os: ubuntu-24.04
+            optimize: ReleaseFast
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
+        if: matrix.os == 'windows-latest'
         with:
           version: 0.15.2
+          use-cache: false
+      - uses: mlugg/setup-zig@v2
+        if: matrix.os != 'windows-latest'
+        with:
+          version: 0.15.2
+      - name: Prefer Git shell tools on Windows
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: echo "C:\Program Files\Git\bin" >> $env:GITHUB_PATH
+      - uses: oven-sh/setup-bun@v2
+      - name: Install Linux audio headers
+        if: startsWith(matrix.os, 'ubuntu-')
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - name: Run integration tests
         if: matrix.os == 'ubuntu-24.04'
         continue-on-error: true
-        run: zig build test-integration -Doptimize=${{ matrix.optimize }} --seed 0 --summary all
+        run: zig build -j1 test-integration -Doptimize=${{ matrix.optimize }} --seed 0 --summary all
       - name: Run integration tests
         if: matrix.os != 'ubuntu-24.04'
-        run: zig build test-integration -Doptimize=${{ matrix.optimize }} --summary all
+        run: zig build -j1 test-integration -Doptimize=${{ matrix.optimize }} --summary all

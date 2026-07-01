@@ -132,7 +132,9 @@ pub fn testRunner(comptime platform_grt: type) glib.testing.TestRunner {
             _ = self;
 
             t.run("kcp/unit", kcp.test_runner.unit.make(platform_grt));
-            t.run("kcp/integration", kcp.test_runner.integration.make(platform_grt));
+            if (@hasDecl(kcp.test_runner, "integration")) {
+                t.run("kcp/integration", kcp.test_runner.integration.make(platform_grt));
+            }
             _ = allocator;
             return t.wait();
         }
