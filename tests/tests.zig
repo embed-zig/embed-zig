@@ -131,6 +131,7 @@ const openapi_codegen_integration_base_modules = .{
 
 const embed_unit_base_modules = .{
     @import("embed_unit/audio_gstd.zig"),
+    @import("embed_unit/bt_kcp_gstd.zig"),
     @import("embed_unit/bt_gstd.zig"),
     @import("embed_unit/drivers_gstd.zig"),
     @import("embed_unit/ledstrip_gstd.zig"),

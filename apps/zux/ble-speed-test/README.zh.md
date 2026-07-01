@@ -1,5 +1,11 @@
 # ble-speed-test User Story
 
+## Transport
+
+- 默认 transport 为 `raw-gatt`，client 通过 GATT write without response 发送测速包，server 通过 notification 发送测速包。
+- 可通过构建参数 `-Dble_speed_transport=kcp-stream` 启用 KCP stream transport。该模式仍使用同一组 BLE service/characteristic，但先在 GATT packet stream 上建立 KCP session，再通过 stream 发送测速包。
+- `kcp-stream` 需要协商后的 ATT payload 能承载 KCP segment；默认 ATT MTU 23 不满足要求，运行时会拒绝低 MTU 配置，避免生成超过 GATT payload 的 KCP segment。
+
 ## Server
 
 ### 基准用户故事

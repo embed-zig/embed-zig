@@ -83,7 +83,6 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
         }
 
         fn run(self: *Self) !void {
-            log.info("ui thread started", .{});
             var lvgl_runtime = try LvglRuntimeType.init(.{
                 .allocator = self.allocator,
                 .threaded = false,
@@ -99,34 +98,23 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
                 render_state.state = self.zux_app.store.stores.speed_test.get();
                 try self.renderOnce(&lvgl_runtime, &render_state);
 
-                var coalesced: u32 = 0;
                 var has_latest = false;
                 while (true) {
                     const next = self.commands.recvTimeout(0) catch break;
                     if (!next.ok) return;
                     render_state.state = self.zux_app.store.stores.speed_test.get();
-                    coalesced += 1;
                     has_latest = true;
                 }
                 if (has_latest) {
-                    log.info("ui render coalesced requests={}", .{coalesced});
                     try self.renderOnce(&lvgl_runtime, &render_state);
                     render_state.state = null;
                 }
             }
-            log.info("ui thread stopped", .{});
         }
 
         fn renderOnce(self: *Self, lvgl_runtime: *LvglRuntimeType, render_state: *RenderState) !void {
             self.render_seq += 1;
-            const seq = self.render_seq;
-            const started = grt.time.instant.now();
-            log.info("ui render begin seq={}", .{seq});
             try lvgl_runtime.render(&self.zux_app.impl);
-            log.info("ui render end seq={} elapsed_ms={}", .{
-                seq,
-                @divTrunc(grt.time.instant.now() - started, glib.time.duration.MilliSecond),
-            });
             render_state.state = null;
         }
 
@@ -138,12 +126,7 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
         fn renderLvgl(render_state: *RenderState, runtime: *LvglRuntimeType, app: *Impl) !void {
             try ensureScreen(render_state, runtime, app);
             const state = render_state.state orelse app.store().stores.speed_test.get();
-            render_state.screen.?.setState(state);
-            log.debug("render phase={s} tx_bps={} rx_bps={}", .{
-                @tagName(state.phase),
-                state.tx_bps,
-                state.rx_bps,
-            });
+            render_state.screen.?.setState(state, sampleRuntimeOverlay(grt));
         }
 
         fn ensureScreen(render_state: *RenderState, runtime: *LvglRuntimeType, app: *Impl) !void {
@@ -155,6 +138,32 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
             try display.setBrightness(display_state.brightness);
             try runtime.ensureDisplay(display);
             render_state.screen = try Screen.init(runtime.displayHandle());
+        }
+
+        fn sampleRuntimeOverlay(comptime runtime_grt: type) Screen.RuntimeOverlay {
+            var overlay: Screen.RuntimeOverlay = .{};
+
+            var cpu_stats: runtime_grt.system.CpuStats = .{};
+            runtime_grt.system.readCpuStats(&cpu_stats) catch |err| switch (err) {
+                error.Unsupported => {},
+                else => log.warn("runtime cpu stats unavailable: {s}", .{@errorName(err)}),
+            };
+            overlay.cpu_core_count = @intCast(@min(cpu_stats.core_count, overlay.idle_percent.len));
+            overlay.cpu_valid = cpu_stats.core_count > 0;
+            for (0..overlay.cpu_core_count) |i| {
+                overlay.idle_percent[i] = 100 - @min(cpu_stats.cores[i].usage_percent, 100);
+            }
+
+            var memory_stats: runtime_grt.system.MemoryStats = .{};
+            runtime_grt.system.readMemoryStats(&memory_stats) catch |err| switch (err) {
+                error.Unsupported => {},
+                else => log.warn("runtime memory stats unavailable: {s}", .{@errorName(err)}),
+            };
+            overlay.memory_valid = memory_stats.internal_total != 0 or memory_stats.psram_total != 0;
+            overlay.diram_free = memory_stats.internal_free;
+            overlay.psram_free = memory_stats.psram_free;
+
+            return overlay;
         }
     };
 }

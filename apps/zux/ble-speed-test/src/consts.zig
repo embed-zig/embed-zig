@@ -17,6 +17,11 @@ pub const Role = enum(u8) {
     server,
 };
 
+pub const Transport = enum(u8) {
+    raw_gatt,
+    kcp_stream,
+};
+
 pub const PacketKind = enum(u8) {
     data = 1,
     ping = 2,
@@ -39,6 +44,12 @@ pub fn roleFromOption(comptime role_text: []const u8) Role {
     if (comptime eql(role_text, "client") or eql(role_text, "central")) return .client;
     if (comptime eql(role_text, "server") or eql(role_text, "periph") or eql(role_text, "peripheral")) return .server;
     @compileError("ble_speed_role must be one of: client, central, server, periph, peripheral");
+}
+
+pub fn transportFromOption(comptime transport_text: []const u8) Transport {
+    if (comptime eql(transport_text, "raw-gatt") or eql(transport_text, "raw_gatt")) return .raw_gatt;
+    if (comptime eql(transport_text, "kcp-stream") or eql(transport_text, "kcp_stream")) return .kcp_stream;
+    @compileError("ble_speed_transport must be one of: raw-gatt, raw_gatt, kcp-stream, kcp_stream");
 }
 
 fn eql(comptime a: []const u8, comptime b: []const u8) bool {

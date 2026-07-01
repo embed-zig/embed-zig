@@ -14,6 +14,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const sysroot = b.option([]const u8, "sysroot", "C sysroot path for cross-target libc headers") orelse "";
     const lvgl_c_short_enums = b.option(bool, "lvgl_c_short_enums", "Pass -fshort-enums to the LVGL C build") orelse false;
+    const ble_speed_transport = b.option([]const u8, "ble_speed_transport", "BLE speed transport: raw-gatt or kcp-stream") orelse "raw-gatt";
     if (sysroot.len != 0) b.sysroot = sysroot;
     const embed_dep = b.dependency("embed", .{
         .target = target,
@@ -36,6 +37,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .lvgl_c_sysroot = sysroot,
         .lvgl_c_short_enums = lvgl_c_short_enums,
+        .ble_speed_transport = ble_speed_transport,
     });
     const openapi_codegen_dep = b.dependency("openapi_codegen", .{
         .target = target,
@@ -69,6 +71,9 @@ pub fn build(b: *std.Build) void {
     b.modules.put("esp", esp_modules.esp) catch @panic("OOM");
     const apps_lvgl = apps_dep.module("lvgl");
     const apps_lvgl_osal = apps_dep.module("lvgl_osal");
+    if (isKcpTransport(ble_speed_transport)) {
+        apps_dep.module("zux_ble_speed_test_common").addImport("kcp", thirdparty_dep.module("kcp"));
+    }
     for (build_modules.thirdparty_modules) |module_spec| {
         const module = if (std.mem.eql(u8, module_spec.dependency_module_name, "lvgl"))
             apps_lvgl
@@ -104,4 +109,8 @@ pub fn build(b: *std.Build) void {
     desktop_module.addImport("speexdsp", thirdparty_dep.module("speexdsp"));
 
     build_tests.create(b, target, optimize);
+}
+
+fn isKcpTransport(transport: []const u8) bool {
+    return std.mem.eql(u8, transport, "kcp-stream") or std.mem.eql(u8, transport, "kcp_stream");
 }

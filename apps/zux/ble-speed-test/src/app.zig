@@ -1,6 +1,7 @@
 const embed = @import("embed");
 const glib = @import("glib");
 const launcher = @import("launcher");
+const app_config = @import("ble_speed_test_config");
 
 const consts = @import("consts.zig");
 const reducers_mod = @import("reducers.zig");
@@ -47,12 +48,12 @@ pub fn Make(comptime configured_role: consts.Role) type {
                 const Self = @This();
 
                 pub const ZuxApp = ZuxAppType(platform_grt);
-                const Runtime = runtime_mod.make(platform_grt, ZuxApp, role);
+                const Runtime = runtime_mod.make(platform_grt, ZuxApp, role, transport);
                 const Renders = renders_mod.make(platform_grt, ZuxApp, Runtime.Ui);
                 const Reducers = reducers_mod.make(platform_grt, ZuxApp);
 
                 pub const title = "ble-speed-test";
-                pub const description = "Raw BLE GATT notification/writeNoResp throughput test.";
+                pub const description = "BLE GATT throughput test.";
 
                 allocator: glib.std.mem.Allocator,
                 zux_app: ZuxApp,
@@ -70,6 +71,10 @@ pub fn Make(comptime configured_role: consts.Role) type {
                         .zux_app = undefined,
                     };
                     self.reducers = Reducers.init();
+                    self.renders = Renders.init(.{
+                        .allocator = allocator,
+                        .zux_app = &self.zux_app,
+                    });
 
                     const initial_speed_test = initialSpeedTestState();
                     var init_config = base_config;
@@ -100,11 +105,7 @@ pub fn Make(comptime configured_role: consts.Role) type {
                     });
                     errdefer self.runtime.deinit();
 
-                    self.renders = Renders.init(.{
-                        .allocator = allocator,
-                        .zux_app = &self.zux_app,
-                        .ui_runtime = &self.runtime.ui,
-                    });
+                    self.renders.bind(&self.zux_app, &self.runtime.ui);
                     return self;
                 }
 
@@ -157,7 +158,7 @@ pub fn Make(comptime configured_role: consts.Role) type {
 
         pub fn testRunner(comptime platform_grt: type) glib.testing.TestRunner {
             const ZuxApp = ZuxAppType(platform_grt);
-            const Runtime = runtime_mod.make(platform_grt, ZuxApp, role);
+            const Runtime = runtime_mod.make(platform_grt, ZuxApp, role, transport);
             const Renders = renders_mod.make(platform_grt, ZuxApp, Runtime.Ui);
             const Reducers = reducers_mod.make(platform_grt, ZuxApp);
             const UserStoryConfigFactoryImpl = struct {
@@ -181,11 +182,7 @@ pub fn Make(comptime configured_role: consts.Role) type {
                             .bt = self_instance.init_config.bt,
                             .ble_task_options = .{},
                         });
-                        self_instance.renders = Renders.init(.{
-                            .allocator = self_instance.init_config.allocator,
-                            .zux_app = app,
-                            .ui_runtime = &self_instance.runtime.ui,
-                        });
+                        self_instance.renders.bind(app, &self_instance.runtime.ui);
                     }
 
                     pub fn deinit(self_instance: *@This()) void {
@@ -196,6 +193,9 @@ pub fn Make(comptime configured_role: consts.Role) type {
                 pub fn make(self_factory: *@This(), init_config: ZuxApp.InitConfig) !*Instance {
                     self_factory.instance = .{ .init_config = init_config };
                     self_factory.instance.reducers = Reducers.init();
+                    self_factory.instance.renders = Renders.init(.{
+                        .allocator = init_config.allocator,
+                    });
                     self_factory.instance.init_config.initial_state = .{
                         .display = .{
                             .enabled = true,
@@ -232,3 +232,5 @@ pub fn Make(comptime configured_role: consts.Role) type {
         }
     };
 }
+
+const transport = consts.transportFromOption(app_config.transport);
