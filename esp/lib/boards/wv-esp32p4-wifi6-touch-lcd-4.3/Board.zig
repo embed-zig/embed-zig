@@ -14,7 +14,7 @@ const Es8311 = embed.drivers.audio.Es8311;
 const log = esp.grt.std.log.scoped(.wv_p4_board);
 const Audio = esp.embed.audio_adapter.Es8311Es7210System.make(.{
     .sample_rate = 16_000,
-    .frame_samples_per_channel = 256,
+    .frame_samples_per_channel = 512,
     .mic_count = 2,
     .i2c = .{
         .port = 0,
@@ -45,9 +45,10 @@ const Audio = esp.embed.audio_adapter.Es8311Es7210System.make(.{
     },
     .default_volume = 0xb0,
     .default_mic_gain_db = 24,
+    .use_esp_sr = false,
     .esp_sr = .{
+        .enable_aec = false,
         .monitor_gain = 3,
-        .speech_enhancement = true,
     },
     .use_i2s_adapters = true,
     .i2s_adapters = .{

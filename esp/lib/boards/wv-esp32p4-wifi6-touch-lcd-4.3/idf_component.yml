@@ -1,5 +1,4 @@
 dependencies:
-  espressif/esp-sr: "1.9.0"
   espressif/esp_hosted:
     version: '*'
   espressif/esp_wifi_remote:

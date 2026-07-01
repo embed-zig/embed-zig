@@ -1,5 +1,5 @@
 dependencies:
-  espressif/esp-sr: "1.9.0"
+  espressif/esp-sr: "2.4.6"
   idf: ">=5.3"
   esp_lcd_sh8601:
     version: "^1.0.0"

@@ -201,6 +201,7 @@ fn addSzpBoardComponent(b: *std.Build, esp_dep: *std.Build.Dependency, board_roo
     component.addRequire("esp_driver_spi");
     component.addRequire("esp_lcd");
     component.addRequire("bt");
+    component.addRequire("esp-sr");
     component.addRequire("esp_timer");
     component.addRequire("log");
     component.addRequire("nvs_flash");
@@ -234,6 +235,7 @@ fn addWvBoardComponent(b: *std.Build, esp_dep: *std.Build.Dependency, board_root
     });
     component.addRequire("driver");
     component.addRequire("bt");
+    component.addRequire("esp-sr");
     component.addRequire("esp_driver_gpio");
     component.addRequire("esp_driver_i2s");
     component.addRequire("esp_driver_spi");
@@ -262,7 +264,7 @@ fn addWvP4BoardComponent(b: *std.Build, esp_dep: *std.Build.Dependency, board_ro
     });
     component.addCSourceFiles(.{
         .root = esp_dep.path("lib/embed/audio"),
-        .files = &.{ "es8311_es7210_native.c", "esp_sr_native.c" },
+        .files = &.{"es8311_es7210_native.c"},
     });
     component.addCSourceFiles(.{
         .root = esp_dep.path("lib/embed/bt"),

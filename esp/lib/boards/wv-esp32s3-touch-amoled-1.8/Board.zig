@@ -11,9 +11,18 @@ const Self = @This();
 const Es8311 = embed.drivers.audio.Es8311;
 const log = esp.grt.std.log.scoped(.wv_board);
 const default_soft_ref_delay_samples: usize = 0;
+
+fn speakerGainTable(gain_db: i8) i8 {
+    return gain_db - 3;
+}
+
+fn micGainTable(gain_db: i8) i8 {
+    return gain_db;
+}
+
 const Audio = esp.embed.audio_adapter.Es8311System.make(.{
     .sample_rate = 16_000,
-    .frame_samples_per_channel = 256,
+    .frame_samples_per_channel = 512,
     .i2c = .{
         .port = 0,
         .sda_io_num = 15,
@@ -55,8 +64,14 @@ const Audio = esp.embed.audio_adapter.Es8311System.make(.{
     },
     .default_volume = 0xb0,
     .default_mic_gain_db = 18,
+    .speaker_gain_table_func = &speakerGainTable,
+    .mic_gain_table_func = &micGainTable,
     .esp_sr = .{
-        .monitor_gain = 3,
+        .enable_aec = true,
+        .monitor_gain = 1,
+        .aec_filter_length = 4,
+        .aec_nlp_level = .normal,
+        .aec_linear_only = false,
     },
 });
 

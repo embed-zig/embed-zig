@@ -9,7 +9,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
-#define MAX_MONO_CHUNK_SAMPLES 512
+#define MAX_MONO_CHUNK_SAMPLES 960
 #define MAX_RX_CHANNELS 2
 
 typedef struct {

@@ -2,13 +2,14 @@ pub const esp_ok: c_int = 0;
 
 pub const Config = extern struct {
     sample_rate_hz: u32,
+    audio_frame_samples: usize,
     mic_count: usize,
     ref_count: usize,
-    afe_task_priority: i32,
     enable_aec: c_int,
-    speech_enhancement: c_int,
-    voice_communication_agc: c_int,
-    voice_communication_agc_gain: i32,
+    aec_mode: i32,
+    aec_filter_length: i32,
+    aec_nlp_level: i32,
+    aec_linear_only: c_int,
 };
 
 pub extern fn espz_esp_sr_afe_configure(config: *const Config) c_int;

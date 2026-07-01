@@ -37,7 +37,6 @@ pub const Type = esp.embed.audio_adapter.Es8311Es7210System.make(.{
     .default_mic_gain_db = 24,
     .esp_sr = .{
         .monitor_gain = 3,
-        .speech_enhancement = true,
     },
     .use_i2s_adapters = true,
     .i2s_adapters = .{

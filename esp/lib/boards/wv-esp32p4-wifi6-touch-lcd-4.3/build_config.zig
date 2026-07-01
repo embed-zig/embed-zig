@@ -53,6 +53,10 @@ pub const task_policy = .{
         .priority = 5,
         .core_id = 1,
     },
+    .net = .{
+        .priority = 6,
+        .core_id = 1,
+    },
     .esp = .{
         .priority = 7,
         .core_id = 1,

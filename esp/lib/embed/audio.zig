@@ -1,4 +1,4 @@
-pub const EspSrAfe = @import("audio/EspSrAfe.zig");
+pub const EspSr = @import("audio/EspSr.zig");
 pub const Es8311System = @import("audio/Es8311System.zig");
 pub const Es8311Es7210System = @import("audio/Es8311Es7210System.zig");
 

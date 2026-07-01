@@ -1,7 +1,7 @@
 const embed = @import("embed_core");
 const esp = @import("esp");
 const EspAudio = @import("../audio.zig");
-const EspSrAfe = @import("EspSrAfe.zig");
+const EspSr = @import("EspSr.zig");
 const native = @import("es8311_es7210_binding.zig");
 
 const Es7210 = embed.drivers.audio.Es7210;
@@ -97,7 +97,7 @@ const defaultTxSlots = [_]I2sSpeakerSlotConfig{
 
 pub const Options = struct {
     sample_rate: u32 = 16_000,
-    frame_samples_per_channel: usize = 256,
+    frame_samples_per_channel: usize = 512,
     mic_count: usize,
     i2c: I2c.Config,
     i2s: I2sConfig,
@@ -110,7 +110,8 @@ pub const Options = struct {
     default_mic_gain_db: i8 = 24,
     speaker_gain_table_func: ?GainTableFunc = null,
     mic_gain_table_func: ?GainTableFunc = null,
-    esp_sr: EspSrAfe.Options = .{},
+    use_esp_sr: bool = true,
+    esp_sr: EspSr.Options = .{},
     use_i2s_adapters: bool = false,
     i2s_adapters: I2sAdapterConfig = .{},
 };
@@ -179,12 +180,18 @@ pub fn make(comptime options: Options) type {
         pub const frame_samples_per_channel = options.frame_samples_per_channel;
         pub const Mic = embed.audio.Mic.make(esp.grt, mic_count, frame_samples_per_channel);
         pub const Speaker = embed.audio.Speaker.make(esp.grt, frame_samples_per_channel);
-        pub const Processor = EspSrAfe.Processor(Mic, .{
-            .sample_rate_hz = options.sample_rate,
-            .mic_count = mic_count,
-            .ref_count = 1,
-            .options = options.esp_sr,
-        });
+        pub const Processor = if (options.use_esp_sr)
+            EspSr.Processor(Mic, .{
+                .sample_rate_hz = options.sample_rate,
+                .mic_count = mic_count,
+                .ref_count = 1,
+                .options = options.esp_sr,
+            })
+        else
+            EspSr.PassThroughProcessor(Mic, .{
+                .mic_count = mic_count,
+                .options = options.esp_sr,
+            });
         pub const Type = blk: {
             var builder = embed.audio.AudioSystem.Builder(esp.grt).init();
             builder.configMic(mic_count, frame_samples_per_channel);
