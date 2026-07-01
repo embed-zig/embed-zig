@@ -95,8 +95,6 @@ capabilities.
 | `embed.audio.AudioSystem` | `audio/processor` | Runs AFE/AEC and writes processed mic samples. |
 | `embed.audio.AudioSystem` | `audio/write` | Mixes playback tracks and writes speaker PCM. |
 | `embed.bt.host.Hci` | `bt/hci/recv` | HCI receive/event loop. |
-| `embed.bt.host.server.Sender` | `bt/server/sender` | Server-side chunked read sender. |
-| `embed.bt.host.server.Receiver` | `bt/server/receiver` | Server-side chunked write receiver. |
 | `embed.zux.pipeline.Pipeline` | `zux/pipeline/driver` | Main zux message reducer/render driver. |
 | `embed.zux.pipeline.Pipeline` | `zux/pipeline/tick` | Periodic tick injection. |
 | `embed.zux.pipeline.Pipeline` | `zux/pipeline/poll` | Generic source polling worker. |
@@ -150,15 +148,12 @@ with business or runtime service tasks.
 | `gstd.tests.runtime_task` | `testing/gstd/main` | Host task runtime test. |
 | `gstd.tests.runtime_task` | `testing/gstd/batch` | Host task runtime batch test. |
 | `gstd.tests.runtime_task` | `testing/gstd/explicit_stack` | Verifies explicit stack hints are forwarded. |
+| `glib.sync.tests.channel` | `testing/sync/channel` | Channel integration test worker. |
 | `embed.audio.tests.mixer` | `testing/audio/ring_buffer_writer` | Ring buffer writer test worker. |
 | `embed.audio.tests.mixer` | `testing/audio/gain_reader` | Mixer gain reader test worker. |
 | `embed.audio.tests.mixer` | `testing/audio/concurrent_writer` | Concurrent mixer writer test worker. |
 | `embed.audio.tests.mixer` | `testing/audio/close_error_writer` | Mixer close-with-error writer test worker. |
 | `embed.audio.tests.mixer` | `testing/audio/backpressure_writer` | Mixer backpressure writer test worker. |
-| `embed.bt.tests.xfer` | `testing/bt/xfer/read` | Transfer read-side test worker. |
-| `embed.bt.tests.xfer` | `testing/bt/xfer/send` | Transfer send-side test worker. |
-| `embed.bt.tests.xfer` | `testing/bt/xfer/write` | Transfer write-side test worker. |
-| `embed.bt.tests.xfer` | `testing/bt/xfer/recv` | Transfer receive-side test worker. |
 | `thirdparty.kcp.tests.loopback` | `testing/kcp/server` | Loopback test server. |
 | `thirdparty.lvgl.embed.LvglZuxRuntime` | `testing/lvgl` | LVGL runtime test worker. |
 | `examples.esp.launcher` | `testing/zux/app` | zux app test runner on ESP. |

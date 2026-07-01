@@ -4,7 +4,9 @@ pub const wifi = struct {
 };
 
 pub const lwip = struct {
-    pub const tcpip_task_affinity_no_affinity = true;
+    pub const tcpip_task_affinity_no_affinity = false;
+    pub const tcpip_task_affinity_cpu0 = true;
+    pub const tcpip_task_affinity_cpu1 = false;
 };
 
 pub const task_policy = .{
