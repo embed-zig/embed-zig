@@ -11,11 +11,11 @@ if [ -f "$CMD_TEST_ROOT/.env" ]; then
     . "$CMD_TEST_ROOT/.env"
 fi
 
-CMDCTL="${CMDCTL:-$REPO_ROOT/zig-out/bin/cmdctl}"
+CMDCTL="${CMDCTL:-$REPO_ROOT/tools/cmdctl/zig-out/bin/cmdctl}"
 
 require_cmdctl() {
     if [ ! -x "$CMDCTL" ]; then
-        (cd "$REPO_ROOT" && zig build cmdctl)
+        (cd "$REPO_ROOT/tools/cmdctl" && zig build cmdctl)
     fi
     if [ ! -x "$CMDCTL" ]; then
         echo "cmdctl not found or not executable: $CMDCTL" >&2

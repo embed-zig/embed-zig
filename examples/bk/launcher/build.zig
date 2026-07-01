@@ -25,14 +25,12 @@ pub fn build(b: *std.Build) void {
     const apps_dep = b.dependency("apps", .{
         .target = context.zig_target,
         .optimize = optimize,
-        .sysroot = lvgl_c_sysroot,
         .lvgl_c_sysroot = lvgl_c_sysroot,
         .lvgl_c_short_enums = true,
     });
     const thirdparty_dep = b.dependency("thirdparty", .{
         .target = context.zig_target,
         .optimize = optimize,
-        .sysroot = lvgl_c_sysroot,
         .lvgl_c_sysroot = lvgl_c_sysroot,
         .lvgl_c_short_enums = true,
     });

@@ -49,9 +49,10 @@ fn MinimalZuxApp(comptime platform_grt: type) type {
             allocator: platform_grt.std.mem.Allocator,
             pipeline_config: PipelineConfig = .{},
             poller_config: PollerConfig = .{},
-            bt: ?embed.bt.Host = null,
+            bt: embed.bt.Host,
         };
         pub const StartConfig = struct {};
+        pub const PeriphLabel = enum { bt };
         pub const registries = .{
             .adc_button = EmptyRegistry(EmptyPeriph){},
             .bt = Registry(BtPeriph, [_]BtPeriph{.{
@@ -135,6 +136,8 @@ pub fn make(comptime platform_ctx: type, comptime platform_grt: type) type {
         void;
     const BtServer = Bt.Server;
     const BtStream = if (app_config.enable_bt_kcp) BtKcp.Stream else void;
+    const TcpListener = if (app_config.enable_desktop_tcp) platform_grt.net.Listener else void;
+    const TcpConn = if (app_config.enable_desktop_tcp) platform_grt.net.Conn else void;
 
     return launcher.make(struct {
         const Self = @This();
@@ -151,6 +154,9 @@ pub fn make(comptime platform_ctx: type, comptime platform_grt: type) type {
         bt_endpoint: if (app_config.enable_bt_kcp) ?BtKcp.server.Endpoint else void =
             if (app_config.enable_bt_kcp) null else {},
         bt_task: ?platform_grt.task.Handle = null,
+        desktop_listener: if (app_config.enable_desktop_tcp) ?TcpListener else void =
+            if (app_config.enable_desktop_tcp) null else {},
+        desktop_task: ?platform_grt.task.Handle = null,
 
         pub fn init(allocator: glib.std.mem.Allocator, base_config: ZuxApp.InitConfig) !*Self {
             const self = try allocator.create(Self);
@@ -173,7 +179,7 @@ pub fn make(comptime platform_ctx: type, comptime platform_grt: type) type {
 
         pub fn deinit(self: *Self) void {
             const allocator = self.allocator;
-            self.stopBtKcp();
+            self.stopCommandTransports();
             self.commands.deinit();
             self.zux_app.deinit();
             self.* = undefined;
@@ -184,13 +190,22 @@ pub fn make(comptime platform_ctx: type, comptime platform_grt: type) type {
             if (@hasDecl(platform_ctx, "attachCommandConsole")) {
                 try platform_ctx.attachCommandConsole(self.commands.executor());
             }
-            try self.startBtKcp();
+            try self.startCommandTransports();
+            errdefer self.stopCommandTransports();
             try self.zux_app.start(.{});
         }
 
+        pub fn startDesktopHost(self: *Self) !void {
+            try self.startCommandTransports();
+        }
+
         pub fn stop(self: *Self) void {
-            self.stopBtKcp();
+            self.stopCommandTransports();
             self.zux_app.stop() catch {};
+        }
+
+        pub fn stopDesktopHost(self: *Self) void {
+            self.stopCommandTransports();
         }
 
         pub fn createTestRunner() glib.testing.TestRunner {
@@ -300,12 +315,116 @@ pub fn make(comptime platform_ctx: type, comptime platform_grt: type) type {
             try cmd.bt_kcp.executeLine(BtStream, self.commands.executor(), stream, line);
         }
 
+        fn startCommandTransports(self: *Self) !void {
+            try self.startDesktopTcp();
+            errdefer self.stopDesktopTcp();
+            try self.startBtKcp();
+            errdefer self.stopBtKcp();
+        }
+
+        fn stopCommandTransports(self: *Self) void {
+            self.stopDesktopTcp();
+            self.stopBtKcp();
+        }
+
+        fn startDesktopTcp(self: *Self) !void {
+            if (comptime !app_config.enable_desktop_tcp) return;
+            if (self.desktop_task != null) return;
+
+            const address = platform_grt.net.netip.AddrPort.from4(
+                .{ 127, 0, 0, 1 },
+                cmd.desktop_tcp.default_port,
+            );
+            self.desktop_listener = try platform_grt.net.listen(self.allocator, .{
+                .address = address,
+            });
+            errdefer {
+                self.desktop_listener.?.deinit();
+                self.desktop_listener = null;
+            }
+
+            self.desktop_task = try platform_grt.task.go(
+                "zux/cmd/desktop-tcp",
+                .{ .min_stack_size = 12 * 1024 },
+                glib.task.Routine.init(self, runDesktopTcp),
+            );
+        }
+
+        fn stopDesktopTcp(self: *Self) void {
+            if (comptime !app_config.enable_desktop_tcp) return;
+            if (self.desktop_listener) |listener| {
+                listener.close();
+            }
+            if (self.desktop_task) |task| {
+                task.join();
+                self.desktop_task = null;
+            }
+            if (self.desktop_listener) |listener| {
+                listener.deinit();
+                self.desktop_listener = null;
+            }
+        }
+
+        fn runDesktopTcp(self: *Self) void {
+            if (comptime !app_config.enable_desktop_tcp) return;
+            const listener = self.desktop_listener orelse return;
+
+            while (true) {
+                var conn = listener.accept() catch |err| switch (@as(anyerror, err)) {
+                    error.Closed => return,
+                    else => {
+                        log.err("desktop command accept failed: {s}", .{@errorName(err)});
+                        return;
+                    },
+                };
+                self.serveDesktopConn(conn) catch |err| {
+                    log.err("desktop command connection failed: {s}", .{@errorName(err)});
+                };
+                conn.deinit();
+            }
+        }
+
+        fn serveDesktopConn(self: *Self, conn: TcpConn) !void {
+            if (comptime !app_config.enable_desktop_tcp) return;
+            var line_buf: [1024]u8 = undefined;
+            const n = try readDesktopLine(conn, &line_buf);
+            if (n == 0) return;
+            var output_impl = DesktopOutput{ .conn = conn };
+            const out = cmd.Output.make(DesktopOutput).init(&output_impl);
+            try cmd.uart.executeLine(self.commands.executor(), line_buf[0..n], out);
+        }
+
+        fn readDesktopLine(conn: TcpConn, out: []u8) !usize {
+            if (comptime !app_config.enable_desktop_tcp) return 0;
+            var len: usize = 0;
+            while (len < out.len) {
+                var byte: [1]u8 = undefined;
+                const n = conn.read(&byte) catch |err| switch (@as(anyerror, err)) {
+                    error.EndOfStream => return len,
+                    else => return err,
+                };
+                if (n == 0 or byte[0] == '\n') return len;
+                if (byte[0] == '\r') continue;
+                out[len] = byte[0];
+                len += 1;
+            }
+            return error.CommandLineTooLong;
+        }
+
         const bt_chars = [_]embed.bt.Peripheral.CharDef{
             embed.bt.Peripheral.Char(bt_tx_char_uuid, .{ .notify = true }),
             embed.bt.Peripheral.Char(bt_rx_char_uuid, .{ .write = true, .write_without_response = true }),
         };
         const bt_services = [_]embed.bt.Peripheral.ServiceDef{
             embed.bt.Peripheral.Service(bt_service_uuid, &bt_chars),
+        };
+
+        const DesktopOutput = struct {
+            conn: TcpConn,
+
+            pub fn write(self: *DesktopOutput, bytes: []const u8) !usize {
+                return self.conn.write(bytes);
+            }
         };
     });
 }

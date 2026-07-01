@@ -14,8 +14,14 @@ pub fn register(registry: anytype) void {
         "command_console_bt_kcp",
         "Enable command-console BT/KCP endpoint",
     ) orelse !isNativeTarget(registry.target);
+    const enable_desktop_tcp = registry.b.option(
+        bool,
+        "command_console_desktop_tcp",
+        "Enable command-console desktop TCP pseudo-serial endpoint",
+    ) orelse isNativeTarget(registry.target);
     const options = registry.b.addOptions();
     options.addOption(bool, "enable_bt_kcp", enable_bt_kcp);
+    options.addOption(bool, "enable_desktop_tcp", enable_desktop_tcp);
 
     const module = registry.b.addModule("zux_command-console", .{
         .root_source_file = registry.b.path("zux/command-console/src/app.zig"),

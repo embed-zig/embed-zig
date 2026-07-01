@@ -34,7 +34,6 @@ const AppRegistry = struct {
     optimize: std.builtin.OptimizeMode,
     launcher: *std.Build.Module,
     glib_empty_zux_app: *std.Build.Module,
-    sysroot: []const u8,
     lvgl_c_sysroot: []const u8,
     lvgl_c_short_enums: bool,
     modules: std.StringHashMap(*std.Build.Module),
@@ -45,7 +44,6 @@ const AppRegistry = struct {
         optimize: std.builtin.OptimizeMode,
         launcher: *std.Build.Module,
         glib_empty_zux_app: *std.Build.Module,
-        sysroot: []const u8,
         lvgl_c_sysroot: []const u8,
         lvgl_c_short_enums: bool,
     ) AppRegistry {
@@ -55,7 +53,6 @@ const AppRegistry = struct {
             .optimize = optimize,
             .launcher = launcher,
             .glib_empty_zux_app = glib_empty_zux_app,
-            .sysroot = sysroot,
             .lvgl_c_sysroot = lvgl_c_sysroot,
             .lvgl_c_short_enums = lvgl_c_short_enums,
             .modules = std.StringHashMap(*std.Build.Module).init(b.allocator),
@@ -83,7 +80,6 @@ const AppRegistry = struct {
         const module = self.b.dependency("thirdparty", .{
             .target = self.target,
             .optimize = self.optimize,
-            .sysroot = self.sysroot,
             .lvgl_c_sysroot = self.lvgl_c_sysroot,
             .lvgl_c_short_enums = self.lvgl_c_short_enums,
         }).module(name);
@@ -95,8 +91,6 @@ const AppRegistry = struct {
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const sysroot = b.option([]const u8, "sysroot", "C sysroot path for cross-target libc headers") orelse "";
-    if (sysroot.len != 0) b.sysroot = sysroot;
     const lvgl_c_sysroot = b.option([]const u8, "lvgl_c_sysroot", "Optional C sysroot passed to the LVGL package") orelse "";
     const lvgl_c_short_enums = b.option(bool, "lvgl_c_short_enums", "Pass -fshort-enums to the LVGL C build") orelse false;
 
@@ -119,7 +113,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    var registry = AppRegistry.init(b, target, optimize, launcher, glib_empty_zux_app, sysroot, lvgl_c_sysroot, lvgl_c_short_enums);
+    var registry = AppRegistry.init(b, target, optimize, launcher, glib_empty_zux_app, lvgl_c_sysroot, lvgl_c_short_enums);
     defer registry.deinit();
     b.modules.put("lvgl", registry.thirdpartyModule("lvgl")) catch @panic("OOM");
     b.modules.put("lvgl_osal", registry.thirdpartyModule("lvgl_osal")) catch @panic("OOM");

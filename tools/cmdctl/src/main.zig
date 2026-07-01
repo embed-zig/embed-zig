@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const embed = @import("embed");
 
 const usage =
@@ -61,7 +62,12 @@ fn parseArgs(args: []const []const u8) !Options {
     while (index < args.len) {
         const arg = args[index];
         if (std.mem.eql(u8, arg, "--addr")) {
-            options.addr = try nextArg(args, &index, "--addr");
+            const value = try nextArg(args, &index, "--addr");
+            if (options.mode == .bt) {
+                options.bt_addr = value;
+            } else {
+                options.addr = value;
+            }
         } else if (std.mem.eql(u8, arg, "--port") and (options.mode == .tcp or options.mode == .serve_tcp)) {
             options.port = try parsePort(try nextArg(args, &index, "--port"));
         } else if (std.mem.eql(u8, arg, "--baud")) {
@@ -135,9 +141,9 @@ fn runTcpServer(options: Options) !void {
 
 fn runSerial(options: Options) !void {
     const path = options.serial_port orelse return error.MissingSerialPort;
-    _ = options.baud;
     var file = try std.fs.openFileAbsolute(path, .{ .mode = .read_write });
     defer file.close();
+    try configureSerial(&file, options.baud);
     try drainSerial(&file);
     if (options.exec) |command| {
         try sendCommand(&file, command);
@@ -147,9 +153,101 @@ fn runSerial(options: Options) !void {
     try runSerialRepl(&file);
 }
 
+fn configureSerial(file: *std.fs.File, baud: u32) !void {
+    if (comptime builtin.os.tag == .windows) return error.UnsupportedSerialPlatform;
+
+    const speed = try serialSpeed(baud);
+    var term = try std.posix.tcgetattr(file.handle);
+    term.iflag = .{};
+    term.oflag = .{};
+    term.lflag = .{};
+    term.cflag.CSIZE = .CS8;
+    term.cflag.CREAD = true;
+    term.cflag.CLOCAL = true;
+    term.cflag.CSTOPB = false;
+    term.cflag.PARENB = false;
+    term.ispeed = speed;
+    term.ospeed = speed;
+    term.cc[@intFromEnum(std.posix.V.MIN)] = 0;
+    term.cc[@intFromEnum(std.posix.V.TIME)] = 1;
+    try std.posix.tcsetattr(file.handle, .FLUSH, term);
+}
+
+fn serialSpeed(baud: u32) !std.posix.speed_t {
+    return switch (baud) {
+        9600 => .B9600,
+        19200 => .B19200,
+        38400 => .B38400,
+        57600 => .B57600,
+        115200 => .B115200,
+        230400 => .B230400,
+        else => error.UnsupportedSerialBaud,
+    };
+}
+
 fn runBt(options: Options) !void {
-    _ = options;
-    return error.BtKcpHostBackendUnavailable;
+    if (comptime builtin.os.tag != .macos) return error.BtKcpHostBackendUnavailable;
+    try runBtMacos(options);
+}
+
+fn runBtMacos(options: Options) !void {
+    const glib = @import("glib");
+    const gstd = @import("gstd");
+    const core_bluetooth = @import("core_bluetooth");
+    const kcp = @import("kcp");
+
+    const service_uuid = try parseUuid16(options.bt_service orelse return error.MissingBtServiceUuid);
+    const tx_uuid = try parseUuid16(options.bt_tx orelse return error.MissingBtTxUuid);
+    const rx_uuid = try parseUuid16(options.bt_rx orelse return error.MissingBtRxUuid);
+    const addr_filter = if (options.bt_addr) |addr| try parseBtAddr(addr) else null;
+
+    const Bt = embed.bt.make(gstd.runtime);
+    const Host = Bt.makeHost(core_bluetooth.Host);
+    const BtKcp = embed.bt.kcp.make(gstd.runtime, kcp);
+    const BtClient = Bt.Client;
+
+    var host = try Host.init(undefined, .{
+        .allocator = std.heap.page_allocator,
+    });
+    defer host.deinit();
+
+    var central = host.central();
+    try central.start();
+    defer central.stop();
+
+    const BtScanState = ScanState(gstd, glib);
+    var scan_state = BtScanState{ .addr_filter = addr_filter };
+    central.addEventHook(&scan_state, BtScanState.onEvent);
+    defer central.removeEventHook(&scan_state, BtScanState.onEvent);
+
+    try central.startScanning(.{
+        .service_uuids = &.{service_uuid},
+        .filter_duplicates = false,
+    });
+    const found = scan_state.wait(10 * glib.time.duration.Second) orelse return error.BtDeviceNotFound;
+    central.stopScanning();
+
+    var client = BtClient.init(std.heap.page_allocator);
+    defer client.deinit();
+    client.bind(central);
+
+    const conn = try client.connect(found.addr, found.addr_type, .{});
+    defer client.disconnectConn(conn.info.conn_handle);
+
+    var kcp_client = KcpClient(BtClient){ .client = &client };
+    const stream = try BtKcp.client.openStream(std.heap.page_allocator, &kcp_client, conn.info.conn_handle, .{
+        .service_uuid = service_uuid,
+        .tx_char_uuid = tx_uuid,
+        .rx_char_uuid = rx_uuid,
+    });
+    defer stream.deinit();
+
+    if (options.exec) |command| {
+        try sendKcpCommand(stream, command);
+        try readKcpResponse(glib, stream);
+        return;
+    }
+    try runKcpRepl(glib, stream);
 }
 
 fn runByteStream(stream: anytype, options: Options, stop_after_first_line: bool) !void {
@@ -305,6 +403,118 @@ fn usageError() !void {
     return error.InvalidUsage;
 }
 
+fn parseUuid16(value: []const u8) !u16 {
+    const trimmed = std.mem.trim(u8, value, " \t\r\n");
+    const hex = if (std.mem.startsWith(u8, trimmed, "0x") or std.mem.startsWith(u8, trimmed, "0X"))
+        trimmed[2..]
+    else
+        trimmed;
+    if (hex.len == 0 or hex.len > 4) return error.InvalidUuid;
+    return std.fmt.parseInt(u16, hex, 16);
+}
+
+fn parseBtAddr(value: []const u8) !embed.bt.Central.BdAddr {
+    var out: embed.bt.Central.BdAddr = undefined;
+    var clean: [12]u8 = undefined;
+    var clean_len: usize = 0;
+    for (value) |byte| {
+        if (byte == ':' or byte == '-' or byte == ' ') continue;
+        if (clean_len == clean.len) return error.InvalidBtAddress;
+        clean[clean_len] = byte;
+        clean_len += 1;
+    }
+    if (clean_len != clean.len) return error.InvalidBtAddress;
+    for (0..6) |i| {
+        out[i] = try std.fmt.parseInt(u8, clean[i * 2 .. i * 2 + 2], 16);
+    }
+    return out;
+}
+
+fn ScanState(comptime gstd: type, comptime glib: type) type {
+    return struct {
+        mutex: gstd.runtime.sync.Mutex = .{},
+        cond: gstd.runtime.sync.Condition = .{},
+        found: ?embed.bt.Central.AdvReport = null,
+        addr_filter: ?embed.bt.Central.BdAddr = null,
+
+        fn onEvent(ctx: ?*anyopaque, event: embed.bt.Central.Event) void {
+            const self: *@This() = @ptrCast(@alignCast(ctx.?));
+            switch (event) {
+                .device_found => |report| self.noteFound(report),
+                else => {},
+            }
+        }
+
+        fn noteFound(self: *@This(), report: embed.bt.Central.AdvReport) void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            if (self.found != null) return;
+            if (self.addr_filter) |expected| {
+                if (!std.mem.eql(u8, &expected, &report.addr)) return;
+            }
+            self.found = report;
+            self.cond.broadcast();
+        }
+
+        fn wait(self: *@This(), timeout: glib.time.duration.Duration) ?embed.bt.Central.AdvReport {
+            const deadline_ns = std.time.nanoTimestamp() + @as(i128, @intCast(timeout));
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            while (self.found == null) {
+                const remaining_ns = deadline_ns - std.time.nanoTimestamp();
+                if (remaining_ns <= 0) return null;
+                self.cond.timedWait(&self.mutex, @intCast(remaining_ns)) catch return null;
+            }
+            return self.found.?;
+        }
+    };
+}
+
+fn KcpClient(comptime BtClient: type) type {
+    return struct {
+        client: *BtClient,
+
+        pub fn resolveCharacteristic(
+            self: *@This(),
+            conn_handle: u16,
+            service_uuid: u16,
+            characteristic_uuid: u16,
+        ) BtClient.GattError!BtClient.Characteristic {
+            const desc = try self.client.resolveCharacteristic(conn_handle, service_uuid, characteristic_uuid);
+            return BtClient.Characteristic.init(self.client, conn_handle, service_uuid, characteristic_uuid, desc);
+        }
+    };
+}
+
+fn sendKcpCommand(stream: anytype, command: []const u8) !void {
+    try stream.write(command);
+    if (command.len == 0 or command[command.len - 1] != '\n') try stream.write("\n");
+}
+
+fn readKcpResponse(comptime glib: type, stream: anytype) !void {
+    var buf: [1024]u8 = undefined;
+    var saw_bytes = false;
+    while (true) {
+        const timeout = if (saw_bytes)
+            250 * glib.time.duration.MilliSecond
+        else
+            3 * glib.time.duration.Second;
+        const maybe = try stream.readTimeout(&buf, timeout);
+        const n = maybe orelse break;
+        if (n == 0) break;
+        saw_bytes = true;
+        try std.fs.File.stdout().writeAll(buf[0..n]);
+    }
+}
+
+fn runKcpRepl(comptime glib: type, stream: anytype) !void {
+    var line_buf: [1024]u8 = undefined;
+    while (try readStdinLine(&line_buf)) |line| {
+        try sendKcpCommand(stream, line);
+        try readKcpResponse(glib, stream);
+    }
+}
+
 pub fn testParseTcpDefaults() !void {
     const options = try parseArgs(&.{"tcp"});
     try std.testing.expectEqual(Mode.tcp, options.mode);
@@ -324,4 +534,23 @@ pub fn testParseSerialExec() !void {
     try std.testing.expectEqual(Mode.serial, options.mode);
     try std.testing.expectEqualStrings("/dev/cu.test", options.serial_port.?);
     try std.testing.expectEqualStrings("ping", options.exec.?);
+}
+
+pub fn testParseSerialBaud() !void {
+    const options = try parseArgs(&.{ "serial", "--port", "/dev/cu.test", "--baud", "230400" });
+    try std.testing.expectEqual(@as(u32, 230400), options.baud);
+    try std.testing.expectEqual(std.posix.speed_t.B230400, try serialSpeed(options.baud));
+    try std.testing.expectError(error.UnsupportedSerialBaud, serialSpeed(12345));
+}
+
+pub fn testParseBtAddr() !void {
+    const options = try parseArgs(&.{ "bt", "--addr", "AA:BB:CC:DD:EE:FF", "--service", "FEE0", "--tx", "FEE1", "--rx", "FEE2" });
+    try std.testing.expectEqual(Mode.bt, options.mode);
+    try std.testing.expectEqualStrings("AA:BB:CC:DD:EE:FF", options.bt_addr.?);
+    try std.testing.expectEqualStrings("FEE0", options.bt_service.?);
+}
+
+pub fn testParseUuid16() !void {
+    try std.testing.expectEqual(@as(u16, 0xFEE0), try parseUuid16("FEE0"));
+    try std.testing.expectEqual(@as(u16, 0xFEE1), try parseUuid16("0xfee1"));
 }

@@ -1,4 +1,3 @@
-const Command = @import("Command.zig");
 const Executor = @import("Executor.zig");
 const Output = @import("Output.zig");
 
@@ -6,11 +5,8 @@ pub const Options = struct {
     version: []const u8 = "unsupported",
 };
 
-const VersionContext = struct {
-    value: []const u8,
-};
-
 pub fn registerMinimal(registry: *Executor.Registry, options: Options) !void {
+    registry.setVersion(options.version);
     try registry.addCommand(.{
         .name = "help",
         .desc = "list commands",
@@ -22,16 +18,11 @@ pub fn registerMinimal(registry: *Executor.Registry, options: Options) !void {
         .desc = "check command liveness",
         .handler = ping,
     });
-
-    const Holder = struct {
-        var version: VersionContext = .{ .value = "unsupported" };
-    };
-    Holder.version.value = options.version;
     try registry.addCommand(.{
         .name = "version",
         .desc = "print version",
         .handler = version,
-        .ctx = &Holder.version,
+        .ctx = registry,
     });
 }
 
@@ -50,8 +41,8 @@ pub fn ping(_: ?*anyopaque, args: []const u8, out: Output) !void {
 
 pub fn version(ctx: ?*anyopaque, args: []const u8, out: Output) !void {
     _ = args;
-    const version_ctx: *VersionContext = @ptrCast(@alignCast(ctx.?));
-    try out.writeAll(version_ctx.value);
+    const registry: *Executor.Registry = @ptrCast(@alignCast(ctx.?));
+    try out.writeAll(registry.getVersion());
     try out.writeAll("\n");
 }
 

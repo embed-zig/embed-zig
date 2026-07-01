@@ -35,7 +35,6 @@ pub fn build(b: *std.Build) void {
     const apps_dep = b.dependency("apps", .{
         .target = target,
         .optimize = optimize,
-        .sysroot = sysroot,
         .lvgl_c_sysroot = sysroot,
         .lvgl_c_short_enums = lvgl_c_short_enums,
         .ble_speed_transport = ble_speed_transport,
@@ -107,49 +106,9 @@ pub fn build(b: *std.Build) void {
     desktop_module.addImport("portaudio", thirdparty_dep.module("portaudio"));
     desktop_module.addImport("speexdsp", thirdparty_dep.module("speexdsp"));
 
-    addCmdctl(b, target, optimize, embed);
     build_tests.create(b, target, optimize);
 }
 
 fn isKcpTransport(transport: []const u8) bool {
     return std.mem.eql(u8, transport, "kcp-stream") or std.mem.eql(u8, transport, "kcp_stream");
-}
-
-fn addCmdctl(
-    b: *std.Build,
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
-    embed: *std.Build.Module,
-) void {
-    const mod = b.createModule(.{
-        .root_source_file = b.path("tools/cmdctl/src/main.zig"),
-        .target = target,
-        .optimize = optimize,
-        .imports = &.{
-            .{ .name = "embed", .module = embed },
-        },
-    });
-    const exe = b.addExecutable(.{
-        .name = "cmdctl",
-        .root_module = mod,
-    });
-    const install = b.addInstallArtifact(exe, .{});
-
-    const cmdctl_step = b.step("cmdctl", "Build the cmdctl host command tool");
-    cmdctl_step.dependOn(&install.step);
-
-    const unit_mod = b.createModule(.{
-        .root_source_file = b.path("tests/tools_cmdctl.zig"),
-        .target = target,
-        .optimize = optimize,
-        .imports = &.{
-            .{ .name = "cmdctl", .module = mod },
-        },
-    });
-    const unit = b.addTest(.{
-        .root_module = unit_mod,
-    });
-    const run_unit = b.addRunArtifact(unit);
-    const test_step = b.step("cmdctl-test", "Run cmdctl unit tests");
-    test_step.dependOn(&run_unit.step);
 }

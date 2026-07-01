@@ -15,6 +15,8 @@ if [ -n "${CMD_BT_ADDR:-}" ]; then
     args="--addr $CMD_BT_ADDR $args"
 fi
 
+require_cmdctl
+
 preflight="$(mktemp "${TMPDIR:-/tmp}/cmd-bt-preflight.XXXXXX")"
 set +e
 # shellcheck disable=SC2086
@@ -24,6 +26,11 @@ set -e
 if [ "$status" -ne 0 ]; then
     if grep -q 'BtKcpHostBackendUnavailable' "$preflight"; then
         echo "SKIP bt: cmdctl BT/KCP host backend is unavailable"
+        rm -f "$preflight"
+        exit 0
+    fi
+    if grep -q 'BluetoothUnavailable' "$preflight"; then
+        echo "SKIP bt: host Bluetooth adapter is unavailable"
         rm -f "$preflight"
         exit 0
     fi

@@ -43,6 +43,5 @@
         "openapi-codegen/",
         "tests/",
         "thirdparty/",
-        "tools/",
     },
 }

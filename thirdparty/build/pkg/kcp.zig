@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const buildtools = @import("buildtools");
 
 const upstream_remote_url = "https://github.com/skywind3000/kcp.git";
@@ -38,7 +39,9 @@ pub fn create(
     lib.root_module.addCSourceFile(.{
         .file = optimized.sourcePath("ikcp.c"),
     });
-    b.installArtifact(lib);
+    if (!isNativeTarget(target)) {
+        b.installArtifact(lib);
+    }
     optimized.dependOn(&lib.step);
 
     const mod = b.createModule(.{
@@ -76,6 +79,10 @@ fn addCommonInputs(
     if (b.sysroot) |sysroot| {
         mod.addSystemIncludePath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "include" }) });
     }
+}
+
+fn isNativeTarget(target: std.Build.ResolvedTarget) bool {
+    return target.result.cpu.arch == builtin.cpu.arch and target.result.os.tag == builtin.os.tag;
 }
 
 const PatchedUpstream = struct {

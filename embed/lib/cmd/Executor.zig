@@ -66,6 +66,7 @@ pub fn make(comptime Impl: type) type {
 pub const Registry = struct {
     allocator: glib.std.mem.Allocator,
     commands: glib.std.ArrayList(Command) = .empty,
+    version: []const u8 = "unsupported",
 
     const Self = @This();
 
@@ -96,6 +97,14 @@ pub const Registry = struct {
 
     pub fn commandList(self: *const Self) []const Command {
         return self.commands.items;
+    }
+
+    pub fn setVersion(self: *Self, version: []const u8) void {
+        self.version = version;
+    }
+
+    pub fn getVersion(self: *const Self) []const u8 {
+        return self.version;
     }
 
     fn find(self: *const Self, name: []const u8) ?Command {
