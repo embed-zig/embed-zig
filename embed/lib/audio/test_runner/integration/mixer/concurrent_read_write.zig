@@ -15,6 +15,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
             const mixer = try DefaultMixerType.init(.{
                 .allocator = allocator,
                 .output = .{ .rate = 8000, .channels = .mono },
+                .headroom_gain = 1.0,
             });
             defer mixer.deinit();
 

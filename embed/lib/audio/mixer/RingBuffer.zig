@@ -13,7 +13,7 @@ pub fn make(comptime grt: type) type {
         write_closed: bool = false,
         has_error: bool = false,
         mutex: grt.sync.Mutex = .{},
-        cond: grt.sync.Condition = .{},
+        space_available: grt.sync.Semaphore = .{},
 
         pub fn init(allocator: Allocator, capacity: usize) !@This() {
             return .{
@@ -31,19 +31,23 @@ pub fn make(comptime grt: type) type {
             if (samples.len == 0) return;
 
             var offset: usize = 0;
-            self.mutex.lock();
-            defer self.mutex.unlock();
-
             while (offset < samples.len) {
-                while (self.len >= self.items.len and !self.write_closed and !self.has_error) {
-                    self.cond.wait(&self.mutex);
+                self.mutex.lock();
+                if (self.write_closed or self.has_error) {
+                    self.mutex.unlock();
+                    return error.Closed;
                 }
 
-                if (self.write_closed or self.has_error) return error.Closed;
+                if (self.len >= self.items.len) {
+                    self.mutex.unlock();
+                    self.space_available.wait();
+                    continue;
+                }
 
                 const space = self.items.len - self.len;
                 const n = @min(samples.len - offset, space);
                 self.writeLocked(samples[offset .. offset + n]);
+                self.mutex.unlock();
                 offset += n;
             }
         }
@@ -66,24 +70,23 @@ pub fn make(comptime grt: type) type {
             }
 
             self.writeLocked(in);
-            self.cond.broadcast();
         }
 
         pub fn closeWrite(self: *@This()) void {
             self.mutex.lock();
-            defer self.mutex.unlock();
             self.write_closed = true;
-            self.cond.broadcast();
+            self.mutex.unlock();
+            self.space_available.post();
         }
 
         pub fn closeWithError(self: *@This()) void {
             self.mutex.lock();
-            defer self.mutex.unlock();
             self.write_closed = true;
             self.has_error = true;
             self.head = 0;
             self.len = 0;
-            self.cond.broadcast();
+            self.mutex.unlock();
+            self.space_available.post();
         }
 
         pub fn isDrained(self: *@This()) bool {
@@ -98,8 +101,8 @@ pub fn make(comptime grt: type) type {
 
         pub fn mixIntoReference(self: *@This(), out: []i16, ref_out: ?[]i16, gain: f32) usize {
             self.mutex.lock();
-            defer self.mutex.unlock();
 
+            const was_full = self.len == self.items.len;
             const n = @min(out.len, self.len);
             if (ref_out) |reference| {
                 glib.std.debug.assert(reference.len >= n);
@@ -116,7 +119,8 @@ pub fn make(comptime grt: type) type {
                 }
             }
             self.consumeLocked(n);
-            if (n > 0) self.cond.broadcast();
+            self.mutex.unlock();
+            if (n > 0 and was_full) self.space_available.post();
             return n;
         }
 
@@ -145,8 +149,8 @@ pub fn make(comptime grt: type) type {
             gain_step: f32,
         ) usize {
             self.mutex.lock();
-            defer self.mutex.unlock();
 
+            const was_full = self.len == self.items.len;
             const n = @min(out.len, self.len);
             if (ref_out) |reference| {
                 glib.std.debug.assert(reference.len >= n);
@@ -160,7 +164,8 @@ pub fn make(comptime grt: type) type {
                 if (ref_out) |reference| reference[i] += scaled;
             }
             self.consumeLocked(n);
-            if (n > 0) self.cond.broadcast();
+            self.mutex.unlock();
+            if (n > 0 and was_full) self.space_available.post();
             return n;
         }
 
@@ -254,6 +259,39 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             try grt.std.testing.expectEqual(error.Closed, state.result.?);
         }
+
+        fn mixIntoUnblocksBlockedWriter() !void {
+            var buffer = try Buffer.init(grt.std.testing.allocator, 2);
+            defer buffer.deinit();
+
+            try buffer.write(&.{ 1, 2 });
+
+            const State = struct {
+                buffer: *Buffer,
+                done: bool = false,
+                result: ?anyerror = null,
+            };
+
+            var state = State{ .buffer = &buffer };
+            const worker = try grt.task.go("testing/audio/ring_buffer_space", .{ .min_stack_size = 8 * 1024 }, glib.task.Routine.init(&state, struct {
+                fn run(worker_state: *State) void {
+                    worker_state.buffer.write(&.{3}) catch |err| {
+                        worker_state.result = err;
+                        return;
+                    };
+                    worker_state.done = true;
+                }
+            }.run));
+
+            grt.time.sleep(10 * grt.time.duration.MilliSecond);
+            var out: [1]i16 = @splat(0);
+            const n = buffer.mixInto(&out, 1.0);
+            try grt.std.testing.expectEqual(@as(usize, 1), n);
+
+            worker.join();
+            try grt.std.testing.expect(state.done);
+            try grt.std.testing.expectEqual(@as(?anyerror, null), state.result);
+        }
     };
 
     const Runner = struct {
@@ -275,6 +313,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 return false;
             };
             TestCase.closeWithErrorUnblocksBlockedWriter() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.mixIntoUnblocksBlockedWriter() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

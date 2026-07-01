@@ -172,6 +172,11 @@ pub fn make(comptime grt: type, comptime mic_count: usize, comptime samples_per_
             return self.micCount();
         }
 
+        fn i2sHasRef(ptr: *anyopaque) bool {
+            const self: *Self = @ptrCast(@alignCast(ptr));
+            return self.ref_channel != null;
+        }
+
         fn i2sRead(ptr: *anyopaque, frame: *Frame) AudioSystem.Error!void {
             const self: *Self = @ptrCast(@alignCast(ptr));
             return self.read(frame);
@@ -201,6 +206,7 @@ pub fn make(comptime grt: type, comptime mic_count: usize, comptime samples_per_
             .deinit = i2sDeinit,
             .sampleRate = i2sSampleRate,
             .micCount = i2sMicCount,
+            .hasRef = i2sHasRef,
             .read = i2sRead,
             .gains = i2sGains,
             .setGains = i2sSetGains,

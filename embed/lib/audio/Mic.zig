@@ -32,6 +32,7 @@ pub fn make(comptime grt: type, comptime mic_count: usize, comptime samples_per_
 
             sampleRate: *const fn (ptr: *anyopaque) u32,
             micCount: *const fn (ptr: *anyopaque) u8,
+            hasRef: *const fn (ptr: *anyopaque) bool = noRef,
 
             read: *const fn (ptr: *anyopaque, frame: *Frame) Error!void,
 
@@ -41,6 +42,10 @@ pub fn make(comptime grt: type, comptime mic_count: usize, comptime samples_per_
             enable: *const fn (ptr: *anyopaque) Error!void,
             disable: *const fn (ptr: *anyopaque) Error!void,
         };
+
+        fn noRef(_: *anyopaque) bool {
+            return false;
+        }
 
         pub fn init(ptr: *anyopaque, vtable: *const VTable) Self {
             return .{
@@ -67,6 +72,10 @@ pub fn make(comptime grt: type, comptime mic_count: usize, comptime samples_per_
 
         pub fn micCount(self: Self) u8 {
             return self.vtable.micCount(self.ptr);
+        }
+
+        pub fn hasRef(self: Self) bool {
+            return self.vtable.hasRef(self.ptr);
         }
 
         pub fn read(self: Self, frame: *Frame) Error!void {

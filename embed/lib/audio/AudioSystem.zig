@@ -70,7 +70,7 @@ pub fn Builder(comptime grt: type) type {
                 const capture_buffer_capacity = samples_per_channel * 16;
                 const ref_buffer_capacity = samples_per_channel * 16;
                 const raw_frame_buffer_capacity = 4;
-                const debug_report_interval = 100;
+                const speaker_write_samples = if (Speaker.frame_samples_per_channel < 256) Speaker.frame_samples_per_channel else 256;
 
                 pub const Mic = MicType;
                 pub const Speaker = SpeakerType;
@@ -341,7 +341,7 @@ pub fn Builder(comptime grt: type) type {
                         const speaker_rate = maybe_speaker.?.sampleRate();
                         if (mic_rate == 0 or speaker_rate == 0) return error.InvalidState;
                         if (self.playback == null) return error.InvalidState;
-                        try self.prepareLoopBuffers(mic_rate, speaker_rate);
+                        try self.prepareLoopBuffers(mic_rate, speaker_rate, !maybe_mic.?.hasRef());
                     } else {
                         discardBuffered(&self.capture_rb);
                         discardBuffered(&self.ref_rb);
@@ -467,10 +467,12 @@ pub fn Builder(comptime grt: type) type {
                     if (self.speaker_impl) |current_speaker| current_speaker.disable() catch {};
                 }
 
-                fn prepareLoopBuffers(self: *AudioSystem, mic_rate: u32, speaker_rate: u32) Error!void {
+                fn prepareLoopBuffers(self: *AudioSystem, mic_rate: u32, speaker_rate: u32, use_soft_ref: bool) Error!void {
                     discardBuffered(&self.capture_rb);
                     self.raw_rb.discard();
                     discardBuffered(&self.ref_rb);
+                    if (!use_soft_ref) return;
+
                     try self.seedSoftRefDelay();
 
                     const converted_len = referenceChunkLen(Speaker.frame_samples_per_channel, speaker_rate, mic_rate) catch |err| switch (err) {
@@ -499,16 +501,13 @@ pub fn Builder(comptime grt: type) type {
 
                 fn readLoop(self: *AudioSystem) void {
                     const mic_impl = self.mic_impl orelse return;
+                    const use_soft_ref = !mic_impl.hasRef();
 
                     var frame: Frame = .{
                         .mic = undefined,
                         .ref = null,
                     };
                     var ref_chunk: [samples_per_channel]i16 = @splat(0);
-                    var frames: usize = 0;
-                    var raw_drops: usize = 0;
-                    var soft_refs: usize = 0;
-                    var soft_ref_samples: usize = 0;
 
                     while (self.isRunning()) {
                         frame.ref = null;
@@ -519,55 +518,41 @@ pub fn Builder(comptime grt: type) type {
                             return;
                         };
 
-                        if (frame.ref == null) {
+                        if (frame.ref == null and use_soft_ref) {
                             @memset(ref_chunk[0..], 0);
-                            soft_ref_samples += readBuffered(&self.ref_rb, ref_chunk[0..]);
-                            soft_refs += 1;
+                            _ = readBuffered(&self.ref_rb, ref_chunk[0..]);
                             frame.ref = ref_chunk;
+                        } else if (frame.ref == null) {
+                            log.err("mic configured with hardware ref but read returned no ref", .{});
+                            self.failAsync();
+                            return;
                         }
 
-                        frames += 1;
-                        if (self.raw_rb.writeDroppingOldest(frame)) raw_drops += 1;
-                        if (frames % debug_report_interval == 0) {
-                            log.info(
-                                "audio dbg read frames={d} raw_drop={d} soft_ref={d} soft_ref_samples={d}",
-                                .{ frames, raw_drops, soft_refs, soft_ref_samples },
-                            );
-                        }
+                        _ = self.raw_rb.writeDroppingOldest(frame);
                         yieldToScheduler();
                     }
                 }
 
                 fn processLoop(self: *AudioSystem) void {
+                    if (self.mic_impl == null) return;
                     var frame: Frame = .{
                         .mic = undefined,
                         .ref = null,
                     };
                     var processed: [samples_per_channel]i16 = undefined;
-                    var frames: usize = 0;
-                    var processed_samples: usize = 0;
-                    var raw_empty: usize = 0;
-                    var process_total_ns: glib.time.duration.Duration = 0;
-                    var process_max_ns: glib.time.duration.Duration = 0;
 
                     while (self.isRunning()) {
                         if (!self.raw_rb.read(&frame)) {
-                            raw_empty += 1;
                             yieldToScheduler();
                             continue;
                         }
 
-                        const process_started = grt.time.instant.now();
                         const n = ProcessorType.process(frame, processed[0..]) catch |err| {
                             if (!self.isRunning()) return;
                             log.err("processor failed: {s}", .{@errorName(err)});
                             self.failAsync();
                             return;
                         };
-                        const process_elapsed = glib.time.instant.sub(grt.time.instant.now(), process_started);
-                        process_total_ns += process_elapsed;
-                        process_max_ns = @max(process_max_ns, process_elapsed);
-                        frames += 1;
                         if (n == 0) {
                             yieldToScheduler();
                             continue;
@@ -577,20 +562,7 @@ pub fn Builder(comptime grt: type) type {
                             return;
                         }
 
-                        processed_samples += n;
                         self.capture_rb.writeDroppingOldest(processed[0..n]);
-                        if (frames % debug_report_interval == 0) {
-                            log.info(
-                                "audio dbg process frames={d} samples={d} raw_empty={d} avg_us={d} max_us={d}",
-                                .{
-                                    frames,
-                                    processed_samples,
-                                    raw_empty,
-                                    durationToUs(@divTrunc(process_total_ns, @as(glib.time.duration.Duration, @intCast(frames)))),
-                                    durationToUs(process_max_ns),
-                                },
-                            );
-                        }
                         yieldToScheduler();
                     }
                 }
@@ -601,32 +573,34 @@ pub fn Builder(comptime grt: type) type {
                     const speaker_rate = speaker_impl.sampleRate();
                     const maybe_mic = self.mic_impl;
                     const mic_rate = if (maybe_mic) |mic_impl| mic_impl.sampleRate() else 0;
+                    const use_soft_ref = if (maybe_mic) |mic_impl| !mic_impl.hasRef() else false;
 
-                    var mix_chunk: Speaker.Frame = @splat(0);
-                    var ref_mix_chunk: Speaker.Frame = @splat(0);
-                    var frames: usize = 0;
-                    var mixed_samples: usize = 0;
-                    var ref_samples: usize = 0;
-                    var idle: usize = 0;
+                    var mix_chunk: [speaker_write_samples]i16 = @splat(0);
+                    var ref_mix_chunk: [speaker_write_samples]i16 = @splat(0);
 
                     while (self.isRunning()) {
                         @memset(mix_chunk[0..], 0);
                         @memset(ref_mix_chunk[0..], 0);
-                        const mixed_n = if (maybe_mic != null)
-                            playback.readWithReference(mix_chunk[0..], ref_mix_chunk[0..]) orelse 0
+                        const maybe_mixed_n = if (use_soft_ref)
+                            playback.readWithReference(mix_chunk[0..], ref_mix_chunk[0..])
                         else
-                            playback.read(mix_chunk[0..]) orelse 0;
+                            playback.read(mix_chunk[0..]);
+                        const mixed_n = maybe_mixed_n orelse {
+                            if (!self.isRunning()) return;
+                            log.err("playback mixer closed while audio/write is running", .{});
+                            self.failAsync();
+                            return;
+                        };
+
                         if (mixed_n == 0) {
-                            idle += 1;
                             sleepForSamples(mix_chunk.len, speaker_rate);
                             continue;
                         }
 
-                        frames += 1;
-                        mixed_samples += mixed_n;
-                        if (maybe_mic != null) {
+                        const write_n = mixed_n;
+                        if (use_soft_ref) {
                             const ref_n = convertSpeakerChunkToMicRate(
-                                ref_mix_chunk[0..mixed_n],
+                                ref_mix_chunk[0..write_n],
                                 speaker_rate,
                                 self.ref_write_scratch,
                                 mic_rate,
@@ -638,22 +612,15 @@ pub fn Builder(comptime grt: type) type {
                             };
                             if (ref_n > 0) {
                                 self.ref_rb.writeDroppingOldest(self.ref_write_scratch[0..ref_n]);
-                                ref_samples += ref_n;
                             }
                         }
 
-                        writeSpeakerFrame(speaker_impl, mix_chunk[0..mixed_n]) catch |err| {
+                        writeSpeakerFrame(speaker_impl, mix_chunk[0..write_n]) catch |err| {
                             if (!self.isRunning()) return;
                             log.err("speaker write failed: {s}", .{@errorName(err)});
                             self.failAsync();
                             return;
                         };
-                        if (frames % debug_report_interval == 0) {
-                            log.info(
-                                "audio dbg write frames={d} mixed_samples={d} ref_samples={d} idle={d}",
-                                .{ frames, mixed_samples, ref_samples, idle },
-                            );
-                        }
                     }
                 }
 
@@ -694,10 +661,6 @@ pub fn Builder(comptime grt: type) type {
                     const duration_128 = (@as(u128, sample_count) * @as(u128, @intCast(grt.time.duration.Second))) /
                         @as(u128, sample_rate);
                     return @intCast(@min(duration_128, @as(u128, @intCast(glib.time.duration.Maximum))));
-                }
-
-                fn durationToUs(duration: glib.time.duration.Duration) i64 {
-                    return @divTrunc(duration, glib.time.duration.MicroSecond);
                 }
 
                 fn referenceChunkLen(input_len: usize, input_rate: u32, output_rate: u32) Error!usize {

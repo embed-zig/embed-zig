@@ -14,6 +14,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
             const mixer = try DefaultMixerType.init(.{
                 .allocator = counted,
                 .output = .{ .rate = 16000, .channels = .mono },
+                .headroom_gain = 1.0,
             });
             defer mixer.deinit();
 
@@ -27,6 +28,8 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
             const left = [_]i16{ 1, 1, 1, 1 };
             const right = [_]i16{ 2, 2, 2, 2 };
             const expected = [_]i16{ 3, 3, 3, 3 };
+            var warm_out: [expected.len]i16 = undefined;
+            try grt.std.testing.expectEqual(@as(usize, 0), mixer.read(&warm_out).?);
             const baseline = counting.snapshot();
 
             for (0..8) |_| {
