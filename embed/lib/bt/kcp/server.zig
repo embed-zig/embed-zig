@@ -53,9 +53,13 @@ pub fn make(comptime grt: type, comptime raw_kcp: type) type {
             }
 
             pub fn deinit(self: *Self) void {
-                self.accept_ch.close();
-                self.clearActive();
+                self.close();
                 self.accept_ch.deinit();
+            }
+
+            pub fn close(self: *Self) void {
+                self.accept_ch.close();
+                self.closeActive();
             }
 
             pub fn handle(self: *Self, server: anytype) !void {
@@ -161,6 +165,12 @@ pub fn make(comptime grt: type, comptime raw_kcp: type) type {
                 self.mutex.lock();
                 self.active_stream = null;
                 self.mutex.unlock();
+            }
+
+            fn closeActive(self: *Self) void {
+                self.mutex.lock();
+                defer self.mutex.unlock();
+                if (self.active_stream) |active| active.close();
             }
 
             fn onRequest(ctx: ?*anyopaque, req: *const bt.Peripheral.Request, rw: *bt.Peripheral.ResponseWriter) void {

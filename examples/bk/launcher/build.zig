@@ -25,12 +25,14 @@ pub fn build(b: *std.Build) void {
     const apps_dep = b.dependency("apps", .{
         .target = context.zig_target,
         .optimize = optimize,
+        .sysroot = lvgl_c_sysroot,
         .lvgl_c_sysroot = lvgl_c_sysroot,
         .lvgl_c_short_enums = true,
     });
     const thirdparty_dep = b.dependency("thirdparty", .{
         .target = context.zig_target,
         .optimize = optimize,
+        .sysroot = lvgl_c_sysroot,
         .lvgl_c_sysroot = lvgl_c_sysroot,
         .lvgl_c_short_enums = true,
     });
@@ -52,19 +54,47 @@ pub fn build(b: *std.Build) void {
         .name = "lvgl",
     });
     lvgl_component.addArtifact(thirdparty_dep.artifact("lvgl"));
+    var kcp_component = bk.armino.Component.create(b, .{
+        .name = "kcp",
+    });
+    kcp_component.addArtifact(thirdparty_dep.artifact("kcp"));
 
     const ap_install = b.addInstallArtifact(ap, .{});
     const lvgl_install = b.addInstallArtifact(thirdparty_dep.artifact("lvgl"), .{});
+    const kcp_install = b.addInstallArtifact(thirdparty_dep.artifact("kcp"), .{});
     const cp_install = b.addInstallArtifact(cp, .{});
 
     const ap_step = b.step("ap", "Build AP Zig static library");
     ap_step.dependOn(&ap_install.step);
     ap_step.dependOn(&lvgl_install.step);
+    if (appNeedsKcp(app_name)) {
+        ap_step.dependOn(&kcp_install.step);
+    }
 
     const cp_step = b.step("cp", "Build CP Zig static library");
     cp_step.dependOn(&cp_install.step);
 
-    const app = bk.armino.addDualCoreApp(b, "launcher", .{
+    const app = if (appNeedsKcp(app_name)) bk.armino.addDualCoreApp(b, "launcher", .{
+        .context = context,
+        .zig_build_options = &.{
+            b.fmt("-Dapp={s}", .{app_name}),
+        },
+        .partition_table = build_config.partition_table,
+        .ram_regions = build_config.ram_regions,
+        .ap = .{
+            .root_source_file = b.path("ap/main.zig"),
+            .root_source_path = "ap/main.zig",
+            .extra_source_paths = &.{},
+            .components = &.{ lvgl_component, kcp_component },
+            .build_config = build_config.ap,
+        },
+        .cp = .{
+            .root_source_file = b.path("cp/main.zig"),
+            .root_source_path = "cp/main.zig",
+            .extra_source_paths = &.{},
+            .build_config = build_config.cp,
+        },
+    }) else bk.armino.addDualCoreApp(b, "launcher", .{
         .context = context,
         .zig_build_options = &.{
             b.fmt("-Dapp={s}", .{app_name}),
@@ -115,6 +145,11 @@ fn selectedAppModule(
 fn validateBoard(board_name: []const u8) void {
     if (std.mem.eql(u8, board_name, "bk7258_v3_2024")) return;
     std.debug.panic("unknown board '{s}', expected bk7258_v3_2024", .{board_name});
+}
+
+fn appNeedsKcp(app_name: []const u8) bool {
+    return std.mem.eql(u8, app_name, "zux_command-console") or
+        std.mem.eql(u8, app_name, "zux_kcp-test");
 }
 
 fn addStaticLib(

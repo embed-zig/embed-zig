@@ -132,6 +132,7 @@ fn addDevkitBoardComponent(b: *std.Build, esp_dep: *std.Build.Dependency, board_
     });
     component.addRequire("driver");
     component.addRequire("bt");
+    component.addRequire("console");
     component.addRequire("esp_driver_gpio");
     component.addRequire("led_strip");
     component.addRequire("log");
@@ -164,6 +165,7 @@ fn addSzpBoardComponent(b: *std.Build, esp_dep: *std.Build.Dependency, board_roo
         .files = &.{"local_hci.c"},
     });
     component.addRequire("driver");
+    component.addRequire("console");
     component.addRequire("esp_driver_gpio");
     component.addRequire("esp_driver_i2s");
     component.addRequire("esp_driver_ledc");
@@ -204,6 +206,7 @@ fn addWvBoardComponent(b: *std.Build, esp_dep: *std.Build.Dependency, board_root
     });
     component.addRequire("driver");
     component.addRequire("bt");
+    component.addRequire("console");
     component.addRequire("esp-sr");
     component.addRequire("esp_driver_gpio");
     component.addRequire("esp_driver_i2s");

@@ -31,6 +31,8 @@ const Packages = struct {
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const sysroot = b.option([]const u8, "sysroot", "C sysroot path for cross-target libc headers") orelse "";
+    if (sysroot.len != 0) b.sysroot = sysroot;
     const lvgl_c_sysroot = b.option(
         []const u8,
         "lvgl_c_sysroot",

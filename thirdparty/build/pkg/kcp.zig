@@ -38,6 +38,7 @@ pub fn create(
     lib.root_module.addCSourceFile(.{
         .file = optimized.sourcePath("ikcp.c"),
     });
+    b.installArtifact(lib);
     optimized.dependOn(&lib.step);
 
     const mod = b.createModule(.{
