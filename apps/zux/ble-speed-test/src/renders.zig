@@ -15,8 +15,8 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type, comptime UiRuntime: t
 
         pub const InitConfig = struct {
             allocator: glib.std.mem.Allocator,
-            zux_app: *ZuxAppType,
-            ui_runtime: *UiRuntime,
+            zux_app: ?*ZuxAppType = null,
+            ui_runtime: ?*UiRuntime = null,
         };
 
         pub fn init(config: InitConfig) Self {
@@ -24,6 +24,11 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type, comptime UiRuntime: t
                 .button = Button.init(config.allocator, config.zux_app),
                 .ui = Ui.init(config.ui_runtime),
             };
+        }
+
+        pub fn bind(self: *Self, zux_app: *ZuxAppType, ui_runtime: *UiRuntime) void {
+            self.button.setApp(zux_app);
+            self.ui.setRuntime(ui_runtime);
         }
     };
 }

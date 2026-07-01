@@ -8,8 +8,9 @@ pub fn make(
     comptime grt: type,
     comptime ZuxAppType: type,
     comptime role: consts.Role,
+    comptime transport: consts.Transport,
 ) type {
-    const Ble = ble_mod.make(grt, ZuxAppType, role);
+    const Ble = ble_mod.make(grt, ZuxAppType, role, transport);
     const UiRuntime = ui_mod.make(grt, ZuxAppType);
 
     return struct {

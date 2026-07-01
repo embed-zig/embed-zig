@@ -4,8 +4,15 @@ const glib = @import("glib");
 const consts = @import("../../consts.zig");
 const speed_test = @import("../../reducers/speed_test.zig");
 
-pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
+pub fn make(comptime grt: type, comptime ZuxAppType: type, comptime transport: consts.Transport) type {
     const bt = embed.bt;
+    const BtKcp = if (transport == .kcp_stream)
+        bt.kcp.make(grt, @import("kcp"))
+    else
+        struct {
+            pub const Config = bt.kcp.Config;
+            pub const Stream = opaque {};
+        };
     const Mutex = grt.sync.Mutex;
     const AcceptChannel = grt.sync.Channel(u16);
     const AtomicBool = grt.std.atomic.Value(bool);
@@ -32,14 +39,18 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
         rx_window_lost_packets: u32 = 0,
         rx_window_reordered_packets: u32 = 0,
         last_zero_rx_log: glib.time.instant.Time = 0,
+        kcp_stream: ?*BtKcp.Stream = null,
 
         const source_id = ZuxAppType.ImplType.sourceId(.bt);
         const window_ms: u32 = 1000;
         const reconnect_sleep_ns = 500 * glib.time.duration.MilliSecond;
         const tx_pace_ns = glib.time.duration.MilliSecond;
         const backpressure_sleep_ns = 5 * glib.time.duration.MilliSecond;
+        const kcp_write_timeout = 20 * glib.time.duration.MilliSecond;
         const accept_backlog: usize = 1;
         const max_zero_rx_windows: u8 = 8;
+        const kcp_acl_datagram_len: usize = 244;
+        const kcp_ble_window: i32 = 8;
 
         const gap_service_uuid: u16 = 0x1800;
         const peripheral_preferred_conn_params_uuid: u16 = 0x2A04;
@@ -72,7 +83,6 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
 
         pub fn start(self: *Self) !void {
             self.stop_requested.store(false, .release);
-            log.debug("starting server runtime", .{});
             self.task = try grt.task.go(
                 "zux/ble_speed/server",
                 self.task_options,
@@ -102,7 +112,6 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
         }
 
         fn loop(self: *Self) !void {
-            log.debug("server loop starting", .{});
             var peripheral = self.host.peripheral();
             peripheral.addEventHook(self, onPeripheralEvent);
             peripheral.addSubscriptionHook(self, onSubscriptionEvent);
@@ -128,7 +137,10 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
                     continue;
                 }
 
-                try self.runTxLoop(peripheral, conn);
+                switch (transport) {
+                    .raw_gatt => try self.runTxLoop(peripheral, conn),
+                    .kcp_stream => try self.runKcpTxLoop(peripheral, conn),
+                }
             }
         }
 
@@ -195,6 +207,100 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
                         self.logZeroRxWindow(tx_packets, tx_bytes, rx_window, zero_rx_windows);
                         if (zero_rx_windows >= max_zero_rx_windows) {
                             log.warn("server rx idle watchdog disconnect conn={} zero_windows={}", .{ conn, zero_rx_windows });
+                            peripheral.disconnect(conn);
+                            self.clearConn(conn);
+                            try self.dispatchStop(conn);
+                            return;
+                        }
+                    } else {
+                        zero_rx_windows = 0;
+                    }
+                    tx_bytes = 0;
+                    tx_packets = 0;
+                    rx_window = .{};
+                    last_window = now;
+                }
+
+                grt.time.sleep(tx_pace_ns);
+            }
+        }
+
+        fn runKcpTxLoop(self: *Self, peripheral: bt.Peripheral, conn: u16) !void {
+            self.setConnHandle(conn);
+            defer self.clearConn(conn);
+
+            var output = KcpOutput{
+                .peripheral = peripheral,
+                .conn = conn,
+            };
+            const config = kcpConfig(self.currentAttMtu());
+            var stream = try BtKcp.makeStream(self.allocator, config, &output, KcpOutput.write);
+            defer stream.deinit();
+            self.setKcpStream(stream);
+            defer self.clearKcpStream(stream);
+            log.info("server kcp stream conn={} mtu={} payload_len={}", .{ conn, config.kcpMtu(), packetPayloadLenForKcp(config) });
+
+            var seq: u32 = 0;
+            var tx_bytes: u32 = 0;
+            var tx_packets: u32 = 0;
+            var rx_window: RxWindow = .{};
+            var last_window = grt.time.instant.now();
+            var packet_buf: [consts.max_payload_len + consts.Header.encoded_len]u8 = undefined;
+            var read_buf: [consts.max_payload_len + consts.Header.encoded_len]u8 = undefined;
+            var zero_rx_windows: u8 = 0;
+            const value_payload_len = packetPayloadLenForKcp(config);
+
+            while (!self.shouldStop() and self.isConnActive(conn)) {
+                self.drainKcpRx(stream, &read_buf) catch |err| {
+                    if (isKcpSessionEnd(err)) {
+                        log.info("server kcp stream ended conn={} err={s}", .{ conn, @errorName(err) });
+                        try self.dispatchStop(conn);
+                        return;
+                    }
+                    return err;
+                };
+                const packet = makePacket(&packet_buf, seq, value_payload_len);
+                const write_started = grt.time.instant.now();
+                const wrote = stream.writeTimeout(packet, kcp_write_timeout) catch |err| {
+                    if (isKcpSessionEnd(err)) {
+                        log.info("server kcp stream ended conn={} err={s}", .{ conn, @errorName(err) });
+                        try self.dispatchStop(conn);
+                        return;
+                    }
+                    return err;
+                };
+                const write_elapsed = grt.time.instant.now() - write_started;
+                if (wrote and write_elapsed > 100 * glib.time.duration.MilliSecond) {
+                    log.info("server kcp write conn={} seq={} bytes={} elapsed_ms={}", .{
+                        conn,
+                        seq,
+                        packet.len,
+                        @divFloor(write_elapsed, glib.time.duration.MilliSecond),
+                    });
+                }
+                if (wrote) {
+                    seq +%= 1;
+                    tx_bytes +|= @intCast(packet.len);
+                    tx_packets +|= 1;
+                } else {
+                    grt.time.sleep(backpressure_sleep_ns);
+                }
+
+                const rx_snapshot = self.takeRxWindow();
+                rx_window.bytes +|= rx_snapshot.bytes;
+                rx_window.packets +|= rx_snapshot.packets;
+                rx_window.expected_seq = rx_snapshot.expected_seq;
+                rx_window.lost_packets +|= rx_snapshot.lost_packets;
+                rx_window.reordered_packets +|= rx_snapshot.reordered_packets;
+
+                const now = grt.time.instant.now();
+                if (now - last_window >= window_ms * glib.time.duration.MilliSecond) {
+                    try self.dispatchStatsWindow(tx_bytes, rx_window, tx_packets);
+                    if (tx_packets > 0 and rx_window.packets == 0) {
+                        zero_rx_windows +|= 1;
+                        self.logZeroRxWindow(tx_packets, tx_bytes, rx_window, zero_rx_windows);
+                        if (zero_rx_windows >= max_zero_rx_windows) {
+                            log.warn("server kcp rx idle watchdog disconnect conn={} zero_windows={}", .{ conn, zero_rx_windows });
                             peripheral.disconnect(conn);
                             self.clearConn(conn);
                             try self.dispatchStop(conn);
@@ -281,7 +387,11 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
                 return;
             }
             if (req.char_uuid == consts.rx_char_uuid and req.op != .read) {
-                self.noteRxPacket(req.data);
+                if (transport == .kcp_stream) {
+                    if (!self.feedKcpStream(req.data)) self.noteRxPacket(req.data);
+                } else {
+                    self.noteRxPacket(req.data);
+                }
                 if (req.op == .write) rw.ok();
                 return;
             }
@@ -331,6 +441,28 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
                 self.conn_handle = 0;
             }
             self.mutex.unlock();
+        }
+
+        fn setKcpStream(self: *Self, stream: *BtKcp.Stream) void {
+            self.mutex.lock();
+            self.kcp_stream = stream;
+            self.mutex.unlock();
+        }
+
+        fn clearKcpStream(self: *Self, stream: *BtKcp.Stream) void {
+            self.mutex.lock();
+            if (self.kcp_stream == stream) self.kcp_stream = null;
+            self.mutex.unlock();
+        }
+
+        fn feedKcpStream(self: *Self, data: []const u8) bool {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            if (self.kcp_stream) |active| {
+                active.input(data) catch {};
+                return true;
+            }
+            return false;
         }
 
         fn isConnActive(self: *Self, conn_handle: u16) bool {
@@ -567,6 +699,63 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
             if (att_mtu <= consts.att_header_len + consts.Header.encoded_len) return 1;
             return @intCast(@min(att_mtu - consts.att_header_len - consts.Header.encoded_len, consts.max_payload_len));
         }
+
+        fn packetPayloadLenForKcp(config: BtKcp.Config) usize {
+            const max_write = config.maxWriteChunkLen();
+            if (max_write <= consts.Header.encoded_len) return 1;
+            return @min(max_write - consts.Header.encoded_len, consts.max_payload_len);
+        }
+
+        fn kcpConfig(att_mtu: u16) BtKcp.Config {
+            return .{
+                .tx_char_uuid = consts.tx_char_uuid,
+                .rx_char_uuid = consts.rx_char_uuid,
+                .att_mtu = att_mtu,
+                .send_window = kcp_ble_window,
+                .recv_window = kcp_ble_window,
+                .channel_capacity = kcp_ble_window,
+                .max_datagram_len = kcp_acl_datagram_len,
+            };
+        }
+
+        fn drainKcpRx(self: *Self, stream: *BtKcp.Stream, buf: []u8) !void {
+            while (true) {
+                const n = (try stream.readTimeout(buf, 0)) orelse return;
+                self.noteRxPacket(buf[0..n]);
+            }
+        }
+
+        fn isKcpSessionEnd(err: anyerror) bool {
+            return err == error.Closed or err == error.OutputFailed;
+        }
+
+        const KcpOutput = struct {
+            peripheral: bt.Peripheral,
+            conn: u16,
+
+            fn write(ctx: ?*anyopaque, data: []const u8) anyerror!void {
+                const self: *KcpOutput = @ptrCast(@alignCast(ctx.?));
+                var attempts: u8 = 0;
+                while (true) {
+                    self.peripheral.notify(self.conn, consts.tx_char_uuid, data) catch |err| switch (err) {
+                        error.Busy, error.Timeout, error.Rejected => {
+                            attempts +|= 1;
+                            if (attempts >= 5) {
+                                log.err("server kcp output failed conn={} len={} err={s}", .{ self.conn, data.len, @errorName(err) });
+                                return err;
+                            }
+                            grt.time.sleep(backpressure_sleep_ns);
+                            continue;
+                        },
+                        else => {
+                            log.err("server kcp output failed conn={} len={} err={s}", .{ self.conn, data.len, @errorName(err) });
+                            return err;
+                        },
+                    };
+                    return;
+                }
+            }
+        };
 
         fn makePacket(buf: []u8, seq: u32, value_len: usize) []const u8 {
             const payload_len = @min(value_len, consts.max_payload_len);

@@ -23,6 +23,7 @@ pub fn build(b: *std.Build) void {
     const netperf_kcp_interval_ms = b.option(i32, "netperf_kcp_interval_ms", "zux_netperf KCP update interval in milliseconds") orelse 10;
     const netperf_kcp_resend = b.option(i32, "netperf_kcp_resend", "zux_netperf KCP fast resend value") orelse 2;
     const netperf_kcp_nc = b.option(i32, "netperf_kcp_nc", "zux_netperf KCP nc value") orelse 1;
+    const ble_speed_transport = b.option([]const u8, "ble_speed_transport", "BLE speed transport: raw-gatt or kcp-stream") orelse "raw-gatt";
     const board_root = boardRoot(board_name);
     const esp_build_dep = b.dependency("esp", .{});
     const build_config_module = createBoardBuildConfigModule(
@@ -70,6 +71,7 @@ pub fn build(b: *std.Build) void {
         .netperf_kcp_interval_ms = netperf_kcp_interval_ms,
         .netperf_kcp_resend = netperf_kcp_resend,
         .netperf_kcp_nc = netperf_kcp_nc,
+        .ble_speed_transport = ble_speed_transport,
     });
     const glib_dep = b.dependency("glib", .{
         .target = context.target,

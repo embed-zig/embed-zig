@@ -329,7 +329,7 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
                     event.error_code,
                     event.error_name_buf[0..event.error_name_len],
                 }),
-                else => log.debug("action={s} role={s} conn={}", .{ @tagName(event.action), @tagName(event.role), event.conn_handle }),
+                else => {},
             }
         }
 
@@ -352,10 +352,6 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
                     renderText(state);
                 }
             }.apply);
-            log.info(
-                "stats delta tx_bytes={d} rx_bytes={d} tx_packets={d} rx_packets={d} rx_lost={d} rx_reordered={d} window_ms={d}",
-                .{ event.tx_bytes, event.rx_bytes, event.tx_packets, event.rx_packets, event.rx_lost_packets, event.rx_reordered_packets, event.window_ms },
-            );
         }
 
         fn resetStats(state: *State) void {

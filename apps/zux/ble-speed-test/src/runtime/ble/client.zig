@@ -4,8 +4,15 @@ const glib = @import("glib");
 const consts = @import("../../consts.zig");
 const speed_test = @import("../../reducers/speed_test.zig");
 
-pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
+pub fn make(comptime grt: type, comptime ZuxAppType: type, comptime transport: consts.Transport) type {
     const bt = embed.bt;
+    const BtKcp = if (transport == .kcp_stream)
+        bt.kcp.make(grt, @import("kcp"))
+    else
+        struct {
+            pub const Config = bt.kcp.Config;
+            pub const Stream = opaque {};
+        };
     const Mutex = grt.sync.Mutex;
     const Condition = grt.sync.Condition;
     const AtomicBool = grt.std.atomic.Value(bool);
@@ -30,12 +37,16 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
         rx_window_packets: u32 = 0,
         rx_window_lost_packets: u32 = 0,
         rx_window_reordered_packets: u32 = 0,
+        kcp_stream: ?*BtKcp.Stream = null,
 
         const source_id = ZuxAppType.ImplType.sourceId(.bt);
         const window_ms: u32 = 1000;
         const reconnect_sleep_ns = 500 * glib.time.duration.MilliSecond;
         const tx_pace_ns = glib.time.duration.MilliSecond;
         const backpressure_sleep_ns = 5 * glib.time.duration.MilliSecond;
+        const kcp_write_timeout = 20 * glib.time.duration.MilliSecond;
+        const kcp_acl_datagram_len: usize = 244;
+        const kcp_ble_window: i32 = 8;
         const preferred_conn_interval_min: u16 = 0x0006;
         const preferred_conn_interval_max: u16 = 0x000C;
 
@@ -50,7 +61,6 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
 
         pub fn start(self: *Self) !void {
             self.stop_requested.store(false, .release);
-            log.debug("starting client runtime", .{});
             self.task = try grt.task.go(
                 "zux/ble_speed/client",
                 self.task_options,
@@ -76,7 +86,6 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
         }
 
         fn loop(self: *Self) !void {
-            log.debug("client loop starting", .{});
             var central = self.host.central();
             central.addEventHook(self, onCentralEvent);
             defer central.removeEventHook(self, onCentralEvent);
@@ -118,9 +127,7 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
                 self.setConnHandle(info.conn_handle);
                 try self.dispatchCentralConnected(info);
 
-                _ = central.exchangeMtu(info.conn_handle, consts.target_mtu) catch |err| {
-                    log.debug("mtu exchange not explicit on this backend: {s}", .{@errorName(err)});
-                };
+                _ = central.exchangeMtu(info.conn_handle, consts.target_mtu) catch {};
                 const speed_chars = resolveSpeedChars(central, info.conn_handle) catch |err| {
                     log.err("resolve speed chars failed: {s}", .{@errorName(err)});
                     try self.dispatchErrorFrom(err);
@@ -138,7 +145,11 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
                 try self.dispatchReady(info.conn_handle, info.interval, att_mtu);
                 try self.dispatchStart(info.conn_handle);
 
-                self.runTxLoop(central, info.conn_handle, speed_chars.rx.value_handle, att_mtu) catch |err| {
+                const tx_result = if (transport == .kcp_stream)
+                    self.runKcpTxLoop(central, info.conn_handle, speed_chars.rx.value_handle, att_mtu)
+                else
+                    self.runTxLoop(central, info.conn_handle, speed_chars.rx.value_handle, att_mtu);
+                tx_result catch |err| {
                     if (self.isConnActive(info.conn_handle)) {
                         try self.dispatchErrorFrom(err);
                         try self.closeSession(central, info.conn_handle, @errorName(err));
@@ -217,6 +228,82 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
             }
         }
 
+        fn runKcpTxLoop(self: *Self, central: bt.Central, conn_handle: u16, value_handle: u16, att_mtu: u16) !void {
+            var output = KcpOutput{
+                .central = central,
+                .conn_handle = conn_handle,
+                .value_handle = value_handle,
+            };
+            const config = kcpConfig(att_mtu);
+            var stream = try BtKcp.makeStream(self.allocator, config, &output, KcpOutput.write);
+            defer stream.deinit();
+            self.setKcpStream(stream);
+            defer self.clearKcpStream(stream);
+            log.info("client kcp stream conn={} mtu={} payload_len={}", .{ conn_handle, config.kcpMtu(), packetPayloadLenForKcp(config) });
+
+            var seq: u32 = 0;
+            var tx_bytes: u32 = 0;
+            var tx_packets: u32 = 0;
+            var rx_window: RxWindow = .{};
+            var last_window = grt.time.instant.now();
+            var packet_buf: [consts.max_payload_len + consts.Header.encoded_len]u8 = undefined;
+            var read_buf: [consts.max_payload_len + consts.Header.encoded_len]u8 = undefined;
+            const value_payload_len = packetPayloadLenForKcp(config);
+
+            while (!self.shouldStop() and self.isConnActive(conn_handle)) {
+                self.drainKcpRx(stream, &read_buf) catch |err| {
+                    if (isKcpSessionEnd(err)) {
+                        log.info("client kcp stream ended conn={} err={s}", .{ conn_handle, @errorName(err) });
+                        return;
+                    }
+                    return err;
+                };
+                const packet = makePacket(&packet_buf, seq, value_payload_len);
+                const write_started = grt.time.instant.now();
+                const wrote = stream.writeTimeout(packet, kcp_write_timeout) catch |err| {
+                    if (isKcpSessionEnd(err)) {
+                        log.info("client kcp stream ended conn={} err={s}", .{ conn_handle, @errorName(err) });
+                        return;
+                    }
+                    return err;
+                };
+                const write_elapsed = grt.time.instant.now() - write_started;
+                if (wrote and write_elapsed > 100 * glib.time.duration.MilliSecond) {
+                    log.info("client kcp write conn={} seq={} bytes={} elapsed_ms={}", .{
+                        conn_handle,
+                        seq,
+                        packet.len,
+                        @divFloor(write_elapsed, glib.time.duration.MilliSecond),
+                    });
+                }
+                if (wrote) {
+                    seq +%= 1;
+                    tx_bytes +|= @intCast(packet.len);
+                    tx_packets +|= 1;
+                } else {
+                    grt.time.sleep(backpressure_sleep_ns);
+                }
+
+                const rx_snapshot = self.takeRxWindow();
+                rx_window.bytes +|= rx_snapshot.bytes;
+                rx_window.packets +|= rx_snapshot.packets;
+                rx_window.expected_seq = rx_snapshot.expected_seq;
+                rx_window.lost_packets +|= rx_snapshot.lost_packets;
+                rx_window.reordered_packets +|= rx_snapshot.reordered_packets;
+
+                const now = grt.time.instant.now();
+                if (now - last_window >= window_ms * glib.time.duration.MilliSecond) {
+                    try self.dispatchStatsWindow(tx_bytes, rx_window, tx_packets);
+                    tx_bytes = 0;
+                    tx_packets = 0;
+                    rx_window = .{};
+                    last_window = now;
+                }
+
+                grt.time.sleep(tx_pace_ns);
+            }
+        }
+
         fn onCentralEvent(ctx: ?*anyopaque, event: bt.Central.Event) void {
             const self: *Self = @ptrCast(@alignCast(ctx.?));
             switch (event) {
@@ -227,7 +314,10 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
                     self.cond.signal();
                     self.mutex.unlock();
                 },
-                .notification => |notif| self.noteRxPacket(notif.payload()),
+                .notification => |notif| {
+                    if (transport == .kcp_stream and self.feedKcpStream(notif.payload())) return;
+                    self.noteRxPacket(notif.payload());
+                },
                 .disconnected => |conn_handle| {
                     self.setConnHandle(0);
                     self.dispatchStop(conn_handle) catch {};
@@ -264,6 +354,28 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
             if (self.conn_handle != conn_handle) self.resetRxTrackingLocked();
             self.conn_handle = conn_handle;
             self.mutex.unlock();
+        }
+
+        fn setKcpStream(self: *Self, stream: *BtKcp.Stream) void {
+            self.mutex.lock();
+            self.kcp_stream = stream;
+            self.mutex.unlock();
+        }
+
+        fn clearKcpStream(self: *Self, stream: *BtKcp.Stream) void {
+            self.mutex.lock();
+            if (self.kcp_stream == stream) self.kcp_stream = null;
+            self.mutex.unlock();
+        }
+
+        fn feedKcpStream(self: *Self, data: []const u8) bool {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            if (self.kcp_stream) |active| {
+                active.input(data) catch {};
+                return true;
+            }
+            return false;
         }
 
         fn isConnActive(self: *Self, conn_handle: u16) bool {
@@ -462,7 +574,6 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
 
             var service: ?bt.Central.DiscoveredService = null;
             for (services_buf[0..service_count]) |svc| {
-                log.debug("service uuid=0x{x} start={} end={}", .{ svc.uuid, svc.start_handle, svc.end_handle });
                 if (svc.uuid == consts.service_uuid) service = svc;
             }
             const speed_service = service orelse return error.AttError;
@@ -473,13 +584,6 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
             var tx: ?bt.Central.DiscoveredChar = null;
             var rx: ?bt.Central.DiscoveredChar = null;
             for (chars_buf[0..char_count]) |ch| {
-                log.debug("char uuid=0x{x} decl={} value={} cccd={} props=0x{x}", .{
-                    ch.uuid,
-                    ch.decl_handle,
-                    ch.value_handle,
-                    ch.cccd_handle,
-                    ch.properties,
-                });
                 if (ch.uuid == consts.tx_char_uuid) tx = ch;
                 if (ch.uuid == consts.rx_char_uuid) rx = ch;
             }
@@ -513,6 +617,64 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
             if (att_mtu <= consts.att_header_len + consts.Header.encoded_len) return 1;
             return @intCast(@min(att_mtu - consts.att_header_len - consts.Header.encoded_len, consts.max_payload_len));
         }
+
+        fn packetPayloadLenForKcp(config: BtKcp.Config) usize {
+            const max_write = config.maxWriteChunkLen();
+            if (max_write <= consts.Header.encoded_len) return 1;
+            return @min(max_write - consts.Header.encoded_len, consts.max_payload_len);
+        }
+
+        fn kcpConfig(att_mtu: u16) BtKcp.Config {
+            return .{
+                .tx_char_uuid = consts.tx_char_uuid,
+                .rx_char_uuid = consts.rx_char_uuid,
+                .att_mtu = att_mtu,
+                .send_window = kcp_ble_window,
+                .recv_window = kcp_ble_window,
+                .channel_capacity = kcp_ble_window,
+                .max_datagram_len = kcp_acl_datagram_len,
+            };
+        }
+
+        fn drainKcpRx(self: *Self, stream: *BtKcp.Stream, buf: []u8) !void {
+            while (true) {
+                const n = (try stream.readTimeout(buf, 0)) orelse return;
+                self.noteRxPacket(buf[0..n]);
+            }
+        }
+
+        fn isKcpSessionEnd(err: anyerror) bool {
+            return err == error.Closed or err == error.OutputFailed;
+        }
+
+        const KcpOutput = struct {
+            central: bt.Central,
+            conn_handle: u16,
+            value_handle: u16,
+
+            fn write(ctx: ?*anyopaque, data: []const u8) anyerror!void {
+                const self: *KcpOutput = @ptrCast(@alignCast(ctx.?));
+                var attempts: u8 = 0;
+                while (true) {
+                    self.central.gattWriteNoResp(self.conn_handle, self.value_handle, data) catch |err| switch (err) {
+                        error.Timeout => {
+                            attempts +|= 1;
+                            if (attempts >= 5) {
+                                log.err("client kcp output failed conn={} len={} err={s}", .{ self.conn_handle, data.len, @errorName(err) });
+                                return err;
+                            }
+                            grt.time.sleep(backpressure_sleep_ns);
+                            continue;
+                        },
+                        else => {
+                            log.err("client kcp output failed conn={} len={} err={s}", .{ self.conn_handle, data.len, @errorName(err) });
+                            return err;
+                        },
+                    };
+                    return;
+                }
+            }
+        };
 
         fn makePacket(buf: []u8, seq: u32, value_len: usize) []const u8 {
             const payload_len = @min(value_len, consts.max_payload_len);

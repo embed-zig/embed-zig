@@ -7,6 +7,7 @@ pub const GattConfig = Peripheral.GattConfig;
 pub const Transport = @import("bt/Transport.zig");
 pub const Hci = @import("bt/Hci.zig");
 pub const Mocker = @import("bt/Mocker.zig").Mocker;
+pub const kcp = @import("bt/kcp.zig");
 pub const test_runner = struct {
     pub const unit = @import("bt/test_runner/unit.zig");
     pub const integration = @import("bt/test_runner/integration.zig");
