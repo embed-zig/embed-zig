@@ -1,0 +1,19 @@
+.{
+    .name = .desktop_gpio_smoke,
+    .version = "0.1.0",
+    .fingerprint = 0x7065eb49ec4aad52,
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{
+        .embed = .{
+            .path = "../../../embed",
+        },
+        .glib = .{
+            .path = "../../../glib",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

@@ -1,4 +1,5 @@
 const glib = @import("glib");
+const drivers = @import("drivers");
 
 const Assembler = @import("../../Assembler.zig");
 const Store = @import("../../Store.zig");
@@ -52,6 +53,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                     try grt.std.testing.expectEqual(@as(usize, 3), assembler.ledstrip_registry.periphs.len);
                     try grt.std.testing.expectEqual(@as(usize, 2), assembler.modem_registry.periphs.len);
                     try grt.std.testing.expectEqual(@as(usize, 2), assembler.nfc_registry.periphs.len);
+                    try grt.std.testing.expectEqual(@as(usize, 8), assembler.gpio_registry.periphs.len);
                     try grt.std.testing.expectEqual(@as(usize, 2), assembler.wifi_sta_registry.periphs.len);
                     try grt.std.testing.expectEqual(@as(usize, 2), assembler.wifi_ap_registry.periphs.len);
                     try grt.std.testing.expectEqual(@as(usize, 3), assembler.custom_event_registry.event_types.len);
@@ -62,6 +64,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                     try grt.std.testing.expectEqual(@as(usize, 0), assembler.ledstrip_registry.len);
                     try grt.std.testing.expectEqual(@as(usize, 0), assembler.modem_registry.len);
                     try grt.std.testing.expectEqual(@as(usize, 0), assembler.nfc_registry.len);
+                    try grt.std.testing.expectEqual(@as(usize, 0), assembler.gpio_registry.len);
                     try grt.std.testing.expectEqual(@as(usize, 0), assembler.wifi_sta_registry.len);
                     try grt.std.testing.expectEqual(@as(usize, 0), assembler.wifi_ap_registry.len);
                     try grt.std.testing.expectEqual(@as(usize, 0), assembler.custom_event_registry.len);
@@ -429,6 +432,26 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                     try grt.std.testing.expectEqualStrings("display", assembler.touch_registry.periphs[0].target.?);
                 }
 
+                fn add_gpio_records_input_mode() !void {
+                    const assembler = comptime blk: {
+                        const AssemblerType = Assembler.make(grt, .{
+                            .max_gpio = 3,
+                        });
+                        var next = AssemblerType.init();
+                        next.addGpio("pin_poll", 32);
+                        next.addIrqGpio("pin_irq", 33);
+                        next.addVirtualGpio("pin_virtual", 34);
+                        break :blk next;
+                    };
+
+                    try grt.std.testing.expectEqual(@as(usize, 3), assembler.gpio_registry.len);
+                    try grt.std.testing.expectEqualStrings("pin_poll", assembler.gpio_registry.periphs[0].label);
+                    try grt.std.testing.expectEqual(@as(u32, 32), assembler.gpio_registry.periphs[0].id);
+                    try grt.std.testing.expectEqual(.poll, assembler.gpio_registry.periphs[0].input_type);
+                    try grt.std.testing.expectEqual(.irq, assembler.gpio_registry.periphs[1].input_type);
+                    try grt.std.testing.expectEqual(.virtual, assembler.gpio_registry.periphs[2].input_type);
+                }
+
                 fn add_component_registries_record_entries() !void {
                     const assembler = comptime blk: {
                         const AssemblerType = Assembler.make(grt, .{
@@ -523,7 +546,6 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                 }
 
                 fn build_returns_app_methods() !void {
-                    const drivers = @import("drivers");
                     const ledstrip_mod = @import("ledstrip");
 
                     const Built = comptime blk: {
@@ -760,6 +782,129 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                     }
                 }
 
+                fn virtual_gpio_requires_no_build_config_field() !void {
+                    const Built = comptime blk: {
+                        const AssemblerType = Assembler.make(grt, .{
+                            .max_gpio = 1,
+                        });
+                        var next = AssemblerType.init();
+                        next.addVirtualGpio("pin", 11);
+
+                        const BuildConfig = next.BuildConfig();
+                        const build_config: BuildConfig = .{};
+                        break :blk next.build(build_config);
+                    };
+
+                    try grt.std.testing.expect(!@hasField(Built.InitConfig, "pin"));
+                    try grt.std.testing.expectEqual(@as(usize, 0), Built.poller_count);
+                    try grt.std.testing.expect(@hasField(Built.Store.Stores, "pin"));
+
+                    var app = try Built.init(.{
+                        .allocator = grt.std.testing.allocator,
+                        .initial_state = .{
+                            .pin = .{},
+                        },
+                    });
+                    defer app.deinit();
+
+                    try app.start(.{ .ticker = .manual });
+                    try app.gpio_changed(.pin, .rising, .high);
+                    app.store.tick();
+
+                    switch (app.impl.last_event.?) {
+                        .raw_gpio_changed => |event_value| {
+                            try grt.std.testing.expectEqual(@as(u32, 11), event_value.source_id);
+                            try grt.std.testing.expectEqual(drivers.Gpio.Edge.rising, event_value.edge);
+                            try grt.std.testing.expectEqual(drivers.Gpio.Level.high, event_value.level);
+                        },
+                        else => return error.UnexpectedMessage,
+                    }
+                    try grt.std.testing.expectEqual(drivers.Gpio.Level.high, app.store.stores.pin.get().level);
+                    try grt.std.testing.expectEqual(@as(u64, 1), app.store.stores.pin.get().generation);
+                }
+
+                fn irq_gpio_attaches_and_detaches_callback() !void {
+                    const Pin = struct {
+                        configured_edge: ?drivers.Gpio.Edge = null,
+                        callback_ctx: ?*const anyopaque = null,
+                        callback_fn: ?drivers.Gpio.CallbackFn = null,
+                        clear_count: usize = 0,
+
+                        pub fn read(_: *@This()) drivers.Gpio.Error!drivers.Gpio.Level {
+                            return .low;
+                        }
+
+                        pub fn write(_: *@This(), _: drivers.Gpio.Level) drivers.Gpio.Error!void {}
+
+                        pub fn setDirection(_: *@This(), _: drivers.Gpio.Direction) drivers.Gpio.Error!void {}
+
+                        pub fn configureInterrupt(self_pin: *@This(), edge: drivers.Gpio.Edge) drivers.Gpio.Error!void {
+                            self_pin.configured_edge = edge;
+                        }
+
+                        pub fn setEventCallback(self_pin: *@This(), ctx: *const anyopaque, emit_fn: drivers.Gpio.CallbackFn) void {
+                            self_pin.callback_ctx = ctx;
+                            self_pin.callback_fn = emit_fn;
+                        }
+
+                        pub fn clearEventCallback(self_pin: *@This()) void {
+                            self_pin.callback_ctx = null;
+                            self_pin.callback_fn = null;
+                            self_pin.clear_count += 1;
+                        }
+                    };
+
+                    const Built = comptime blk: {
+                        const AssemblerType = Assembler.make(grt, .{
+                            .max_gpio = 1,
+                        });
+                        var next = AssemblerType.init();
+                        next.addIrqGpio("pin", 12);
+
+                        const BuildConfig = next.BuildConfig();
+                        const build_config: BuildConfig = .{
+                            .pin = drivers.Gpio,
+                        };
+                        break :blk next.build(build_config);
+                    };
+
+                    var pin = Pin{};
+                    const gpio = drivers.Gpio.init(&pin);
+                    var app = try Built.init(.{
+                        .allocator = grt.std.testing.allocator,
+                        .initial_state = .{
+                            .pin = .{},
+                        },
+                        .pin = gpio,
+                    });
+                    defer app.deinit();
+
+                    try app.start(.{});
+                    try grt.std.testing.expectEqual(@as(?drivers.Gpio.Edge, .both), pin.configured_edge);
+                    try grt.std.testing.expect(pin.callback_ctx != null);
+                    try grt.std.testing.expect(pin.callback_fn != null);
+
+                    pin.callback_fn.?(pin.callback_ctx.?, .{
+                        .edge = .falling,
+                        .level = .low,
+                    });
+                    var received = false;
+                    for (0..100) |_| {
+                        app.store.tick();
+                        if (app.store.stores.pin.get().last_edge) |edge| {
+                            try grt.std.testing.expectEqual(drivers.Gpio.Edge.falling, edge);
+                            received = true;
+                            break;
+                        }
+                        grt.time.sleep(1 * glib.time.duration.MilliSecond);
+                    }
+                    try grt.std.testing.expect(received);
+                    try app.stop();
+                    try grt.std.testing.expect(pin.callback_ctx == null);
+                    try grt.std.testing.expect(pin.callback_fn == null);
+                    try grt.std.testing.expectEqual(@as(usize, 1), pin.clear_count);
+                }
+
                 fn render_subscriber_runs_on_store_commit() !void {
                     const CounterStore = Store.Object.make(grt, struct {
                         value: u32 = 0,
@@ -879,6 +1024,10 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                 t.logFatal(@errorName(err));
                 return false;
             };
+            TestCase.add_gpio_records_input_mode() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
             TestCase.add_component_registries_record_entries() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
@@ -904,6 +1053,14 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                 return false;
             };
             TestCase.virtual_grouped_button_requires_no_build_config_field() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.virtual_gpio_requires_no_build_config_field() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.irq_gpio_attaches_and_detaches_callback() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

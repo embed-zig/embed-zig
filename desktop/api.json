@@ -107,7 +107,9 @@
                 "up",
                 "on",
                 "off",
-                "toggle"
+                "toggle",
+                "high",
+                "low"
               ]
             }
           },
@@ -271,6 +273,7 @@
               "grouped_button",
               "ledstrip",
               "switch_output",
+              "gpio",
               "display",
               "modem",
               "nfc",
@@ -352,6 +355,9 @@
           },
           {
             "$ref": "#/components/schemas/SwitchOutputState"
+          },
+          {
+            "$ref": "#/components/schemas/GpioState"
           },
           {
             "$ref": "#/components/schemas/DisplayState"
@@ -451,6 +457,45 @@
           },
           "enabled": {
             "type": "boolean"
+          }
+        }
+      },
+      "GpioState": {
+        "type": "object",
+        "required": [
+          "label",
+          "kind",
+          "level",
+          "generation"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "const": "gpio"
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "low",
+              "high"
+            ]
+          },
+          "last_edge": {
+            "type": "string",
+            "enum": [
+              "rising",
+              "falling",
+              "both",
+              "low_level",
+              "high_level"
+            ]
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       },

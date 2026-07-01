@@ -7,6 +7,7 @@ const registry_audio_system = @import("assembler/registry/audio_system.zig");
 const registry_adc_button = @import("assembler/registry/adc_button.zig");
 const registry_custom_event = @import("assembler/registry/custom_event.zig");
 const registry_display = @import("assembler/registry/display.zig");
+const registry_gpio = @import("assembler/registry/gpio.zig");
 const registry_single_button = @import("assembler/registry/single_button.zig");
 const registry_imu = @import("assembler/registry/imu.zig");
 const registry_ledstrip = @import("assembler/registry/ledstrip.zig");
@@ -39,6 +40,7 @@ pub fn make(
     const AdcButtonRegistryType = registry_adc_button.make(config.max_adc_buttons);
     const AudioSystemRegistryType = registry_audio_system.make(config.max_audio_systems);
     const DisplayRegistryType = registry_display.make(config.max_displays);
+    const GpioRegistryType = registry_gpio.make(config.max_gpio);
     const SingleButtonRegistryType = registry_single_button.make(config.max_single_buttons);
     const ImuRegistryType = registry_imu.make(config.max_imu);
     const LedStripRegistryType = registry_ledstrip.make(config.max_led_strips);
@@ -59,6 +61,7 @@ pub fn make(
         adc_button_registry: AdcButtonRegistryType,
         audio_system_registry: AudioSystemRegistryType,
         display_registry: DisplayRegistryType,
+        gpio_registry: GpioRegistryType,
         single_button_registry: SingleButtonRegistryType,
         imu_registry: ImuRegistryType,
         ledstrip_registry: LedStripRegistryType,
@@ -86,6 +89,7 @@ pub fn make(
                 .adc_button_registry = AdcButtonRegistryType.init(),
                 .audio_system_registry = AudioSystemRegistryType.init(),
                 .display_registry = DisplayRegistryType.init(),
+                .gpio_registry = GpioRegistryType.init(),
                 .single_button_registry = SingleButtonRegistryType.init(),
                 .imu_registry = ImuRegistryType.init(),
                 .ledstrip_registry = LedStripRegistryType.init(),
@@ -281,6 +285,63 @@ pub fn make(
             self.display_registry.addWithMetadataAndSize(label, id, metadata, width, height);
         }
 
+        pub fn addGpio(
+            self: *Self,
+            comptime label: []const u8,
+            comptime id: u32,
+        ) void {
+            ensureComponentUnique(self, label, id);
+            self.gpio_registry.add(label, id);
+        }
+
+        pub fn addGpioWithMetadata(
+            self: *Self,
+            comptime label: []const u8,
+            comptime id: u32,
+            comptime metadata: Metadata,
+        ) void {
+            ensureComponentUnique(self, label, id);
+            self.gpio_registry.addWithMetadata(label, id, metadata);
+        }
+
+        pub fn addIrqGpio(
+            self: *Self,
+            comptime label: []const u8,
+            comptime id: u32,
+        ) void {
+            ensureComponentUnique(self, label, id);
+            self.gpio_registry.addIrq(label, id);
+        }
+
+        pub fn addIrqGpioWithMetadata(
+            self: *Self,
+            comptime label: []const u8,
+            comptime id: u32,
+            comptime metadata: Metadata,
+        ) void {
+            ensureComponentUnique(self, label, id);
+            self.gpio_registry.addIrqWithMetadata(label, id, metadata);
+        }
+
+        pub fn addVirtualGpio(
+            self: *Self,
+            comptime label: []const u8,
+            comptime id: u32,
+        ) void {
+            ensureComponentUnique(self, label, id);
+            self.gpio_registry.addVirtual(label, id);
+        }
+
+        pub fn addVirtualGpioWithMetadata(
+            self: *Self,
+            comptime label: []const u8,
+            comptime id: u32,
+            comptime metadata: Metadata,
+        ) void {
+            ensureComponentUnique(self, label, id);
+            self.gpio_registry.addVirtualWithMetadata(label, id, metadata);
+        }
+
         pub fn addImu(
             self: *Self,
             comptime label: []const u8,
@@ -431,6 +492,7 @@ pub fn make(
                 .adc_button = self.adc_button_registry,
                 .audio_system = self.audio_system_registry,
                 .display = self.display_registry,
+                .gpio = self.gpio_registry,
                 .single_button = self.single_button_registry,
                 .imu = self.imu_registry,
                 .ledstrip = self.ledstrip_registry,
@@ -457,6 +519,7 @@ pub fn make(
                     .adc_button = self.adc_button_registry,
                     .audio_system = self.audio_system_registry,
                     .display = self.display_registry,
+                    .gpio = self.gpio_registry,
                     .single_button = self.single_button_registry,
                     .imu = self.imu_registry,
                     .ledstrip = self.ledstrip_registry,
@@ -489,6 +552,7 @@ pub fn make(
                     self.bt_registry,
                     self.audio_system_registry,
                     self.display_registry,
+                    self.gpio_registry,
                     self.single_button_registry,
                     self.imu_registry,
                     self.ledstrip_registry,

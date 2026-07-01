@@ -43,6 +43,7 @@ const grt_source_files = [_][]const u8{
 };
 const embed_idf_requires = [_][]const u8{
     "esp_driver_i2c",
+    "esp_driver_gpio",
     "esp_event",
     "esp_lcd",
     "esp_netif",
@@ -52,6 +53,7 @@ const embed_idf_requires = [_][]const u8{
 };
 const embed_source_files = [_][]const u8{
     "display/native_dbi.c",
+    "gpio/binding.c",
     "i2c/binding.c",
     "system/preferences_binding.c",
     "wifi/sta_binding.c",

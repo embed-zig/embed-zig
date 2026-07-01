@@ -22,10 +22,28 @@ pub const Level = enum(u1) {
     high = 1,
 };
 
+pub const Edge = enum {
+    rising,
+    falling,
+    both,
+    low_level,
+    high_level,
+};
+
+pub const Event = struct {
+    edge: Edge,
+    level: Level,
+};
+
+pub const CallbackFn = *const fn (ctx: *const anyopaque, event: Event) void;
+
 pub const VTable = struct {
     read: *const fn (ptr: *anyopaque) Error!Level,
     write: *const fn (ptr: *anyopaque, level: Level) Error!void,
     setDirection: *const fn (ptr: *anyopaque, direction: Direction) Error!void,
+    configureInterrupt: *const fn (ptr: *anyopaque, edge: Edge) Error!void = defaultConfigureInterrupt,
+    setEventCallback: *const fn (ptr: *anyopaque, ctx: *const anyopaque, emit_fn: CallbackFn) void = defaultSetEventCallback,
+    clearEventCallback: *const fn (ptr: *anyopaque) void = defaultClearEventCallback,
 };
 
 pub fn read(self: Gpio) Error!Level {
@@ -56,6 +74,18 @@ pub fn setLow(self: Gpio) Error!void {
     try self.write(.low);
 }
 
+pub fn configureInterrupt(self: Gpio, edge: Edge) Error!void {
+    try self.vtable.configureInterrupt(self.ptr, edge);
+}
+
+pub fn setEventCallback(self: Gpio, ctx: *const anyopaque, emit_fn: CallbackFn) void {
+    self.vtable.setEventCallback(self.ptr, ctx, emit_fn);
+}
+
+pub fn clearEventCallback(self: Gpio) void {
+    self.vtable.clearEventCallback(self.ptr);
+}
+
 pub fn init(pointer: anytype) Gpio {
     const Impl = childType(@TypeOf(pointer));
 
@@ -81,10 +111,39 @@ pub fn init(pointer: anytype) Gpio {
             try self.setDirection(direction);
         }
 
+        fn configureInterruptFn(ptr: *anyopaque, edge: Edge) Error!void {
+            if (comptime !@hasDecl(Impl, "configureInterrupt")) {
+                return defaultConfigureInterrupt(ptr, edge);
+            }
+            const self: *Impl = @ptrCast(@alignCast(ptr));
+            return self.configureInterrupt(edge);
+        }
+
+        fn setEventCallbackFn(ptr: *anyopaque, ctx: *const anyopaque, emit_fn: CallbackFn) void {
+            if (comptime !@hasDecl(Impl, "setEventCallback")) {
+                defaultSetEventCallback(ptr, ctx, emit_fn);
+                return;
+            }
+            const self: *Impl = @ptrCast(@alignCast(ptr));
+            self.setEventCallback(ctx, emit_fn);
+        }
+
+        fn clearEventCallbackFn(ptr: *anyopaque) void {
+            if (comptime !@hasDecl(Impl, "clearEventCallback")) {
+                defaultClearEventCallback(ptr);
+                return;
+            }
+            const self: *Impl = @ptrCast(@alignCast(ptr));
+            self.clearEventCallback();
+        }
+
         const vtable = VTable{
             .read = readFn,
             .write = writeFn,
             .setDirection = setDirectionFn,
+            .configureInterrupt = configureInterruptFn,
+            .setEventCallback = setEventCallbackFn,
+            .clearEventCallback = clearEventCallbackFn,
         };
     };
 
@@ -302,6 +361,90 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(@as(?Level, .low), expander.last_level);
             try grt.std.testing.expectEqual(@as(?Direction, .input), expander.last_direction);
         }
+
+        fn defaultInterruptSupportIsUnsupported() !void {
+            const Fake = struct {
+                fn read(_: *@This()) Error!Level {
+                    return .low;
+                }
+
+                fn write(_: *@This(), _: Level) Error!void {}
+
+                fn setDirection(_: *@This(), _: Direction) Error!void {}
+            };
+
+            var fake = Fake{};
+            const gpio = Gpio.init(&fake);
+            try grt.std.testing.expectError(error.Unsupported, gpio.configureInterrupt(.rising));
+            gpio.setEventCallback(@ptrFromInt(@as(usize, 1)), struct {
+                fn callback(_: *const anyopaque, _: Event) void {}
+            }.callback);
+            gpio.clearEventCallback();
+        }
+
+        fn forwardsInterruptAndCallbackSupport() !void {
+            const Fake = struct {
+                configured_edge: ?Edge = null,
+                callback_ctx: ?*const anyopaque = null,
+                callback_fn: ?CallbackFn = null,
+                clear_count: usize = 0,
+
+                fn read(_: *@This()) Error!Level {
+                    return .low;
+                }
+
+                fn write(_: *@This(), _: Level) Error!void {}
+
+                fn setDirection(_: *@This(), _: Direction) Error!void {}
+
+                fn configureInterrupt(self: *@This(), edge: Edge) Error!void {
+                    self.configured_edge = edge;
+                }
+
+                fn setEventCallback(self: *@This(), ctx: *const anyopaque, emit_fn: CallbackFn) void {
+                    self.callback_ctx = ctx;
+                    self.callback_fn = emit_fn;
+                }
+
+                fn clearEventCallback(self: *@This()) void {
+                    self.callback_ctx = null;
+                    self.callback_fn = null;
+                    self.clear_count += 1;
+                }
+
+                fn emit(self: *@This(), event: Event) void {
+                    const ctx = self.callback_ctx orelse return;
+                    const emit_fn = self.callback_fn orelse return;
+                    emit_fn(ctx, event);
+                }
+            };
+
+            const Sink = struct {
+                count: usize = 0,
+                last_event: ?Event = null,
+
+                fn callback(ctx: *const anyopaque, event: Event) void {
+                    const self: *@This() = @ptrCast(@alignCast(@constCast(ctx)));
+                    self.count += 1;
+                    self.last_event = event;
+                }
+            };
+
+            var fake = Fake{};
+            var sink = Sink{};
+            const gpio = Gpio.init(&fake);
+
+            try gpio.configureInterrupt(.both);
+            gpio.setEventCallback(@ptrCast(&sink), Sink.callback);
+            fake.emit(.{ .edge = .rising, .level = .high });
+            gpio.clearEventCallback();
+
+            try grt.std.testing.expectEqual(@as(?Edge, .both), fake.configured_edge);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.count);
+            try grt.std.testing.expectEqual(Edge.rising, sink.last_event.?.edge);
+            try grt.std.testing.expectEqual(Level.high, sink.last_event.?.level);
+            try grt.std.testing.expectEqual(@as(usize, 1), fake.clear_count);
+        }
     };
 
     const Runner = struct {
@@ -320,6 +463,8 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 TestCase.writeAndDirectionDispatch,
                 TestCase.fromTca9554AdaptsChipMethods,
                 TestCase.fromPca9557AdaptsChipMethods,
+                TestCase.defaultInterruptSupportIsUnsupported,
+                TestCase.forwardsInterruptAndCallbackSupport,
             }) |case| {
                 case() catch |err| {
                     t.logFatal(@errorName(err));
@@ -340,6 +485,14 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     };
     return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }
+
+fn defaultConfigureInterrupt(_: *anyopaque, _: Edge) Error!void {
+    return error.Unsupported;
+}
+
+fn defaultSetEventCallback(_: *anyopaque, _: *const anyopaque, _: CallbackFn) void {}
+
+fn defaultClearEventCallback(_: *anyopaque) void {}
 
 fn childType(comptime PointerType: type) type {
     return switch (@typeInfo(PointerType)) {

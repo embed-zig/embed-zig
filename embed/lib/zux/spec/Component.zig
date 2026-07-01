@@ -8,6 +8,7 @@ pub const Kind = union(enum) {
     bt: void,
     audio_system: void,
     display: DisplaySpec,
+    gpio: GpioSpec,
     single_button: ButtonSpec,
     imu: void,
     led_strip: struct {
@@ -34,6 +35,16 @@ pub const ButtonSpec = struct {
 pub const GroupedButtonSpec = struct {
     button_count: usize,
     input_type: ButtonInputType = .poll,
+};
+
+pub const GpioInputType = enum {
+    irq,
+    poll,
+    virtual,
+};
+
+pub const GpioSpec = struct {
+    input_type: GpioInputType = .poll,
 };
 
 pub const DisplaySpec = struct {
@@ -525,6 +536,9 @@ fn parseKindValue(
     if (glib.std.mem.eql(u8, entry.key_ptr.*, "display")) {
         return .{ .display = try parseDisplaySpecValue(entry.value_ptr.*) };
     }
+    if (glib.std.mem.eql(u8, entry.key_ptr.*, "gpio")) {
+        return .{ .gpio = try parseGpioSpecValue(entry.value_ptr.*) };
+    }
     if (glib.std.mem.eql(u8, entry.key_ptr.*, "imu")) {
         try expectEmptyPayload(entry.value_ptr.*);
         return .{ .imu = {} };
@@ -644,6 +658,9 @@ fn parseKindSlice(comptime source: []const u8) Kind {
             "zux.spec.Component.parseSlice display payload",
         ) };
     }
+    if (comptimeEql(kind_name, "gpio")) {
+        return .{ .gpio = parseGpioSpecSlice(payload_source) };
+    }
     if (comptimeEql(kind_name, "imu")) {
         expectEmptyPayloadSlice(
             payload_source,
@@ -732,6 +749,9 @@ fn parsePathKindSlice(comptime kind_path: []const u8, comptime source: []const u
             "zux.spec.Component.parseSlice Component/display",
         ) };
     }
+    if (comptimeEql(kind_path, "gpio")) {
+        return .{ .gpio = parseGpioSpecSlice(source) };
+    }
     if (comptimeEql(kind_path, "imu")) {
         return .{ .imu = {} };
     }
@@ -789,6 +809,9 @@ fn parsePathKindValue(
     }
     if (glib.std.mem.eql(u8, kind_path, "display")) {
         return .{ .display = try parseDisplaySpecJsonObject(object) };
+    }
+    if (glib.std.mem.eql(u8, kind_path, "gpio")) {
+        return .{ .gpio = try parseGpioSpecJsonObject(object) };
     }
     if (glib.std.mem.eql(u8, kind_path, "imu")) {
         return .{ .imu = {} };
@@ -1207,6 +1230,100 @@ fn parseButtonInputTypeName(comptime text: []const u8) ButtonInputType {
     @compileError("zux.spec.Component button/single `type` must be `poll` or `virtual`");
 }
 
+fn parseGpioInputTypeValue(value: glib.std.json.Value) !GpioInputType {
+    const text = switch (value) {
+        .string => |text| text,
+        else => return error.ExpectedString,
+    };
+    if (glib.std.mem.eql(u8, text, "irq")) return .irq;
+    if (glib.std.mem.eql(u8, text, "poll")) return .poll;
+    if (glib.std.mem.eql(u8, text, "virtual")) return .virtual;
+    return error.UnknownGpioInputType;
+}
+
+fn parseGpioSpecValue(value: glib.std.json.Value) !GpioSpec {
+    return switch (value) {
+        .null => .{},
+        .object => |object| try parseGpioSpecJsonObject(object),
+        else => error.ExpectedObject,
+    };
+}
+
+fn parseGpioSpecJsonObject(object: glib.std.json.ObjectMap) !GpioSpec {
+    const input_type = if (object.get("type")) |value|
+        try parseGpioInputTypeValue(value)
+    else
+        .poll;
+    return .{ .input_type = input_type };
+}
+
+fn parseGpioSpecSlice(comptime source: []const u8) GpioSpec {
+    return .{
+        .input_type = parseGpioInputTypeSlice(source),
+    };
+}
+
+fn parseGpioInputTypeSlice(comptime source: []const u8) GpioInputType {
+    var parser = JsonParser.init(source);
+    switch (parser.peekByte()) {
+        'n' => {
+            parser.expectNull();
+            parser.finish();
+            return .poll;
+        },
+        '{' => {},
+        else => @compileError("zux.spec.Component gpio payload must be null or an object"),
+    }
+
+    parser.expectByte('{');
+    if (parser.consumeByte('}')) {
+        parser.finish();
+        return .poll;
+    }
+
+    var result: GpioInputType = .poll;
+    while (true) {
+        const key = parser.parseString();
+        parser.expectByte(':');
+        if (comptimeEql(key, "type")) {
+            const value = parser.parseString();
+            result = parseGpioInputTypeName(value);
+        } else {
+            _ = parser.parseValueSlice();
+        }
+        if (parser.consumeByte(',')) continue;
+        parser.expectByte('}');
+        break;
+    }
+    parser.finish();
+    return result;
+}
+
+fn parseGpioSpecComptime(comptime value: glib.std.json.Value) GpioSpec {
+    return switch (value) {
+        .null => .{},
+        .object => |object| .{ .input_type = parseGpioInputTypeComptime(object) },
+        else => @compileError("zux.spec.Component gpio payload must be null or an object"),
+    };
+}
+
+fn parseGpioInputTypeComptime(comptime object: glib.std.json.ObjectMap) GpioInputType {
+    if (object.get("type")) |value| {
+        return switch (value) {
+            .string => |text| parseGpioInputTypeName(text),
+            else => @compileError("zux.spec.Component gpio `type` must be a string"),
+        };
+    }
+    return .poll;
+}
+
+fn parseGpioInputTypeName(comptime text: []const u8) GpioInputType {
+    if (comptimeEql(text, "irq")) return .irq;
+    if (comptimeEql(text, "poll")) return .poll;
+    if (comptimeEql(text, "virtual")) return .virtual;
+    @compileError("zux.spec.Component gpio `type` must be `irq`, `poll`, or `virtual`");
+}
+
 fn parseTouchSpecValue(allocator: glib.std.mem.Allocator, value: glib.std.json.Value) !TouchSpec {
     return switch (value) {
         .null => .{},
@@ -1409,6 +1526,9 @@ fn parseKindValueComptime(comptime value: glib.std.json.Value) Kind {
     }
     if (comptimeEql(kind_name, "display")) {
         return .{ .display = parseDisplaySpecComptime(payload) };
+    }
+    if (comptimeEql(kind_name, "gpio")) {
+        return .{ .gpio = parseGpioSpecComptime(payload) };
     }
     if (comptimeEql(kind_name, "imu")) {
         expectEmptyPayloadComptime(
@@ -1710,6 +1830,47 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 else => return error.ExpectedGroupedButtonComponent,
             }
         }
+
+        fn parses_gpio_json_slice(allocator: glib.std.mem.Allocator) !void {
+            const source =
+                \\{
+                \\  "label": "pin",
+                \\  "id": 12,
+                \\  "type": "irq"
+                \\}
+            ;
+
+            var parsed = try parseAllocSliceWithKindPath(allocator, "gpio", source);
+            defer parsed.deinit(allocator);
+
+            try grt.std.testing.expectEqualStrings("pin", parsed.label);
+            try grt.std.testing.expectEqual(@as(u32, 12), parsed.id);
+            switch (parsed.kind) {
+                .gpio => |gpio| try grt.std.testing.expectEqual(GpioInputType.irq, gpio.input_type),
+                else => return error.ExpectedGpioComponent,
+            }
+        }
+
+        fn parses_gpio_comptime_slice() !void {
+            const parsed = comptime parseSlice(
+                \\{
+                \\  "label": "pin",
+                \\  "id": 13,
+                \\  "kind": {
+                \\    "gpio": {
+                \\      "type": "virtual"
+                \\    }
+                \\  }
+                \\}
+            );
+
+            try grt.std.testing.expectEqualStrings("pin", parsed.label);
+            try grt.std.testing.expectEqual(@as(u32, 13), parsed.id);
+            switch (parsed.kind) {
+                .gpio => |gpio| try grt.std.testing.expectEqual(GpioInputType.virtual, gpio.input_type),
+                else => return error.ExpectedGpioComponent,
+            }
+        }
     };
 
     const Runner = struct {
@@ -1726,6 +1887,14 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 return false;
             };
             TestCase.parses_virtual_grouped_button_json_slice(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.parses_gpio_json_slice(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.parses_gpio_comptime_slice() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

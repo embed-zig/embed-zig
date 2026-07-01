@@ -217,6 +217,70 @@ body {
   transform: translateX(24px);
 }
 
+.gpio {
+  width: 168px;
+  min-height: 72px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 8px;
+  color: #f8fafc;
+  cursor: pointer;
+  background: #111827;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  box-shadow:
+    0 14px 26px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    transform 140ms ease;
+}
+
+.gpio:hover {
+  transform: translateY(-1px);
+  border-color: rgba(125, 211, 252, 0.42);
+}
+
+.gpio:focus-visible {
+  outline: 3px solid rgba(96, 165, 250, 0.75);
+  outline-offset: 5px;
+}
+
+.gpio-label {
+  min-width: 0;
+  color: #dbeafe;
+  font-size: 14px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.gpio-level {
+  min-width: 54px;
+  border-radius: 999px;
+  background: #334155;
+  color: #e2e8f0;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  padding: 9px 10px;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.gpio.high {
+  border-color: rgba(96, 165, 250, 0.48);
+  background: #102033;
+}
+
+.gpio.high .gpio-level {
+  background: #2563eb;
+  color: #eff6ff;
+}
+
 .display {
   display: block;
   width: auto;

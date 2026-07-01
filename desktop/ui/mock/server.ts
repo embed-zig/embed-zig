@@ -13,6 +13,10 @@ type GearTopology =
   | {
       label: 'relay';
       kind: 'switch_output';
+    }
+  | {
+      label: 'door_sensor';
+      kind: 'gpio';
     };
 
 type Color = {
@@ -40,9 +44,17 @@ type SwitchOutputState = {
   enabled: boolean;
 };
 
+type GpioState = {
+  label: 'door_sensor';
+  kind: 'gpio';
+  level: 'low' | 'high';
+  last_edge?: 'rising' | 'falling' | 'low_level' | 'high_level';
+  generation: number;
+};
+
 type StateResponse = {
   ts_ms: number;
-  gears: Array<SingleButtonState | LedStripState | SwitchOutputState>;
+  gears: Array<SingleButtonState | LedStripState | SwitchOutputState | GpioState>;
 };
 
 type ServerEvent =
@@ -77,6 +89,7 @@ export function createMockServer(options?: {
       { label: 'power-btn', kind: 'single_button' },
       { label: 'strip', kind: 'ledstrip', pixel_count: 8 },
       { label: 'relay', kind: 'switch_output' },
+      { label: 'door_sensor', kind: 'gpio' },
     ],
   };
 
@@ -84,6 +97,7 @@ export function createMockServer(options?: {
     button: SingleButtonState;
     strip: LedStripState;
     relay: SwitchOutputState;
+    gpio: GpioState;
   } = {
     button: {
       label: 'power-btn',
@@ -100,6 +114,12 @@ export function createMockServer(options?: {
       label: 'relay',
       kind: 'switch_output',
       enabled: false,
+    },
+    gpio: {
+      label: 'door_sensor',
+      kind: 'gpio',
+      level: 'low',
+      generation: 0,
     },
   };
 
@@ -127,6 +147,7 @@ export function createMockServer(options?: {
         pixels: clonePixels(state.strip.pixels),
       },
       { ...state.relay },
+      { ...state.gpio },
     ],
   });
 
@@ -212,7 +233,7 @@ export function createMockServer(options?: {
       return json({ error: { code: 'INVALID_TS', message: 'Query parameter ts must be a number.' } }, 400);
     }
 
-    if (gearLabel !== 'power-btn' && gearLabel !== 'relay') {
+    if (gearLabel !== 'power-btn' && gearLabel !== 'relay' && gearLabel !== 'door_sensor') {
       return json({ error: { code: 'UNKNOWN_GEAR', message: `Unknown gear label: ${gearLabel}` } }, 404);
     }
 
@@ -221,6 +242,30 @@ export function createMockServer(options?: {
         return json({ error: { code: 'INVALID_EVENT', message: `Unsupported event: ${eventName}` } }, 400);
       }
       state.button.pressed = eventName === 'press';
+      broadcastSnapshot(ts);
+
+      return json({
+        accepted: true,
+        gear_label: gearLabel,
+        event: eventName,
+        ts,
+        metadata: metadata ?? undefined,
+      });
+    }
+
+    if (gearLabel === 'door_sensor') {
+      const previous = state.gpio.level;
+      if (eventName === 'high') {
+        state.gpio.level = 'high';
+      } else if (eventName === 'low') {
+        state.gpio.level = 'low';
+      } else if (eventName === 'toggle') {
+        state.gpio.level = state.gpio.level === 'low' ? 'high' : 'low';
+      } else {
+        return json({ error: { code: 'INVALID_EVENT', message: `Unsupported event: ${eventName}` } }, 400);
+      }
+      state.gpio.last_edge = gpioEdge(previous, state.gpio.level);
+      state.gpio.generation += 1;
       broadcastSnapshot(ts);
 
       return json({
@@ -354,6 +399,12 @@ export function createMockServer(options?: {
       await server.stop(closeActiveConnections);
     },
   };
+}
+
+function gpioEdge(previous: GpioState['level'], current: GpioState['level']): NonNullable<GpioState['last_edge']> {
+  if (previous === 'low' && current === 'high') return 'rising';
+  if (previous === 'high' && current === 'low') return 'falling';
+  return current === 'high' ? 'high_level' : 'low_level';
 }
 
 function black(): Color {

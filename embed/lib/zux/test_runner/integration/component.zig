@@ -4,6 +4,7 @@ const Builder = @import("../../spec/Builder.zig");
 const audio_system = @import("component/audio_system.zig");
 const bt = @import("component/bt.zig");
 const display = @import("component/display.zig");
+const gpio = @import("component/gpio.zig");
 const switch_component = @import("component/switch.zig");
 
 pub fn make(comptime grt: type) glib.testing.TestRunner {
@@ -84,6 +85,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
             t.run("bt", bt.make(grt));
             t.run("audio system", audio_system.make(grt));
             t.run("display", display.make(grt));
+            t.run("gpio", gpio.make(grt));
             t.run("switch", switch_component.make(grt));
             t.run("stories", story_runner);
             return t.wait();

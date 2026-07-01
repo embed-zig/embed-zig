@@ -1,6 +1,7 @@
 import {
   createDesktopController,
   getDisplayStates,
+  getGpioStates,
   getGroupedButtonStates,
   getLedStripState,
   getSingleButtonStates,
@@ -17,6 +18,7 @@ let latestState: StateResponse | null = null;
 const buttonEls = new Map<string, HTMLButtonElement>();
 const groupedButtonEls = new Map<string, HTMLButtonElement[]>();
 const switchOutputEls = new Map<string, HTMLButtonElement>();
+const gpioEls = new Map<string, HTMLButtonElement>();
 const displayCanvases = new Map<string, HTMLCanvasElement>();
 
 function log(message: string, data?: unknown): void {
@@ -40,6 +42,7 @@ function render(state: StateResponse): void {
   const groupedButtons = getGroupedButtonStates(state);
   const strip = getLedStripState(state);
   const switchOutputs = getSwitchOutputStates(state);
+  const gpios = getGpioStates(state);
   const displays = getDisplayStates(state);
 
   for (const button of buttons) {
@@ -59,6 +62,16 @@ function render(state: StateResponse): void {
     if (!node) continue;
     node.classList.toggle('enabled', output.enabled);
     node.setAttribute('aria-checked', String(output.enabled));
+  }
+
+  for (const gpio of gpios) {
+    const node = gpioEls.get(gpio.label);
+    if (!node) continue;
+    const high = gpio.level === 'high';
+    node.classList.toggle('high', high);
+    node.setAttribute('aria-pressed', String(high));
+    const value = node.querySelector('.gpio-level');
+    if (value) value.textContent = gpio.level;
   }
 
   const stripEl = document.getElementById('strip');
@@ -99,6 +112,10 @@ async function emitSwitchOutput(gearLabel: string, event: 'toggle' | 'on' | 'off
   await controller.emit(gearLabel, event);
 }
 
+async function emitGpio(gearLabel: string, event: 'toggle' | 'high' | 'low'): Promise<void> {
+  await controller.emit(gearLabel, event);
+}
+
 const controller = await createDesktopController({
   onEvent(event) {
     if (event.event === 'display.updated') {
@@ -136,6 +153,7 @@ function buildGearUi(): void {
   buttonEls.clear();
   groupedButtonEls.clear();
   switchOutputEls.clear();
+  gpioEls.clear();
   displayCanvases.clear();
 
   for (const gear of topology.gears) {
@@ -226,6 +244,31 @@ function buildGearUi(): void {
       });
       switchOutputEls.set(gear.label, toggle);
       gearsEl.appendChild(wrapPanel(toggle));
+      continue;
+    }
+
+    if (gear.kind === 'gpio') {
+      const gpio = document.createElement('button');
+      gpio.className = 'gpio';
+      gpio.type = 'button';
+      gpio.setAttribute('aria-pressed', 'false');
+      gpio.title = gear.label;
+
+      const label = document.createElement('span');
+      label.className = 'gpio-label';
+      label.textContent = formatGearLabel(gear);
+      gpio.appendChild(label);
+
+      const level = document.createElement('span');
+      level.className = 'gpio-level';
+      level.textContent = 'low';
+      gpio.appendChild(level);
+
+      gpio.addEventListener('click', () => {
+        void emitGpio(gear.label, 'toggle');
+      });
+      gpioEls.set(gear.label, gpio);
+      gearsEl.appendChild(wrapPanel(gpio));
       continue;
     }
 

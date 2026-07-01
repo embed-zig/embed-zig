@@ -9,6 +9,7 @@ const App = @import("../App.zig");
 const component_audio_system = @import("../component/audio_system.zig");
 const button = @import("../component/button.zig");
 const component_display = @import("../component/display.zig");
+const component_gpio = @import("../component/gpio.zig");
 const component_imu = @import("../component/Imu.zig");
 const component_modem = @import("../component/modem.zig");
 const component_nfc = @import("../component/Nfc.zig");
@@ -49,6 +50,7 @@ pub fn build(builder: root, comptime context: anytype) type {
     const bt_registry = context.registries.bt;
     const audio_system_registry = context.registries.audio_system;
     const display_registry = context.registries.display;
+    const gpio_registry = context.registries.gpio;
     const single_button_registry = context.registries.single_button;
     const imu_registry = context.registries.imu;
     const ledstrip_registry = context.registries.ledstrip;
@@ -63,6 +65,7 @@ pub fn build(builder: root, comptime context: anytype) type {
     const bt_count = registryPeriphLen(bt_registry);
     const audio_system_count = registryPeriphLen(audio_system_registry);
     const display_count = registryPeriphLen(display_registry);
+    const gpio_count = registryPeriphLen(gpio_registry);
     const single_button_count = registryPeriphLen(single_button_registry);
     const imu_count = registryPeriphLen(imu_registry);
     const ledstrip_count = registryPeriphLen(ledstrip_registry);
@@ -78,6 +81,7 @@ pub fn build(builder: root, comptime context: anytype) type {
     const has_button_runtime = (adc_count + single_button_count) > 0;
     const has_audio_system_runtime = audio_system_count > 0;
     const has_display_runtime = display_count > 0;
+    const has_gpio_runtime = gpio_count > 0;
     const has_imu_runtime = imu_count > 0;
     const has_ledstrip_runtime = ledstrip_count > 0;
     const has_modem_runtime = modem_count > 0;
@@ -102,6 +106,12 @@ pub fn build(builder: root, comptime context: anytype) type {
         touch_registry,
         drivers.Touch,
     );
+    const gpio_poller_count = countRegistryInputControlType(
+        context.build_config,
+        gpio_registry,
+        .poll,
+        drivers.Gpio,
+    );
     comptime validateRegistryControlTypes(context.build_config, single_button_registry, &.{
         drivers.button.Single,
     }, "button/single");
@@ -111,6 +121,9 @@ pub fn build(builder: root, comptime context: anytype) type {
     comptime validateRegistryControlTypes(context.build_config, touch_registry, &.{
         drivers.Touch,
     }, "touch");
+    comptime validateRegistryControlTypes(context.build_config, gpio_registry, &.{
+        drivers.Gpio,
+    }, "gpio");
     comptime validateRegistryControlTypes(context.build_config, bt_registry, &.{
         bt.Host,
     }, "bt");
@@ -128,6 +141,7 @@ pub fn build(builder: root, comptime context: anytype) type {
     const BtInstances = makePeriphInstancesType(context.build_config, bt_registry);
     const AudioSystemInstances = makePeriphInstancesType(context.build_config, audio_system_registry);
     const DisplayInstances = makePeriphInstancesType(context.build_config, display_registry);
+    const GpioInstances = makePeriphInstancesType(context.build_config, gpio_registry);
     const GroupedButtonInstances = makePeriphInstancesType(context.build_config, adc_registry);
     const ImuInstances = makePeriphInstancesType(context.build_config, imu_registry);
     const LedStripInstances = makePeriphInstancesType(context.build_config, ledstrip_registry);
@@ -143,6 +157,7 @@ pub fn build(builder: root, comptime context: anytype) type {
     const periph_kinds = makePeriphKindTable(context.registries);
     const SingleButtonPoller = button.SinglePoller.make(context.grt);
     const GroupedButtonPoller = button.GroupedPoller.make(context.grt);
+    const GpioPoller = component_gpio.Poller.make(context.grt);
     const TouchPoller = component_touch.Poller.make(context.grt);
     const ImuPollerType = component_imu.Poller.make(context.grt);
     const ImuPollerWrapper = if (has_imu_runtime) struct {
@@ -490,6 +505,7 @@ pub fn build(builder: root, comptime context: anytype) type {
             .bt = bt_registry,
             .audio_system = audio_system_registry,
             .display = display_registry,
+            .gpio = gpio_registry,
             .single_button = single_button_registry,
             .imu = imu_registry,
             .ledstrip = ledstrip_registry,
@@ -606,6 +622,7 @@ pub fn build(builder: root, comptime context: anytype) type {
             bts: BtInstances,
             audio_systems: AudioSystemInstances,
             displays: DisplayInstances,
+            gpios: GpioInstances,
             grouped_buttons: GroupedButtonInstances,
             imus: ImuInstances,
             led_strips: LedStripInstances,
@@ -620,6 +637,8 @@ pub fn build(builder: root, comptime context: anytype) type {
             store_reducer: if (has_button_runtime) StoreReducerType else void,
             audio_system_store_reducer: if (has_audio_system_runtime) StoreReducerType else void,
             display_store_reducer: if (has_display_runtime) StoreReducerType else void,
+            gpio_event_hooks: if (has_gpio_runtime) [gpio_count]component_gpio.EventHook else void,
+            gpio_store_reducer: if (has_gpio_runtime) StoreReducerType else void,
             imu_detector: if (has_imu_runtime) component_imu.Reducer else void,
             imu_store_reducer: if (has_imu_runtime) StoreReducerType else void,
             ledstrip_store_reducer: if (has_ledstrip_runtime) StoreReducerType else void,
@@ -650,6 +669,7 @@ pub fn build(builder: root, comptime context: anytype) type {
             poller_config: Poller.Config,
             single_button_pollers: [single_button_poller_count]SingleButtonPoller = undefined,
             grouped_button_pollers: [grouped_button_poller_count]GroupedButtonPoller = undefined,
+            gpio_pollers: [gpio_poller_count]GpioPoller = undefined,
             touch_pollers: [touch_poller_count]TouchPoller = undefined,
             imu_pollers: [imu_count]ImuPollerWrapper = undefined,
             pollers: [runtime_poller_count]Poller = undefined,
@@ -665,6 +685,7 @@ pub fn build(builder: root, comptime context: anytype) type {
                 runtime.bts = initBtInstances(init_config);
                 runtime.audio_systems = initAudioSystemInstances(init_config);
                 runtime.displays = initDisplayInstances(init_config);
+                runtime.gpios = initGpioInstances(init_config);
                 runtime.grouped_buttons = initGroupedButtonInstances(init_config);
                 runtime.imus = initImuInstances(init_config);
                 runtime.led_strips = initLedStripInstances(init_config);
@@ -738,6 +759,12 @@ pub fn build(builder: root, comptime context: anytype) type {
                     runtime.display_store_reducer = StoreReducerType.init(
                         &runtime.store.stores,
                         DisplayStoreReducerFn.reduce,
+                    );
+                }
+                if (has_gpio_runtime) {
+                    runtime.gpio_store_reducer = StoreReducerType.init(
+                        &runtime.store.stores,
+                        GpioStoreReducerFn.reduce,
                     );
                 }
                 if (has_imu_runtime) {
@@ -834,6 +861,13 @@ pub fn build(builder: root, comptime context: anytype) type {
                         .stores = &runtime.store.stores,
                     };
                 }
+                if (has_gpio_runtime) {
+                    inline for (0..gpio_count) |i| {
+                        const periph = gpio_registry.periphs[i];
+                        runtime.gpio_event_hooks[i] = component_gpio.EventHook.init(periphIdForRecord(periph));
+                        runtime.gpio_event_hooks[i].bindOutput(Emitter.init(&runtime.pipeline_sink));
+                    }
+                }
                 if (has_wifi_sta_runtime) {
                     inline for (0..wifi_sta_count) |i| {
                         runtime.wifi_sta_event_hooks[i] = component_wifi.EventHook.init();
@@ -875,6 +909,11 @@ pub fn build(builder: root, comptime context: anytype) type {
                 }
                 if (has_nfc_runtime) {
                     inline for (&runtime.nfc_event_hooks) |*hook| {
+                        hook.clearOutput();
+                    }
+                }
+                if (has_gpio_runtime) {
+                    inline for (&runtime.gpio_event_hooks) |*hook| {
                         hook.clearOutput();
                     }
                 }
@@ -986,6 +1025,32 @@ pub fn build(builder: root, comptime context: anytype) type {
                     }
                 }
 
+                inline for (0..gpio_count) |i| {
+                    const periph = gpio_registry.periphs[i];
+                    if (comptime !periphHasInputType(periph, .poll)) continue;
+                    const label_name = comptime periphLabel(periph);
+                    const GpioType = @TypeOf(@field(runtime.gpios, label_name));
+                    if (comptime GpioType == drivers.Gpio) {
+                        const gpio_poller_index = countRegistryInputControlTypeBefore(
+                            context.build_config,
+                            gpio_registry,
+                            i,
+                            .poll,
+                            drivers.Gpio,
+                        );
+                        const poller_index = single_button_poller_count + grouped_button_poller_count + gpio_poller_index;
+                        runtime.pollers[poller_index] = runtime.gpio_pollers[gpio_poller_index].init(
+                            @field(runtime.gpios, label_name),
+                            .{
+                                .source_id = periphIdForRecord(periph),
+                            },
+                        );
+                        runtime.pollers[poller_index].bindOutput(Emitter.init(&runtime.pipeline_sink));
+                    } else {
+                        @compileError("zux.assembler.Builder.build gpio must use drivers.Gpio");
+                    }
+                }
+
                 inline for (0..touch_count) |i| {
                     const periph = touch_registry.periphs[i];
                     const label_name = comptime periphLabel(periph);
@@ -997,7 +1062,7 @@ pub fn build(builder: root, comptime context: anytype) type {
                             i,
                             drivers.Touch,
                         );
-                        const poller_index = single_button_poller_count + grouped_button_poller_count + touch_poller_index;
+                        const poller_index = single_button_poller_count + grouped_button_poller_count + gpio_poller_count + touch_poller_index;
                         runtime.pollers[poller_index] = runtime.touch_pollers[touch_poller_index].init(
                             @field(runtime.touches, label_name),
                             .{
@@ -1013,7 +1078,7 @@ pub fn build(builder: root, comptime context: anytype) type {
                 inline for (0..imu_count) |i| {
                     const periph = imu_registry.periphs[i];
                     const label_name = comptime periphLabel(periph);
-                    const poller_index = single_button_poller_count + grouped_button_poller_count + touch_poller_count + i;
+                    const poller_index = single_button_poller_count + grouped_button_poller_count + gpio_poller_count + touch_poller_count + i;
                     runtime.imu_pollers[i] = .{
                         .inner = ImuPollerType.init(
                             @field(runtime.imus, label_name),
@@ -1042,6 +1107,9 @@ pub fn build(builder: root, comptime context: anytype) type {
                 }
                 if (has_display_runtime) {
                     config._zux_display_store_reducer = runtime.display_store_reducer.node();
+                }
+                if (has_gpio_runtime) {
+                    config._zux_gpio_store_reducer = runtime.gpio_store_reducer.node();
                 }
                 if (has_imu_runtime) {
                     config._zux_imu_detector = runtime.imu_detector.node();
@@ -1124,6 +1192,19 @@ pub fn build(builder: root, comptime context: anytype) type {
                     @field(displays, label_name) = @field(init_config, label_name);
                 }
                 return displays;
+            }
+
+            fn initGpioInstances(init_config: InitConfig) GpioInstances {
+                var gpios: GpioInstances = undefined;
+                inline for (0..gpio_count) |i| {
+                    const periph = gpio_registry.periphs[i];
+                    if (comptime isVirtualPeriph(periph)) continue;
+                    const label_name = comptime periphLabel(periph);
+                    if (@hasField(GpioInstances, label_name)) {
+                        @field(gpios, label_name) = @field(init_config, label_name);
+                    }
+                }
+                return gpios;
             }
 
             fn initGroupedButtonInstances(init_config: InitConfig) GroupedButtonInstances {
@@ -1396,6 +1477,36 @@ pub fn build(builder: root, comptime context: anytype) type {
             }
         };
 
+        const GpioStoreReducerFn = struct {
+            fn reduce(stores: *StoreType.Stores, message: Message, emit: Emitter) !void {
+                switch (message.body) {
+                    .raw_gpio_changed => |raw_gpio| {
+                        inline for (0..gpio_count) |i| {
+                            const periph = gpio_registry.periphs[i];
+                            if (raw_gpio.source_id == periphIdForRecord(periph)) {
+                                var reducer = component_gpio.Reducer.init();
+                                defer reducer.deinit();
+                                try reducer.reduce(
+                                    &@field(stores, periphLabel(periph)),
+                                    message,
+                                    emit,
+                                );
+                                try emit.emit(message);
+                                return;
+                            }
+                        }
+                        try emit.emit(message);
+                        return;
+                    },
+                    else => {
+                        if (message.body == .tick) return;
+                        try emit.emit(message);
+                        return;
+                    },
+                }
+            }
+        };
+
         const TouchStoreReducerFn = struct {
             fn reduce(stores: *StoreType.Stores, message: Message, emit: Emitter) !void {
                 switch (message.body) {
@@ -1584,6 +1695,14 @@ pub fn build(builder: root, comptime context: anytype) type {
                     self.runtime.nfc_event_hooks[i].attach(@field(self.runtime.nfcs, label_name));
                 }
             }
+            if (has_gpio_runtime) {
+                inline for (0..gpio_count) |i| {
+                    const periph = gpio_registry.periphs[i];
+                    if (comptime !periphHasInputType(periph, .irq)) continue;
+                    const label_name = comptime periphLabel(periph);
+                    try self.runtime.gpio_event_hooks[i].attach(@field(self.runtime.gpios, label_name));
+                }
+            }
             if (has_wifi_sta_runtime) {
                 inline for (0..wifi_sta_count) |i| {
                     const periph = wifi_sta_registry.periphs[i];
@@ -1610,6 +1729,14 @@ pub fn build(builder: root, comptime context: anytype) type {
                         const periph = nfc_registry.periphs[i];
                         const label_name = comptime periphLabel(periph);
                         self.runtime.nfc_event_hooks[i].detach(@field(self.runtime.nfcs, label_name));
+                    }
+                }
+                if (has_gpio_runtime) {
+                    inline for (0..gpio_count) |i| {
+                        const periph = gpio_registry.periphs[i];
+                        if (comptime !periphHasInputType(periph, .irq)) continue;
+                        const label_name = comptime periphLabel(periph);
+                        self.runtime.gpio_event_hooks[i].detach(@field(self.runtime.gpios, label_name));
                     }
                 }
                 if (has_wifi_sta_runtime) {
@@ -1761,6 +1888,18 @@ pub fn build(builder: root, comptime context: anytype) type {
                     .source_id = periphId(label),
                     .pressed = false,
                     .point_count = 0,
+                },
+            });
+        }
+
+        pub fn gpio_changed(self: *Self, label: PeriphLabel, edge: drivers.Gpio.Edge, level: drivers.Gpio.Level) !void {
+            if (comptime periph_ids.len == 0) return error.InvalidPeriphKind;
+            if (dispatchKind(label) != .gpio) return error.InvalidPeriphKind;
+            try self.emitBody(.{
+                .raw_gpio_changed = .{
+                    .source_id = periphId(label),
+                    .edge = edge,
+                    .level = level,
                 },
             });
         }
@@ -2415,6 +2554,16 @@ pub fn build(builder: root, comptime context: anytype) type {
             @panic("zux app has no touch for label");
         }
 
+        pub fn gpio(self: *Self, label: PeriphLabel) drivers.Gpio {
+            inline for (0..gpio_count) |i| {
+                const gpio_record = gpio_registry.periphs[i];
+                if (label == @field(PeriphLabel, periphLabel(gpio_record))) {
+                    return @field(self.runtime.gpios, periphLabel(gpio_record));
+                }
+            }
+            @panic("zux app has no gpio for label");
+        }
+
         fn emitBody(self: *Self, body: Message.Event) !void {
             _ = try self.dispatch(.{
                 .origin = .manual,
@@ -2474,6 +2623,10 @@ fn makeRuntimeStoreBuilder(comptime context: anytype) @TypeOf(context.store_buil
     inline for (0..registryPeriphLen(context.registries.display)) |i| {
         const periph = context.registries.display.periphs[i];
         builder.setStore(periph.label, store.Object.make(context.grt, component_display.State, periph.label));
+    }
+    inline for (0..registryPeriphLen(context.registries.gpio)) |i| {
+        const periph = context.registries.gpio.periphs[i];
+        builder.setStore(periph.label, store.Object.make(context.grt, component_gpio.State, periph.label));
     }
     inline for (0..registryPeriphLen(context.registries.adc_button)) |i| {
         const periph = context.registries.adc_button.periphs[i];
@@ -2541,6 +2694,9 @@ fn makeRuntimeNodeBuilder(comptime context: anytype) NodeBuilder.Builder(context
     }
     if (registryPeriphLen(context.registries.display) > 0) {
         builder.addNode(._zux_display_store_reducer);
+    }
+    if (registryPeriphLen(context.registries.gpio) > 0) {
+        builder.addNode(._zux_gpio_store_reducer);
     }
     if (registryPeriphLen(context.registries.imu) > 0) {
         builder.addNode(._zux_imu_detector);
@@ -2946,6 +3102,7 @@ fn totalPeriphLen(comptime registries: anytype) usize {
 
 fn totalPollerCount(comptime build_config_value: anytype, comptime registries: anytype) usize {
     return buttonPollerCount(build_config_value, registries) +
+        countRegistryInputControlType(build_config_value, registries.gpio, .poll, drivers.Gpio) +
         countRegistryControlType(build_config_value, registries.touch, drivers.Touch) +
         registryPeriphLen(registries.imu);
 }
@@ -2984,6 +3141,40 @@ fn countRegistryControlTypeBefore(
     comptime var count: usize = 0;
     inline for (0..end_index) |i| {
         const periph = registry.periphs[i];
+        if (comptime !periphRequiresBuildConfig(periph)) continue;
+        if (comptime @field(build_config_value, periphLabel(periph)) == ControlType) {
+            count += 1;
+        }
+    }
+    return count;
+}
+
+fn countRegistryInputControlType(
+    comptime build_config_value: anytype,
+    comptime registry: anytype,
+    comptime input_type: anytype,
+    comptime ControlType: type,
+) usize {
+    return countRegistryInputControlTypeBefore(
+        build_config_value,
+        registry,
+        registryPeriphLen(registry),
+        input_type,
+        ControlType,
+    );
+}
+
+fn countRegistryInputControlTypeBefore(
+    comptime build_config_value: anytype,
+    comptime registry: anytype,
+    comptime end_index: usize,
+    comptime input_type: anytype,
+    comptime ControlType: type,
+) usize {
+    comptime var count: usize = 0;
+    inline for (0..end_index) |i| {
+        const periph = registry.periphs[i];
+        if (comptime !periphHasInputType(periph, input_type)) continue;
         if (comptime !periphRequiresBuildConfig(periph)) continue;
         if (comptime @field(build_config_value, periphLabel(periph)) == ControlType) {
             count += 1;
@@ -3039,6 +3230,12 @@ fn periphRequiresBuildConfig(comptime periph: anytype) bool {
 
 fn isVirtualPeriph(comptime periph: anytype) bool {
     return !periphRequiresBuildConfig(periph);
+}
+
+fn periphHasInputType(comptime periph: anytype, comptime input_type: anytype) bool {
+    const PeriphType = @TypeOf(periph);
+    if (!@hasField(PeriphType, "input_type")) return false;
+    return @field(periph, "input_type") == input_type;
 }
 
 fn nodeBuilderHasTag(comptime builder: anytype, comptime tag: []const u8) bool {
@@ -3162,6 +3359,7 @@ const PeriphDispatchKind = enum {
     audio_system,
     bt,
     display,
+    gpio,
     single_button,
     grouped_button,
     imu,
@@ -3192,6 +3390,7 @@ fn dispatchKindForRecord(comptime periph: anytype) PeriphDispatchKind {
     if (ControlType == type) return .audio_system;
     if (ControlType == bt.Host) return .bt;
     if (ControlType == @import("drivers").Display) return .display;
+    if (ControlType == @import("drivers").Gpio) return .gpio;
     if (ControlType == @import("drivers").button.Single) return .single_button;
     if (ControlType == @import("drivers").button.Grouped) return .grouped_button;
     if (ControlType == @import("drivers").imu) return .imu;
@@ -3242,6 +3441,7 @@ fn messageSourceId(message: Message) u32 {
         .audio_system_dec_gain => |event| event.source_id,
         .audio_system_set_mic_gains => |event| event.source_id,
         .display_set => |event| event.source_id,
+        .raw_gpio_changed => |event| event.source_id,
         .switch_set => |event| event.source_id,
         .pwm_set => |event| event.source_id,
         .raw_imu_accel => |event| event.source_id,

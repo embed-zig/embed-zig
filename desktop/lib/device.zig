@@ -1,6 +1,7 @@
 pub const audio_system = @import("device/audio_system.zig");
 pub const bt_host = @import("device/bt_host.zig");
 pub const display = @import("device/display.zig");
+pub const gpio = @import("device/gpio.zig");
 pub const grouped_button = @import("device/grouped_button.zig");
 pub const ledstrip = @import("device/ledstrip.zig");
 pub const modem = @import("device/modem.zig");
