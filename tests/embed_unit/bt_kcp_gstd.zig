@@ -55,6 +55,42 @@ test "embed/bt/unit/kcp/gstd stream transfers payloads over packet output" {
     try gstd.runtime.std.testing.expectEqualStrings("hello over kcp", buf[0..n]);
 }
 
+test "embed/bt/unit/kcp/gstd stream reads preserve payload across small buffers" {
+    const allocator = gstd.runtime.std.testing.allocator;
+    var left_link = Link{};
+    var right_link = Link{};
+
+    var left = try BtKcp.makeStream(allocator, .{
+        .tx_char_uuid = 0xFEE1,
+        .rx_char_uuid = 0xFEE2,
+        .att_mtu = 128,
+    }, &left_link, Link.output);
+    defer left.deinit();
+
+    var right = try BtKcp.makeStream(allocator, .{
+        .tx_char_uuid = 0xFEE1,
+        .rx_char_uuid = 0xFEE2,
+        .att_mtu = 128,
+    }, &right_link, Link.output);
+    defer right.deinit();
+
+    left_link.peer = right;
+    right_link.peer = left;
+
+    try left.write("hello over kcp");
+
+    var first: [5]u8 = undefined;
+    var second: [5]u8 = undefined;
+    var third: [8]u8 = undefined;
+    const first_n = (try right.readTimeout(first[0..], 2 * glib.time.duration.Second)) orelse return error.Timeout;
+    const second_n = (try right.readTimeout(second[0..], 2 * glib.time.duration.Second)) orelse return error.Timeout;
+    const third_n = (try right.readTimeout(third[0..], 2 * glib.time.duration.Second)) orelse return error.Timeout;
+
+    try gstd.runtime.std.testing.expectEqualStrings("hello", first[0..first_n]);
+    try gstd.runtime.std.testing.expectEqualStrings(" over", second[0..second_n]);
+    try gstd.runtime.std.testing.expectEqualStrings(" kcp", third[0..third_n]);
+}
+
 test "embed/bt/unit/kcp/gstd client and server facade APIs instantiate" {
     const allocator = gstd.runtime.std.testing.allocator;
 
@@ -76,6 +112,22 @@ test "embed/bt/unit/kcp/gstd client and server facade APIs instantiate" {
     defer stream.deinit();
 }
 
+test "embed/bt/unit/kcp/gstd endpoint reports handler errors" {
+    const allocator = gstd.runtime.std.testing.allocator;
+
+    var endpoint = try BtKcp.server.Endpoint.init(allocator, .{
+        .tx_char_uuid = 0xFEE1,
+        .rx_char_uuid = 0xFEE2,
+        .handler = .{ .onStream = onFailingServerStream },
+    });
+    defer endpoint.deinit();
+
+    var fake_server = FakeServer{ .auto_subscribe = true };
+    try endpoint.handle(&fake_server);
+
+    try gstd.runtime.std.testing.expectError(error.HandlerFailed, endpoint.run());
+}
+
 test "embed/bt/unit/kcp/gstd rejects ATT MTU that cannot carry KCP segments" {
     const allocator = gstd.runtime.std.testing.allocator;
     var link = Link{};
@@ -91,6 +143,12 @@ test "embed/bt/unit/kcp/gstd rejects ATT MTU that cannot carry KCP segments" {
 fn onServerStream(ctx: ?*anyopaque, stream: *BtKcp.Stream) anyerror!void {
     _ = ctx;
     _ = stream;
+}
+
+fn onFailingServerStream(ctx: ?*anyopaque, stream: *BtKcp.Stream) anyerror!void {
+    _ = ctx;
+    defer stream.deinit();
+    return error.HandlerFailed;
 }
 
 const FakeClient = struct {
@@ -148,14 +206,14 @@ const FakeMessage = struct {
 const FakeServer = struct {
     pub const Subscription = FakeSubscription;
 
+    auto_subscribe: bool = false,
+
     pub fn handle(self: *FakeServer, service_uuid: u16, char_uuid: u16, handler: anytype, ctx: ?*anyopaque) !void {
-        _ = self;
         _ = service_uuid;
         _ = char_uuid;
-        _ = ctx;
         if (@hasField(@TypeOf(handler), "onSubscription")) {
             const callback: *const fn (?*anyopaque, FakeSubscription) void = handler.onSubscription;
-            _ = callback;
+            if (self.auto_subscribe) callback(ctx, .{});
         }
         if (@hasField(@TypeOf(handler), "onRequest")) {
             const bt = embed.bt;

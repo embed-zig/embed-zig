@@ -47,11 +47,15 @@ pub fn make(comptime grt: type, comptime raw_kcp: type) type {
                     }
                 }
 
-                fn cleanup(ctx: ?*anyopaque) void {
+                fn stopFeeder(ctx: ?*anyopaque) void {
                     const self: *@This() = @ptrCast(@alignCast(ctx.?));
                     self.closing.store(true, .release);
-                    self.subscription.deinit();
                     if (self.feeder) |feeder| feeder.join();
+                }
+
+                fn cleanup(ctx: ?*anyopaque) void {
+                    const self: *@This() = @ptrCast(@alignCast(ctx.?));
+                    self.subscription.deinit();
                     const owned_allocator = self.allocator;
                     self.* = undefined;
                     owned_allocator.destroy(self);
@@ -66,7 +70,7 @@ pub fn make(comptime grt: type, comptime raw_kcp: type) type {
                 .subscription = sub,
             };
 
-            const stream = try Stream.initWithCleanup(allocator, config, output, Output.write, Output.cleanup);
+            const stream = try Stream.initWithLifecycle(allocator, config, output, Output.write, Output.stopFeeder, Output.cleanup);
             errdefer stream.deinit();
             output.stream = stream;
             output.feeder = try grt.task.go("bt/kcp/client/feed", config.task_options, glib.task.Routine.init(output, Output.run));

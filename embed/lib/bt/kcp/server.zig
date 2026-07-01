@@ -84,7 +84,10 @@ pub fn make(comptime grt: type, comptime raw_kcp: type) type {
                 while (true) {
                     const accepted = self.accept_ch.recv() catch break;
                     if (!accepted.ok) break;
-                    self.handler.onStream(self.ctx, accepted.value) catch {};
+                    self.handler.onStream(self.ctx, accepted.value) catch |err| {
+                        self.clearIfActive(accepted.value);
+                        return err;
+                    };
                     self.clearIfActive(accepted.value);
                 }
             }
@@ -138,9 +141,8 @@ pub fn make(comptime grt: type, comptime raw_kcp: type) type {
 
             fn feedInput(self: *Self, data: []const u8) void {
                 self.mutex.lock();
-                const stream = self.active_stream;
-                self.mutex.unlock();
-                if (stream) |active| active.input(data) catch {};
+                defer self.mutex.unlock();
+                if (self.active_stream) |active| active.input(data) catch {};
             }
 
             fn setActive(self: *Self, stream: *Stream) void {

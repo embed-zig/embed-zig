@@ -10,6 +10,7 @@ pub fn Stream(comptime grt: type, comptime kcp: type) type {
         allocator: glib.std.mem.Allocator,
         session: *Session,
         cleanup_ctx: ?*anyopaque = null,
+        before_session_deinit_fn: ?*const fn (?*anyopaque) void = null,
         cleanup_fn: ?*const fn (?*anyopaque) void = null,
 
         const Self = @This();
@@ -23,7 +24,7 @@ pub fn Stream(comptime grt: type, comptime kcp: type) type {
             output_ctx: ?*anyopaque,
             output_fn: Session.OutputFn,
         ) !*Self {
-            return initWithCleanup(allocator, config, output_ctx, output_fn, null);
+            return initWithLifecycle(allocator, config, output_ctx, output_fn, null, null);
         }
 
         pub fn initWithCleanup(
@@ -33,18 +34,32 @@ pub fn Stream(comptime grt: type, comptime kcp: type) type {
             output_fn: Session.OutputFn,
             cleanup_fn: ?*const fn (?*anyopaque) void,
         ) !*Self {
+            return initWithLifecycle(allocator, config, output_ctx, output_fn, null, cleanup_fn);
+        }
+
+        pub fn initWithLifecycle(
+            allocator: glib.std.mem.Allocator,
+            config: Config,
+            output_ctx: ?*anyopaque,
+            output_fn: Session.OutputFn,
+            before_session_deinit_fn: ?*const fn (?*anyopaque) void,
+            cleanup_fn: ?*const fn (?*anyopaque) void,
+        ) !*Self {
             const self = try allocator.create(Self);
             errdefer allocator.destroy(self);
             self.* = .{
                 .allocator = allocator,
                 .session = try Session.init(allocator, config, output_ctx, output_fn),
                 .cleanup_ctx = output_ctx,
+                .before_session_deinit_fn = before_session_deinit_fn,
                 .cleanup_fn = cleanup_fn,
             };
             return self;
         }
 
         pub fn deinit(self: *Self) void {
+            self.session.close();
+            if (self.before_session_deinit_fn) |before_session_deinit| before_session_deinit(self.cleanup_ctx);
             self.session.deinit();
             if (self.cleanup_fn) |cleanup| cleanup(self.cleanup_ctx);
             const allocator = self.allocator;

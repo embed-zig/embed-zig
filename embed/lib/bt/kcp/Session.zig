@@ -43,6 +43,8 @@ pub fn Session(comptime grt: type, comptime kcp: type) type {
         input_errors: u64 = 0,
         recv_bytes: u64 = 0,
         pending_recv: ?Packet = null,
+        read_pending: ?Packet = null,
+        read_offset: usize = 0,
 
         pub fn init(
             allocator: glib.std.mem.Allocator,
@@ -143,24 +145,22 @@ pub fn Session(comptime grt: type, comptime kcp: type) type {
 
         pub fn read(self: *Self, out: []u8) Error!usize {
             if (out.len == 0) return 0;
+            if (self.readPending(out)) |n| return n;
             const result = self.recv_ch.recv() catch return error.Closed;
             if (!result.ok) return error.Closed;
-            const n = @min(out.len, result.value.len);
-            @memcpy(out[0..n], result.value.data[0..n]);
-            return n;
+            return self.copyReadPacket(result.value, out);
         }
 
         pub fn recvTimeout(self: *Self, out: []u8, timeout: glib.time.duration.Duration) Error!?usize {
             if (out.len == 0) return 0;
+            if (self.readPending(out)) |n| return n;
             const result = self.recv_ch.recvTimeout(timeout) catch |err| switch (@as(anyerror, err)) {
                 error.Timeout => return null,
                 error.Closed => return error.Closed,
                 else => return error.Unexpected,
             };
             if (!result.ok) return error.Closed;
-            const n = @min(out.len, result.value.len);
-            @memcpy(out[0..n], result.value.data[0..n]);
-            return n;
+            return self.copyReadPacket(result.value, out);
         }
 
         pub fn stats(self: *const Self) Stats {
@@ -191,6 +191,30 @@ pub fn Session(comptime grt: type, comptime kcp: type) type {
             };
             if (!result.ok) return error.Closed;
             return true;
+        }
+
+        fn readPending(self: *Self, out: []u8) ?usize {
+            if (self.read_pending) |packet| {
+                const n = @min(out.len, packet.len - self.read_offset);
+                @memcpy(out[0..n], packet.data[self.read_offset..][0..n]);
+                self.read_offset += n;
+                if (self.read_offset >= packet.len) {
+                    self.read_pending = null;
+                    self.read_offset = 0;
+                }
+                return n;
+            }
+            return null;
+        }
+
+        fn copyReadPacket(self: *Self, packet: Packet, out: []u8) usize {
+            const n = @min(out.len, packet.len);
+            @memcpy(out[0..n], packet.data[0..n]);
+            if (n < packet.len) {
+                self.read_pending = packet;
+                self.read_offset = n;
+            }
+            return n;
         }
 
         fn workerMain(self: *Self) void {
