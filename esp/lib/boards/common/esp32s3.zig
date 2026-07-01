@@ -24,10 +24,6 @@ pub const task_policy = .{
         .priority = 5,
         .core_id = 1,
     },
-    .netperf = .{
-        .priority = 5,
-        .core_id = 0,
-    },
     .net = .{
         .priority = 6,
         .core_id = 0,

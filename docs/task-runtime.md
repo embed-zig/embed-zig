@@ -59,7 +59,6 @@ Examples:
 
 ```text
 audio/processor -> audio
-netperf/send    -> netperf
 zux/test        -> zux
 ```
 
@@ -124,7 +123,6 @@ capabilities.
 | `apps.zux.sync_smoke` | `zux/sync_smoke/channel_send` | Sync smoke unbuffered channel send worker. |
 | `apps.zux.task_smoke` | `zux/task_smoke/alpha` | Task smoke worker. |
 | `apps.zux.task_smoke` | `zux/task_smoke/beta` | Task smoke worker. |
-| `examples.zux.netperf` | `netperf/run` | Netperf app worker. |
 | `esp.net.ModemPpp` | `net/modem_ppp_rx` | PPP receive bridge. |
 | `examples.esp.wifi_led_threads` | `wifi_led/led` | LED state loop. |
 | `examples.esp.wifi_led_threads` | `wifi_led/wifi` | WiFi connection loop. |
@@ -171,7 +169,7 @@ When adding a new task:
 
 1. Pick a stable slash-delimited name owned by the package or app.
 2. Prefer a service prefix that board policies can route, such as `audio`,
-   `bt`, `zux`, `kcp`, or `netperf`.
+   `bt`, `zux`, or `kcp`.
 3. Pass `min_stack_size` only as a measured lower bound.
 4. Add the new name or prefix to this registry.
 5. Add or update board `task_policy` entries when the task needs distinct

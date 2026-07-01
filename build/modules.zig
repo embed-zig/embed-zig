@@ -52,7 +52,6 @@ pub const apps_modules = [_]ModuleSpec{
     module2("apps", "zux_fs-smoke"),
     module2("apps", "zux_kcp-test"),
     module2("apps", "zux_net-smoke"),
-    module2("apps", "zux_netperf"),
     module2("apps", "zux_preferences-smoke"),
     module2("apps", "zux_sync-smoke"),
     module2("apps", "zux_system-smoke"),

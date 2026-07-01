@@ -7,22 +7,6 @@ pub fn build(b: *std.Build) void {
     const mode = b.option([]const u8, "mode", "Launcher mode: app or test") orelse "app";
     const board_name = b.option([]const u8, "board", "ESP board: devkit, szp, wv-esp32s3-touch-amoled-1.8, or wv-esp32p4-wifi6-touch-lcd-4.3") orelse "devkit";
     const build_dir = b.option([]const u8, "build", "Generated ESP-IDF build directory") orelse ".build";
-    const netperf_wifi_connect = b.option(bool, "netperf_wifi_connect", "Connect WiFi before running zux_netperf") orelse false;
-    const netperf_wifi_ssid = b.option([]const u8, "netperf_wifi_ssid", "zux_netperf WiFi SSID") orelse "";
-    const netperf_wifi_password = b.option([]const u8, "netperf_wifi_password", "zux_netperf WiFi password") orelse
-        b.graph.env_map.get("NETPERF_WIFI_PASSWORD") orelse "";
-    const netperf_host = b.option([]const u8, "netperf_host", "zux_netperf control host IP") orelse "127.0.0.1";
-    const netperf_port = b.option(u16, "netperf_port", "zux_netperf control TCP port") orelse 9821;
-    const netperf_protocol = b.option([]const u8, "netperf_protocol", "zux_netperf protocol: tcp, udp, ikcp-packet, ikcp-stream, ikcp-memory, or all") orelse "all";
-    const netperf_direction = b.option([]const u8, "netperf_direction", "zux_netperf direction: up, down, duplex, ping, or all") orelse "all";
-    const netperf_bytes = b.option(usize, "netperf_bytes", "zux_netperf bytes per direction") orelse 5 * 1024 * 1024;
-    const netperf_udp_pps = b.option(u32, "netperf_udp_pps", "zux_netperf raw UDP packets per second, 0 disables pacing") orelse 1650;
-    const netperf_kcp_snd_wnd = b.option(u32, "netperf_kcp_snd_wnd", "zux_netperf KCP send window") orelse 32;
-    const netperf_kcp_rcv_wnd = b.option(u32, "netperf_kcp_rcv_wnd", "zux_netperf KCP receive window") orelse 32;
-    const netperf_nodelay = b.option(i32, "netperf_nodelay", "zux_netperf TCP_NODELAY / KCP nodelay value") orelse 1;
-    const netperf_kcp_interval_ms = b.option(i32, "netperf_kcp_interval_ms", "zux_netperf KCP update interval in milliseconds") orelse 10;
-    const netperf_kcp_resend = b.option(i32, "netperf_kcp_resend", "zux_netperf KCP fast resend value") orelse 2;
-    const netperf_kcp_nc = b.option(i32, "netperf_kcp_nc", "zux_netperf KCP nc value") orelse 1;
     const ble_speed_transport = b.option([]const u8, "ble_speed_transport", "BLE speed transport: raw-gatt or kcp-stream") orelse "raw-gatt";
     const board_root = boardRoot(board_name);
     const esp_build_dep = b.dependency("esp", .{});
@@ -56,21 +40,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .lvgl_c_sysroot = if (context.toolchain_sysroot) |sysroot| sysroot.root else "",
         .lvgl_c_short_enums = true,
-        .netperf_wifi_connect = netperf_wifi_connect,
-        .netperf_wifi_ssid = netperf_wifi_ssid,
-        .netperf_wifi_password = netperf_wifi_password,
-        .netperf_host = netperf_host,
-        .netperf_port = netperf_port,
-        .netperf_protocol = netperf_protocol,
-        .netperf_direction = netperf_direction,
-        .netperf_bytes = netperf_bytes,
-        .netperf_udp_pps = netperf_udp_pps,
-        .netperf_kcp_snd_wnd = netperf_kcp_snd_wnd,
-        .netperf_kcp_rcv_wnd = netperf_kcp_rcv_wnd,
-        .netperf_nodelay = netperf_nodelay,
-        .netperf_kcp_interval_ms = netperf_kcp_interval_ms,
-        .netperf_kcp_resend = netperf_kcp_resend,
-        .netperf_kcp_nc = netperf_kcp_nc,
         .ble_speed_transport = ble_speed_transport,
     });
     const glib_dep = b.dependency("glib", .{

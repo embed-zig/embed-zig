@@ -48,9 +48,6 @@ const State = struct {
     send_udp_enqueue_wait_total: usize = 0,
     send_udp_enqueue_wait_packet_total: usize = 0,
     send_udp_enqueue_wait_max_per_packet: usize = 0,
-    send_udp_pps_started_ns: u64 = 0,
-    send_udp_pps_last_ns: u64 = 0,
-    send_udp_pps_last_total: usize = 0,
 
     fn create(conn: *binding.netconn, kind: SocketKind) error{OutOfMemory}!*State {
         const raw = heap_binding.espz_heap_caps_aligned_alloc(@alignOf(State), @sizeOf(State), defaultInternalCaps()) orelse return error.OutOfMemory;
@@ -82,9 +79,6 @@ const State = struct {
         self.send_udp_enqueue_wait_total = 0;
         self.send_udp_enqueue_wait_packet_total = 0;
         self.send_udp_enqueue_wait_max_per_packet = 0;
-        self.send_udp_pps_started_ns = 0;
-        self.send_udp_pps_last_ns = 0;
-        self.send_udp_pps_last_total = 0;
         binding.espz_lwip_netconn_set_callback_arg(conn, self);
         return self;
     }
@@ -778,56 +772,15 @@ fn recvUdp(state: *State, conn: *binding.netconn, out: []u8, remote: ?*netip.Add
 }
 
 fn recordUdpSendResult(state: *State, rc: c_int) void {
-    const PpsLog = struct {
-        total: usize,
-        recent_pps: u64,
-        avg_pps: u64,
-        window_ms: u64,
-        total_ms: u64,
-    };
-
-    var pps_log: ?PpsLog = null;
-
     state.lock();
     if (rc == binding.err_ok) {
         state.send_udp_ok_total +|= 1;
-        const total = state.send_udp_ok_total;
-        if (state.send_udp_pps_started_ns == 0) {
-            const now = Time.instantNow();
-            state.send_udp_pps_started_ns = now;
-            state.send_udp_pps_last_ns = now;
-            state.send_udp_pps_last_total = 0;
-        } else if (total % 100 == 0) {
-            const now = Time.instantNow();
-            const window_ns = elapsedNsSince(state.send_udp_pps_last_ns, now);
-            const total_ns = elapsedNsSince(state.send_udp_pps_started_ns, now);
-            const window_packets = total - state.send_udp_pps_last_total;
-            pps_log = .{
-                .total = total,
-                .recent_pps = packetsPerSecond(window_packets, window_ns),
-                .avg_pps = packetsPerSecond(total, total_ns),
-                .window_ms = nsToMs(window_ns),
-                .total_ms = nsToMs(total_ns),
-            };
-            state.send_udp_pps_last_ns = now;
-            state.send_udp_pps_last_total = total;
-        }
     } else if (rc == binding.err_mem or rc == binding.err_buf) {
         state.send_udp_local_drop_total +|= 1;
     } else {
         state.send_udp_fail_total +|= 1;
     }
     state.unlock();
-
-    if (pps_log) |log| {
-        esp_log.write(.info, .espz_udp, "pps n={} recent={} avg={} window_ms={} total_ms={}", .{
-            log.total,
-            log.recent_pps,
-            log.avg_pps,
-            log.window_ms,
-            log.total_ms,
-        });
-    }
 }
 
 fn finishUdpSend(state: *State, rc: c_int, len: usize) runtime.SocketError!usize {
@@ -840,19 +793,6 @@ fn finishUdpSend(state: *State, rc: c_int, len: usize) runtime.SocketError!usize
         },
         else => lwipErrToSocket(rc),
     };
-}
-
-fn elapsedNsSince(started_ns: u64, now: u64) u64 {
-    return if (now > started_ns) now - started_ns else 0;
-}
-
-fn packetsPerSecond(packets: usize, ns: u64) u64 {
-    if (ns == 0) return 0;
-    return @divTrunc(@as(u64, @intCast(packets)) * glib.time.duration.Second, ns);
-}
-
-fn nsToMs(ns: u64) u64 {
-    return @divTrunc(ns, glib.time.duration.MilliSecond);
 }
 
 fn connectConn(conn: *binding.netconn, addr: *const binding.ip_addr, port: u16) runtime.SocketError!void {

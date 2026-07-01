@@ -90,9 +90,7 @@ pub fn build(b: *std.Build) void {
             app_mod.addImport("embed", embed);
             app_mod.addImport("lvgl", apps_lvgl);
         }
-        if (std.mem.eql(u8, module_spec.dependency_module_name, "zux_kcp-test") or
-            std.mem.eql(u8, module_spec.dependency_module_name, "zux_netperf"))
-        {
+        if (std.mem.eql(u8, module_spec.dependency_module_name, "zux_kcp-test")) {
             app_mod.addImport("kcp", thirdparty_dep.module("kcp"));
         }
         b.modules.put(module_spec.export_name, app_mod) catch @panic("OOM");

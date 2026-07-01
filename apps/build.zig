@@ -20,7 +20,6 @@ const zux_colorbar_adc = @import("zux/colorbar-adc/build.zig");
 const zux_fs_smoke = @import("zux/fs-smoke/build.zig");
 const zux_kcp_test = @import("zux/kcp-test/build.zig");
 const zux_net_smoke = @import("zux/net-smoke/build.zig");
-const zux_netperf = @import("zux/netperf/build.zig");
 const zux_preferences_smoke = @import("zux/preferences-smoke/build.zig");
 const zux_sync_smoke = @import("zux/sync-smoke/build.zig");
 const zux_switch_output_smoke = @import("zux/switch-output-smoke/build.zig");
@@ -134,7 +133,6 @@ pub fn build(b: *std.Build) void {
     zux_fs_smoke.register(&registry);
     zux_kcp_test.register(&registry);
     zux_net_smoke.register(&registry);
-    zux_netperf.register(&registry);
     zux_preferences_smoke.register(&registry);
     zux_sync_smoke.register(&registry);
     zux_switch_output_smoke.register(&registry);
