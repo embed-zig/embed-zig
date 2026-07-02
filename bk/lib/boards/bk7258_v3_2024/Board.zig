@@ -5,6 +5,7 @@ const Audio = @import("Audio.zig").Type;
 const BtHost = bk.embed.bt.Local;
 const Display = @import("Display.zig");
 const Touch = bk.embed.touch.ArminoTouch;
+const GpioPin = bk.embed.gpio.Pin;
 
 const Board = @This();
 
@@ -47,6 +48,7 @@ pub const InitConfig = struct {
 display_device: Display = .{},
 adc_group: Keys = .{},
 switch_outputs: embed.board.SwitchOutputBank(8) = .{},
+smoke_gpio: GpioPin = GpioPin.init(.{ .pin = 26 }),
 audio: ?Audio = null,
 audio_allocator: ?bk.ap.grt.std.mem.Allocator = null,
 audio_system_config: Audio.Type.Config = .{},
@@ -93,6 +95,11 @@ pub fn groupedButton(self: *Board, label: []const u8) !embed.drivers.button.Grou
     if (!stringsEqual(label, "keys") and !stringsEqual(label, "controls")) return error.UnknownPeripheral;
     try self.adc_group.init();
     return self.adc_group.handle();
+}
+
+pub fn gpio(self: *Board, label: []const u8) !embed.drivers.Gpio {
+    if (stringsEqual(label, "smoke")) return self.smoke_gpio.handle();
+    return error.UnknownPeripheral;
 }
 
 pub fn switchOutput(self: *Board, label: []const u8) !embed.drivers.Switch {

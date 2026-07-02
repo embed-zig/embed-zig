@@ -17,6 +17,10 @@ pub const events = struct {
     pub const button = @import("zux/component/button/state.zig");
 };
 
+pub const component = struct {
+    pub const gpio = @import("zux/component/gpio.zig");
+};
+
 pub const spec = struct {
     pub const Builder = @import("zux/spec/Builder.zig");
     pub const Component = @import("zux/spec/Component.zig");

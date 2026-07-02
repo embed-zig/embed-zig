@@ -30,7 +30,7 @@ static bool s_isr_service_installed;
 
 static esp_err_t ensure_event_task(void);
 static void event_task(void *arg);
-static void IRAM_ATTR gpio_isr(void *arg);
+static void gpio_isr(void *arg);
 
 int esp_embed_gpio_read(int pin, uint32_t *level)
 {
