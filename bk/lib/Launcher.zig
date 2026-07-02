@@ -136,6 +136,15 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type, comptime Board: type)
                 }
             }
 
+            if (comptime hasRegistry(registries, "gpio")) {
+                inline for (0..registries.gpio.len) |i| {
+                    const periph = registries.gpio.periphs[i];
+                    if (comptime isVirtualPeriph(periph)) continue;
+                    const label_name = comptime labelText(periph.label);
+                    @field(init_config, label_name) = try board.gpio(label_name);
+                }
+            }
+
             return init_config;
         }
 

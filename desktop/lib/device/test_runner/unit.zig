@@ -2,6 +2,7 @@ const glib = @import("glib");
 const audio_system = @import("../audio_system.zig");
 const bt_host = @import("../bt_host.zig");
 const display = @import("../display.zig");
+const gpio = @import("../gpio.zig");
 const grouped_button = @import("../grouped_button.zig");
 const ledstrip = @import("../ledstrip.zig");
 const modem = @import("../modem.zig");
@@ -28,6 +29,7 @@ pub fn make(comptime std: type) glib.testing.TestRunner {
             t.run("audio_system", audio_system.TestRunner(std));
             t.run("bt_host", bt_host.TestRunner(std));
             t.run("display", display.TestRunner(std));
+            t.run("gpio", gpio.Pin.TestRunner(std));
             t.run("grouped_button", grouped_button.TestRunner(std));
             t.run("ledstrip", ledstrip.TestRunner(std));
             t.run("modem", modem.TestRunner(std));

@@ -1,0 +1,13 @@
+{
+  "kind": "Doc",
+  "spec": [
+    {
+      "kind": "Component/gpio",
+      "spec": {
+        "label": "gpio",
+        "id": 61,
+        "input_type": "virtual"
+      }
+    }
+  ]
+}

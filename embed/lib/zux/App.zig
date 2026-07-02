@@ -86,6 +86,9 @@ pub fn make(comptime Impl: type) type {
         if (!@hasDecl(Impl, "release_grouped_button")) {
             @compileError("zux.App.make requires Impl.release_grouped_button");
         }
+        if (!@hasDecl(Impl, "gpio_changed")) {
+            @compileError("zux.App.make requires Impl.gpio_changed");
+        }
         if (!@hasDecl(Impl, "imu_accel")) {
             @compileError("zux.App.make requires Impl.imu_accel");
         }
@@ -237,6 +240,7 @@ pub fn make(comptime Impl: type) type {
         _ = @as(*const fn (*Impl, impl_periph_label) anyerror!void, &Impl.release_single_button);
         _ = @as(*const fn (*Impl, impl_periph_label, u32) anyerror!void, &Impl.press_grouped_button);
         _ = @as(*const fn (*Impl, impl_periph_label) anyerror!void, &Impl.release_grouped_button);
+        _ = @as(*const fn (*Impl, impl_periph_label, drivers.Gpio.Edge, drivers.Gpio.Level) anyerror!void, &Impl.gpio_changed);
         _ = @as(*const fn (*Impl, impl_periph_label, drivers.imu.Vec3) anyerror!void, &Impl.imu_accel);
         _ = @as(*const fn (*Impl, impl_periph_label, drivers.imu.Vec3) anyerror!void, &Impl.imu_gyro);
         _ = @as(*const fn (*Impl, impl_periph_label, modem_api.Modem.SimState) anyerror!void, &Impl.modem_sim_state_changed);
@@ -308,6 +312,7 @@ pub fn make(comptime Impl: type) type {
         pub const ReducerHook = if (@hasDecl(Impl, "ReducerHook")) Impl.ReducerHook else void;
         pub const RenderHook = if (@hasDecl(Impl, "RenderHook")) Impl.RenderHook else void;
         pub const Display = drivers.Display;
+        pub const Gpio = drivers.Gpio;
         pub const Imu = drivers.imu;
         pub const Modem = modem_api.Modem;
         pub const Nfc = nfc_api;
@@ -408,6 +413,10 @@ pub fn make(comptime Impl: type) type {
             return self.impl.touch(label);
         }
 
+        pub fn gpio(self: *Self, label: PeriphLabel) drivers.Gpio {
+            return self.impl.gpio(label);
+        }
+
         pub fn press_single_button(self: *Self, label: PeriphLabel) !void {
             try self.impl.press_single_button(label);
         }
@@ -434,6 +443,10 @@ pub fn make(comptime Impl: type) type {
 
         pub fn release_grouped_button(self: *Self, label: PeriphLabel) !void {
             try self.impl.release_grouped_button(label);
+        }
+
+        pub fn gpio_changed(self: *Self, label: PeriphLabel, edge: drivers.Gpio.Edge, level: drivers.Gpio.Level) !void {
+            try self.impl.gpio_changed(label, edge, level);
         }
 
         pub fn imu_accel(self: *Self, label: PeriphLabel, accel: Imu.Vec3) !void {

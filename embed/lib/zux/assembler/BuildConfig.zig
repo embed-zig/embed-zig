@@ -108,6 +108,7 @@ fn periphBuildType(comptime periph: anytype) type {
     if (ControlType == type) return type;
     if (ControlType == bt.Host) return bt.Host;
     if (ControlType == drivers.Display) return drivers.Display;
+    if (ControlType == drivers.Gpio) return drivers.Gpio;
     if (ControlType == drivers.button.Single) return drivers.button.Single;
     if (ControlType == drivers.button.Grouped) return drivers.button.Grouped;
     if (ControlType == drivers.imu) return drivers.imu;

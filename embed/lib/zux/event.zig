@@ -7,6 +7,7 @@ const bt_event = @import("component/bt/event.zig");
 const button_event = @import("component/button/event.zig");
 const audio_system_event = @import("component/audio_system/event.zig");
 const display_event = @import("component/display/event.zig");
+const gpio_event = @import("component/gpio/event.zig");
 const modem_event = @import("component/modem/event.zig");
 const nfc_event = @import("component/nfc/event.zig");
 const switch_event = @import("component/switch/event.zig");
@@ -67,6 +68,7 @@ pub const Event = make(.{
     audio_system_event.DecGain,
     audio_system_event.SetMicGains,
     display_event.Set,
+    gpio_event.RawChanged,
     @import("component/ledstrip/event.zig").Set,
     @import("component/ledstrip/event.zig").SetPixels,
     @import("component/ledstrip/event.zig").Flash,

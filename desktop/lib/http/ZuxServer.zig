@@ -46,13 +46,15 @@ pub fn make(comptime Launcher: type) type {
     const exposed_grouped_button_count = exposedButtonCount(registries.adc_button);
     const ledstrip_count = registries.ledstrip.len;
     const switch_output_count = if (@hasField(@TypeOf(registries), "switch_output")) registries.switch_output.len else 0;
+    const gpio_count = if (@hasField(@TypeOf(registries), "gpio")) registries.gpio.len else 0;
+    const exposed_gpio_count = if (@hasField(@TypeOf(registries), "gpio")) exposedGpioCount(registries.gpio) else 0;
     const modem_count = registries.modem.len;
     const nfc_count = registries.nfc.len;
     const touch_count = registries.touch.len;
     const wifi_sta_count = registries.wifi_sta.len;
     const has_bt_host = @hasField(ZuxApp.InitConfig, "bt");
-    const topology_gear_count = exposed_single_button_count + exposed_grouped_button_count + ledstrip_count + switch_output_count + display_count + modem_count + nfc_count + touch_count + wifi_sta_count;
-    const state_gear_count = exposed_single_button_count + exposed_grouped_button_count + ledstrip_count + switch_output_count + display_count + wifi_sta_count;
+    const topology_gear_count = exposed_single_button_count + exposed_grouped_button_count + ledstrip_count + switch_output_count + exposed_gpio_count + display_count + modem_count + nfc_count + touch_count + wifi_sta_count;
+    const state_gear_count = exposed_single_button_count + exposed_grouped_button_count + ledstrip_count + switch_output_count + exposed_gpio_count + display_count + wifi_sta_count;
 
     return struct {
         const Server = @This();
@@ -233,6 +235,9 @@ pub fn make(comptime Launcher: type) type {
             nfcs: [nfc_count]device.nfc.Nfc,
             strips: [ledstrip_count]device.ledstrip.LedStrip,
             switch_outputs: [switch_output_count]device.switch_output.SwitchOutput,
+            gpios: [gpio_count]device.gpio.Pin,
+            gpio_generations: [gpio_count]u64,
+            gpio_last_edges: [gpio_count]?embed.drivers.Gpio.Edge,
             touches: [touch_count]device.touch.Touch,
             wifi_stas: [wifi_sta_count]device.wifi_sta.WifiSta,
             bt_host: if (has_bt_host) device.bt_host.BtHost else void,
@@ -310,6 +315,9 @@ pub fn make(comptime Launcher: type) type {
                 self.strips = try initStripDevices(allocator);
                 errdefer deinitStripDevices(&self.strips);
                 self.switch_outputs = [_]device.switch_output.SwitchOutput{.{}} ** switch_output_count;
+                self.gpios = [_]device.gpio.Pin{device.gpio.Pin.init(.low)} ** gpio_count;
+                self.gpio_generations = [_]u64{0} ** gpio_count;
+                self.gpio_last_edges = [_]?embed.drivers.Gpio.Edge{null} ** gpio_count;
                 self.touches = [_]device.touch.Touch{.{}} ** touch_count;
                 self.wifi_stas = try initWifiStaDevices(allocator);
                 errdefer deinitWifiStaDevices(&self.wifi_stas);
@@ -329,6 +337,7 @@ pub fn make(comptime Launcher: type) type {
                     &self.nfcs,
                     &self.strips,
                     &self.switch_outputs,
+                    &self.gpios,
                     &self.touches,
                     &self.wifi_stas,
                     &self.bt_host,
@@ -456,6 +465,22 @@ pub fn make(comptime Launcher: type) type {
                     const periph = registries.switch_output.periphs[i];
                     gears[index] = .{
                         .kind = "switch_output",
+                        .label = comptime labelText(periph.label),
+                        .pixel_count = null,
+                        .button_count = null,
+                        .width = null,
+                        .height = null,
+                        .target = null,
+                        .metadata = topologyMetadata(periphMetadata(periph)),
+                    };
+                    index += 1;
+                }
+
+                inline for (0..gpio_count) |i| {
+                    const periph = registries.gpio.periphs[i];
+                    if (comptime !isVirtualGpio(periph)) continue;
+                    gears[index] = .{
+                        .kind = "gpio",
                         .label = comptime labelText(periph.label),
                         .pixel_count = null,
                         .button_count = null,
@@ -633,6 +658,19 @@ pub fn make(comptime Launcher: type) type {
                     index += 1;
                 }
 
+                inline for (0..gpio_count) |i| {
+                    const periph = registries.gpio.periphs[i];
+                    if (comptime !isVirtualGpio(periph)) continue;
+                    gears[index] = @unionInit(Models.GearState, "GpioState", .{
+                        .kind = "gpio",
+                        .label = comptime labelText(periph.label),
+                        .level = gpioLevelText(try self.gpios[i].read()),
+                        .last_edge = if (self.gpio_last_edges[i]) |edge| gpioEdgeText(edge) else null,
+                        .generation = @intCast(self.gpio_generations[i]),
+                    });
+                    index += 1;
+                }
+
                 inline for (0..display_count) |i| {
                     const periph = registries.display.periphs[i];
                     const snapshot = try self.displays[i].snapshot(allocator);
@@ -797,6 +835,40 @@ pub fn make(comptime Launcher: type) type {
                         self.launcher.zux().set_switch(@field(ZuxApp.PeriphLabel, label_name), enabled) catch return error.InvalidEvent;
                         // Desktop keeps an observable local output state for UI/state snapshots.
                         self.switch_outputs[i].set(enabled) catch return error.InvalidEvent;
+                        self.bumpRevision();
+                        return .{
+                            .accepted = true,
+                            .event = event_name,
+                            .gear_label = gear_label,
+                            .metadata = metadata,
+                            .ts = ts_ms,
+                        };
+                    }
+                }
+
+                inline for (0..gpio_count) |i| {
+                    const periph = registries.gpio.periphs[i];
+                    if (comptime !isVirtualGpio(periph)) continue;
+                    const label_name = comptime labelText(periph.label);
+                    if (gstd.runtime.std.mem.eql(u8, gear_label, label_name)) {
+                        const current_level = self.gpios[i].read() catch return error.InvalidEvent;
+                        const next_level: embed.drivers.Gpio.Level = if (gstd.runtime.std.mem.eql(u8, event_name, "high"))
+                            .high
+                        else if (gstd.runtime.std.mem.eql(u8, event_name, "low"))
+                            .low
+                        else if (gstd.runtime.std.mem.eql(u8, event_name, "toggle"))
+                            switch (current_level) {
+                                .low => .high,
+                                .high => .low,
+                            }
+                        else
+                            return error.InvalidEvent;
+
+                        const edge = edgeForGpioChange(current_level, next_level);
+                        self.gpios[i].setLevel(next_level) catch return error.InvalidEvent;
+                        self.gpio_last_edges[i] = edge;
+                        self.gpio_generations[i] +%= 1;
+                        self.launcher.zux().gpio_changed(@field(ZuxApp.PeriphLabel, label_name), edge, next_level) catch return error.InvalidEvent;
                         self.bumpRevision();
                         return .{
                             .accepted = true,
@@ -1096,6 +1168,7 @@ pub fn make(comptime Launcher: type) type {
                 nfcs: *[nfc_count]device.nfc.Nfc,
                 strips: *[ledstrip_count]device.ledstrip.LedStrip,
                 switch_outputs: *[switch_output_count]device.switch_output.SwitchOutput,
+                gpios: *[gpio_count]device.gpio.Pin,
                 touches: *[touch_count]device.touch.Touch,
                 wifi_stas: *[wifi_sta_count]device.wifi_sta.WifiSta,
                 bt_host: *if (has_bt_host) device.bt_host.BtHost else void,
@@ -1159,6 +1232,15 @@ pub fn make(comptime Launcher: type) type {
                     const periph = registries.switch_output.periphs[i];
                     const label_name = comptime labelText(periph.label);
                     @field(init_config, label_name) = switch_outputs[i].handle();
+                }
+
+                inline for (0..gpio_count) |i| {
+                    const periph = registries.gpio.periphs[i];
+                    if (comptime isVirtualGpio(periph)) continue;
+                    const label_name = comptime labelText(periph.label);
+                    if (@hasField(ZuxApp.InitConfig, label_name)) {
+                        @field(init_config, label_name) = gpios[i].handle();
+                    }
                 }
 
                 inline for (0..display_count) |i| {
@@ -1409,6 +1491,11 @@ fn validateLauncher(comptime Launcher: type) void {
             _ = @as(*const fn (*ZuxApp, ZuxApp.PeriphLabel, bool) anyerror!void, &ZuxApp.set_switch);
         }
     }
+    if (@hasField(@TypeOf(registries), "gpio")) {
+        if (registries.gpio.len != 0) {
+            _ = @as(*const fn (*ZuxApp, ZuxApp.PeriphLabel, embed.drivers.Gpio.Edge, embed.drivers.Gpio.Level) anyerror!void, &ZuxApp.gpio_changed);
+        }
+    }
     if (registries.imu.len != 0) @compileError("desktop ZuxServer does not support imu yet");
     if (registries.wifi_ap.len != 0) @compileError("desktop ZuxServer does not support wifi ap yet");
 }
@@ -1435,10 +1522,28 @@ fn isVirtualButton(comptime periph: anytype) bool {
     return false;
 }
 
+fn isVirtualGpio(comptime periph: anytype) bool {
+    const PeriphType = @TypeOf(periph);
+    if (@hasField(PeriphType, "input_type")) {
+        return periph.input_type == .virtual;
+    }
+    return false;
+}
+
 fn exposedButtonCount(comptime registry: anytype) usize {
     comptime var count: usize = 0;
     inline for (0..registry.len) |i| {
         if (!isVirtualButton(registry.periphs[i])) {
+            count += 1;
+        }
+    }
+    return count;
+}
+
+fn exposedGpioCount(comptime registry: anytype) usize {
+    comptime var count: usize = 0;
+    inline for (0..registry.len) |i| {
+        if (isVirtualGpio(registry.periphs[i])) {
             count += 1;
         }
     }
@@ -1532,6 +1637,32 @@ fn wifiStaStateText(state: embed.drivers.wifi.Sta.State) []const u8 {
     };
 }
 
+fn gpioLevelText(level: embed.drivers.Gpio.Level) []const u8 {
+    return switch (level) {
+        .low => "low",
+        .high => "high",
+    };
+}
+
+fn gpioEdgeText(edge: embed.drivers.Gpio.Edge) []const u8 {
+    return switch (edge) {
+        .rising => "rising",
+        .falling => "falling",
+        .both => "both",
+        .low_level => "low_level",
+        .high_level => "high_level",
+    };
+}
+
+fn edgeForGpioChange(previous: embed.drivers.Gpio.Level, current: embed.drivers.Gpio.Level) embed.drivers.Gpio.Edge {
+    if (previous == .low and current == .high) return .rising;
+    if (previous == .high and current == .low) return .falling;
+    return switch (current) {
+        .low => .low_level,
+        .high => .high_level,
+    };
+}
+
 fn copyPixels(allocator: gstd.runtime.std.mem.Allocator, source: []const embed.ledstrip.Color) ![]api.Models.Color {
     const pixels = try allocator.alloc(api.Models.Color, source.len);
     for (source, 0..) |pixel, index| {
@@ -1621,6 +1752,7 @@ pub fn TestRunner(comptime std_api: type) glib.testing.TestRunner {
         const AssemblerType = embed.zux.assemble(gstd.runtime, .{
             .max_adc_buttons = 1,
             .max_displays = 1,
+            .max_gpio = 1,
             .max_modem = 1,
             .max_nfc = 1,
             .max_switches = 1,
@@ -1641,6 +1773,9 @@ pub fn TestRunner(comptime std_api: type) glib.testing.TestRunner {
         });
         assembler.addSwitchWithMetadata("relay", 17, .{
             .label_text = "Relay",
+        });
+        assembler.addVirtualGpioWithMetadata("door_sensor", 19, .{
+            .label_text = "Door Sensor",
         });
 
         const BuildConfig = assembler.BuildConfig();
@@ -1699,12 +1834,13 @@ pub fn TestRunner(comptime std_api: type) glib.testing.TestRunner {
             defer allocator.free(topology.gears);
 
             try std_api.testing.expectEqualStrings("topology test", topology.title);
-            try std_api.testing.expectEqual(@as(usize, 5), topology.gears.len);
+            try std_api.testing.expectEqual(@as(usize, 6), topology.gears.len);
             try expectGear(topology.gears[0], "grouped_button", "buttons", null, 3, null, null, null, "Buttons", &.{ "Red", "Green", "Blue" });
             try expectGear(topology.gears[1], "switch_output", "relay", null, null, null, null, null, "Relay", &.{});
-            try expectGear(topology.gears[2], "display", "screen", null, null, 128, 64, null, "Screen", &.{});
-            try expectGear(topology.gears[3], "modem", "modem", null, null, null, null, null, "Cellular", &.{});
-            try expectGear(topology.gears[4], "nfc", "nfc", null, null, null, null, null, "NFC", &.{});
+            try expectGear(topology.gears[2], "gpio", "door_sensor", null, null, null, null, null, "Door Sensor", &.{});
+            try expectGear(topology.gears[3], "display", "screen", null, null, 128, 64, null, "Screen", &.{});
+            try expectGear(topology.gears[4], "modem", "modem", null, null, null, null, null, "Cellular", &.{});
+            try expectGear(topology.gears[5], "nfc", "nfc", null, null, null, null, null, "NFC", &.{});
         }
 
         fn groupedButtonEmitUpdatesState(allocator: std_api.mem.Allocator) !void {
@@ -1716,7 +1852,7 @@ pub fn TestRunner(comptime std_api: type) glib.testing.TestRunner {
             var pressed = try runtime.makeStateResponse(allocator, 124);
             defer Server.RuntimeState.deinitStateResponse(allocator, &pressed);
 
-            try std_api.testing.expectEqual(@as(usize, 3), pressed.gears.len);
+            try std_api.testing.expectEqual(@as(usize, 4), pressed.gears.len);
             switch (pressed.gears[0]) {
                 .GroupedButtonState => |state| {
                     try std_api.testing.expectEqualStrings("buttons", state.label);
@@ -1766,6 +1902,39 @@ pub fn TestRunner(comptime std_api: type) glib.testing.TestRunner {
             switch (toggled.gears[1]) {
                 .SwitchOutputState => |state| try std_api.testing.expect(!state.enabled),
                 else => return error.ExpectedSwitchOutputState,
+            }
+        }
+
+        fn gpioEmitUpdatesState(allocator: std_api.mem.Allocator) !void {
+            var runtime: Server.RuntimeState = undefined;
+            try runtime.init(allocator, .{ .ticker = .manual });
+            defer runtime.deinit();
+
+            _ = try runtime.emit("door_sensor", "high", 323, null, null, null);
+            var high = try runtime.makeStateResponse(allocator, 324);
+            defer Server.RuntimeState.deinitStateResponse(allocator, &high);
+
+            switch (high.gears[2]) {
+                .GpioState => |state| {
+                    try std_api.testing.expectEqualStrings("door_sensor", state.label);
+                    try std_api.testing.expectEqualStrings("high", state.level);
+                    try std_api.testing.expectEqualStrings("rising", state.last_edge.?);
+                    try std_api.testing.expectEqual(@as(i64, 1), state.generation);
+                },
+                else => return error.ExpectedGpioState,
+            }
+
+            _ = try runtime.emit("door_sensor", "toggle", 325, null, null, null);
+            var low = try runtime.makeStateResponse(allocator, 326);
+            defer Server.RuntimeState.deinitStateResponse(allocator, &low);
+
+            switch (low.gears[2]) {
+                .GpioState => |state| {
+                    try std_api.testing.expectEqualStrings("low", state.level);
+                    try std_api.testing.expectEqualStrings("falling", state.last_edge.?);
+                    try std_api.testing.expectEqual(@as(i64, 2), state.generation);
+                },
+                else => return error.ExpectedGpioState,
             }
         }
 
@@ -1825,6 +1994,10 @@ pub fn TestRunner(comptime std_api: type) glib.testing.TestRunner {
             };
             TestCase.switchOutputEmitUpdatesState(allocator) catch |err| {
                 t.logFatalf("switchOutputEmitUpdatesState: {s}", .{@errorName(err)});
+                return false;
+            };
+            TestCase.gpioEmitUpdatesState(allocator) catch |err| {
+                t.logFatalf("gpioEmitUpdatesState: {s}", .{@errorName(err)});
                 return false;
             };
             return true;

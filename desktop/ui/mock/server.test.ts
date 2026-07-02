@@ -57,7 +57,7 @@ test('SSE publishes ledstrip refresh events after emit', async () => {
     expect(hasNonBlackPixel(refreshes[0]!.data.pixels)).toBe(true);
 
     const state = await getState();
-    expect(state.gears).toHaveLength(3);
+    expect(state.gears).toHaveLength(4);
     expect(events.some((event) => event.event === 'state.snapshot')).toBe(true);
     expect(events.some((event) => event.event === 'ledstrip.refreshed')).toBe(true);
     expect(snapshots.length).toBeGreaterThanOrEqual(1);
@@ -101,6 +101,26 @@ test('emit toggles switch output state', async () => {
   const state = await getState();
   const relay = state.gears.find((gear) => gear.kind === 'switch_output');
   expect(relay?.enabled).toBe(!previous);
+});
+
+test('emit toggles gpio level state', async () => {
+  const ts = Date.now();
+  const before = await getState();
+  const previous = before.gears.find((gear) => gear.kind === 'gpio')?.level ?? 'low';
+
+  const ack = await emitInputEvent({
+    gearLabel: 'door_sensor',
+    event: 'toggle',
+    ts,
+  });
+
+  expect(ack.accepted).toBe(true);
+  expect(ack.ts).toBe(ts);
+
+  const state = await getState();
+  const gpio = state.gears.find((gear) => gear.kind === 'gpio');
+  expect(gpio?.level).toBe(previous === 'low' ? 'high' : 'low');
+  expect(gpio?.generation).toBeGreaterThanOrEqual(1);
 });
 
 function deferred<T>() {

@@ -220,6 +220,7 @@ fn addSideRuntimeBindings(b: *std.Build, files: *std.Build.Step.WriteFile, side:
     if (std.mem.eql(u8, side, "ap")) {
         _ = files.add(b.fmt("{s}/bk_embed_adc_binding.c", .{side}), @embedFile("../embed/adc_binding.c"));
         _ = files.add(b.fmt("{s}/bk_embed_gpio_button_binding.c", .{side}), @embedFile("../embed/gpio_button_binding.c"));
+        _ = files.add(b.fmt("{s}/bk_embed_gpio_binding.c", .{side}), @embedFile("../embed/gpio/binding.c"));
         _ = files.add(b.fmt("{s}/bk_embed_bt_local_hci.c", .{side}), @embedFile("../embed/bt/local_hci.c"));
         _ = files.add(b.fmt("{s}/bk_embed_wifi_sta_binding.c", .{side}), @embedFile("../embed/wifi/sta_binding.c"));
         _ = files.add(b.fmt("{s}/bk_embed_preferences_binding.c", .{side}), @embedFile("../embed/system/preferences_binding.c"));
@@ -598,7 +599,7 @@ fn sideCmakeText(
     else
         "";
     const c_sources = if (std.mem.eql(u8, side, "ap"))
-        b.fmt("{s}_main.c grt_net_binding.c bk_embed_adc_binding.c bk_embed_gpio_button_binding.c bk_embed_bt_local_hci.c bk_embed_wifi_sta_binding.c bk_embed_preferences_binding.c bk_embed_audio_onboard_speaker.c bk_embed_display_qspi_binding.c bk_embed_display_rgb_binding.c bk_embed_touch_binding.c{s}", .{ side, flashdb_sources })
+        b.fmt("{s}_main.c grt_net_binding.c bk_embed_adc_binding.c bk_embed_gpio_button_binding.c bk_embed_gpio_binding.c bk_embed_bt_local_hci.c bk_embed_wifi_sta_binding.c bk_embed_preferences_binding.c bk_embed_audio_onboard_speaker.c bk_embed_display_qspi_binding.c bk_embed_display_rgb_binding.c bk_embed_touch_binding.c{s}", .{ side, flashdb_sources })
     else
         b.fmt("{s}_main.c grt_net_binding.c", .{side});
     const base_priv_requires = if (std.mem.eql(u8, side, "ap"))

@@ -1,0 +1,16 @@
+.{
+    .name = .esp_gpio_smoke,
+    .version = "0.1.0",
+    .fingerprint = 0x1289dfdaa9eeb9c4,
+    .minimum_zig_version = "0.15.2",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+    .dependencies = .{
+        .esp = .{
+            .path = "../../../esp",
+        },
+    },
+}

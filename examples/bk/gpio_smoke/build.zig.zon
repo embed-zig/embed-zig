@@ -1,0 +1,18 @@
+.{
+    .name = .bk_gpio_smoke,
+    .version = "0.1.0",
+    .fingerprint = 0xd0233776dbf9dec2,
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{
+        .bk = .{
+            .path = "../../../bk",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "build_config.zig",
+        "ap",
+        "cp",
+    },
+}

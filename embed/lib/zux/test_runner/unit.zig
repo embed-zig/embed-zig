@@ -12,6 +12,7 @@ pub const assembler = @import("unit/assembler.zig");
 pub const button = @import("unit/button.zig");
 pub const bt = @import("unit/bt.zig");
 pub const event = @import("unit/event.zig");
+pub const gpio = @import("unit/gpio.zig");
 pub const imu = @import("unit/imu.zig");
 pub const modem = @import("unit/modem.zig");
 pub const netstack = @import("unit/netstack.zig");
@@ -49,6 +50,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
             t.run("button", button.make(grt));
             t.run("bt", bt.make(grt));
             t.run("event", event.make(grt));
+            t.run("gpio", gpio.make(grt));
             t.run("imu", imu.make(grt));
             t.run("modem", modem.make(grt));
             t.run("netstack", netstack.make(grt));

@@ -3,6 +3,7 @@ import { openEvents, type RuntimeEvent } from './api/events.ts';
 import type {
   DisplayState,
   EmitAck,
+  GpioState,
   GroupedButtonState,
   LedStripState,
   SingleButtonState,
@@ -10,7 +11,7 @@ import type {
   SwitchOutputState,
 } from './api/generated/types.gen';
 
-export type DesktopInputEvent = 'press' | 'release' | 'down' | 'move' | 'up' | 'on' | 'off' | 'toggle';
+export type DesktopInputEvent = 'press' | 'release' | 'down' | 'move' | 'up' | 'on' | 'off' | 'toggle' | 'high' | 'low';
 export type DesktopEmitOptions = {
   point?: { x: number; y: number };
   buttonId?: number;
@@ -21,11 +22,13 @@ type GearState =
   | GroupedButtonState
   | LedStripState
   | SwitchOutputState
+  | GpioState
   | DisplayState
   | { SingleButtonState: SingleButtonState }
   | { GroupedButtonState: GroupedButtonState }
   | { LedStripState: LedStripState }
   | { SwitchOutputState: SwitchOutputState }
+  | { GpioState: GpioState }
   | { DisplayState: DisplayState };
 
 export interface DesktopController {
@@ -160,6 +163,18 @@ export function getSwitchOutputStates(state: StateResponse): SwitchOutputState[]
     }
   }
   return outputs;
+}
+
+export function getGpioStates(state: StateResponse): GpioState[] {
+  const gpios: GpioState[] = [];
+  for (const gear of state.gears as GearState[]) {
+    if ('GpioState' in gear) {
+      gpios.push(gear.GpioState);
+    } else if ('kind' in gear && gear.kind === 'gpio') {
+      gpios.push(gear);
+    }
+  }
+  return gpios;
 }
 
 export function getDisplayStates(state: StateResponse): DisplayState[] {

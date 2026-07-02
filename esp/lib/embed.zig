@@ -15,6 +15,7 @@ pub const audio_adapter = @import("embed/audio.zig");
 pub const BtHost = @import("embed/BtHost.zig");
 pub const HostedCopro = @import("embed/HostedCopro.zig");
 pub const display = @import("embed/display.zig");
+pub const gpio = @import("embed/gpio.zig");
 pub const I2c = @import("embed/I2c.zig");
 pub const time = @import("embed/time.zig");
 pub const wifi = @import("embed/Wifi.zig");

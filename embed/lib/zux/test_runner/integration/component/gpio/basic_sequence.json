@@ -1,0 +1,56 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "gpio basic sequence",
+    "description": "Spec.testRunner drives a virtual GPIO component from raw level events.",
+    "initial_state": {
+      "gpio": {}
+    },
+    "steps": [
+      {
+        "inputs": [
+          {
+            "raw_gpio_changed": {
+              "source_id": 61,
+              "edge": "rising",
+              "level": "high"
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "gpio",
+            "state": {
+              "source_id": 61,
+              "level": "high",
+              "last_edge": "rising",
+              "generation": 1
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "raw_gpio_changed": {
+              "source_id": 61,
+              "edge": "falling",
+              "level": "low"
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "gpio",
+            "state": {
+              "source_id": 61,
+              "level": "low",
+              "last_edge": "falling",
+              "generation": 2
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -12,6 +12,7 @@ pub const system = @import("embed/system.zig");
 pub const zux = embed_core.zux;
 
 pub const display = @import("embed/display.zig");
+pub const gpio = @import("embed/gpio.zig");
 pub const saradc = @import("embed/saradc.zig");
 pub const touch = @import("embed/touch.zig");
 pub const Wifi = @import("embed/Wifi.zig");

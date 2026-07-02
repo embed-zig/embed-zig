@@ -18,6 +18,7 @@ const zux_compress_smoke = @import("zux/compress-smoke/build.zig");
 const zux_colorbar = @import("zux/colorbar/build.zig");
 const zux_colorbar_adc = @import("zux/colorbar-adc/build.zig");
 const zux_fs_smoke = @import("zux/fs-smoke/build.zig");
+const zux_gpio_smoke = @import("zux/gpio-smoke/build.zig");
 const zux_kcp_test = @import("zux/kcp-test/build.zig");
 const zux_net_smoke = @import("zux/net-smoke/build.zig");
 const zux_preferences_smoke = @import("zux/preferences-smoke/build.zig");
@@ -131,6 +132,7 @@ pub fn build(b: *std.Build) void {
     zux_colorbar.register(&registry);
     zux_colorbar_adc.register(&registry);
     zux_fs_smoke.register(&registry);
+    zux_gpio_smoke.register(&registry);
     zux_kcp_test.register(&registry);
     zux_net_smoke.register(&registry);
     zux_preferences_smoke.register(&registry);

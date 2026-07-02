@@ -206,6 +206,13 @@ pub fn make(comptime spec_doc: anytype) type {
                         .display => |display| {
                             next.addDisplayWithMetadataAndSize(label, component.id, metadata, display.width, display.height);
                         },
+                        .gpio => |gpio| {
+                            switch (gpio.input_type) {
+                                .irq => next.addIrqGpioWithMetadata(label, component.id, metadata),
+                                .poll => next.addGpioWithMetadata(label, component.id, metadata),
+                                .virtual => next.addVirtualGpioWithMetadata(label, component.id, metadata),
+                            }
+                        },
                         .imu => {
                             next.addImuWithMetadata(label, component.id, metadata);
                         },
@@ -416,6 +423,7 @@ pub fn make(comptime spec_doc: anytype) type {
                 .display => drivers.Display,
                 .bt => bt.Host,
                 .audio_system => *TestAudioSystem,
+                .gpio => drivers.Gpio,
                 .single_button => drivers.button.Single,
                 .grouped_button => drivers.button.Grouped,
                 .imu => drivers.imu,
@@ -453,6 +461,9 @@ pub fn make(comptime spec_doc: anytype) type {
             }
             if (PeriphType == drivers.button.Grouped) {
                 return makeTestGroupedButton();
+            }
+            if (PeriphType == drivers.Gpio) {
+                return makeTestGpio();
             }
             if (PeriphType == drivers.imu) {
                 return makeTestImu();
@@ -530,6 +541,56 @@ pub fn make(comptime spec_doc: anytype) type {
                 var impl = Impl{};
             };
             return drivers.button.Grouped.init(Impl, &Holder.impl);
+        }
+
+        fn makeTestGpio() drivers.Gpio {
+            const Impl = struct {
+                level: drivers.Gpio.Level = .low,
+                callback_ctx: ?*const anyopaque = null,
+                callback_fn: ?drivers.Gpio.CallbackFn = null,
+
+                pub fn read(self: *@This()) drivers.Gpio.Error!drivers.Gpio.Level {
+                    return self.level;
+                }
+
+                pub fn write(self: *@This(), level: drivers.Gpio.Level) drivers.Gpio.Error!void {
+                    const previous = self.level;
+                    self.level = level;
+                    const callback_ctx = self.callback_ctx orelse return;
+                    const callback_fn = self.callback_fn orelse return;
+                    callback_fn(callback_ctx, .{
+                        .edge = edgeFromGpioTransition(previous, level),
+                        .level = level,
+                    });
+                }
+
+                pub fn setDirection(_: *@This(), _: drivers.Gpio.Direction) drivers.Gpio.Error!void {}
+
+                pub fn configureInterrupt(_: *@This(), _: drivers.Gpio.Edge) drivers.Gpio.Error!void {}
+
+                pub fn setEventCallback(self: *@This(), ctx: *const anyopaque, emit_fn: drivers.Gpio.CallbackFn) void {
+                    self.callback_ctx = ctx;
+                    self.callback_fn = emit_fn;
+                }
+
+                pub fn clearEventCallback(self: *@This()) void {
+                    self.callback_ctx = null;
+                    self.callback_fn = null;
+                }
+            };
+            const Holder = struct {
+                var impl = Impl{};
+            };
+            return drivers.Gpio.init(&Holder.impl);
+        }
+
+        fn edgeFromGpioTransition(previous: drivers.Gpio.Level, current: drivers.Gpio.Level) drivers.Gpio.Edge {
+            if (previous == .low and current == .high) return .rising;
+            if (previous == .high and current == .low) return .falling;
+            return switch (current) {
+                .low => .low_level,
+                .high => .high_level,
+            };
         }
 
         fn makeTestDisplay() drivers.Display {
